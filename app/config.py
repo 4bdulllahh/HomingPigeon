@@ -3,9 +3,10 @@ import os
 import sys
 from pathlib import Path
 
-APP_NAME = "UniformersMailer"
-APP_TITLE = "Uniformers Mailer"
-APP_VERSION = "1.0.0"
+APP_NAME = "HomingPigeon"
+APP_TITLE = "HomingPigeon"
+APP_VERSION = "v0.1 beta"
+APP_TAGLINE = "Safe, simple email for your business"
 
 
 def _app_data_dir() -> Path:

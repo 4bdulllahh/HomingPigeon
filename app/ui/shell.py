@@ -8,15 +8,15 @@ from app.core import db, warmup
 from app.ui.widgets.common import toast
 
 NAV_ITEMS = [
-    ("dashboard", "Dashboard", "Overview and activity"),
-    ("guide", "Setup guide", "Step-by-step checklist"),
-    ("account", "Email account", "SMTP and IMAP settings"),
-    ("deliverability", "Deliverability", "SPF, DKIM, DMARC tools"),
-    ("contacts", "Contacts", "Import and clean your list"),
-    ("templates", "Templates", "Subjects, bodies, signature"),
-    ("campaign", "Campaign", "Pacing and brochure"),
-    ("send", "Send", "Run and monitor"),
-    ("inbox", "Replies & bounces", "IMAP sync results"),
+    ("dashboard", 'Home', "How things are going"),
+    ("guide", 'Start here', "Step-by-step setup"),
+    ("account", 'My email account', "Connect your email"),
+    ("deliverability", 'Domain check', "Stay out of spam"),
+    ("contacts", 'My contacts', "Your list of people"),
+    ("templates", 'My message', "What you want to say"),
+    ("campaign", 'Sending options', "Speed, timing, brochure"),
+    ("send", 'Send emails', "Start and watch it run"),
+    ("inbox", 'Replies & bounces', "Who answered, who failed"),
 ]
 
 
@@ -75,7 +75,7 @@ class SidebarButton(ctk.CTkFrame):
 class AppShell(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title(f"{config.APP_TITLE}  {config.APP_VERSION}")
+        self.title(f"{config.APP_TITLE} {config.APP_VERSION} — {config.APP_TAGLINE}")
         self.geometry("1180x780")
         self.minsize(1000, 660)
         self.configure(fg_color=theme.BG)
@@ -109,12 +109,22 @@ class AppShell(ctk.CTk):
         self.content.grid_columnconfigure(0, weight=1)
 
     def _build_sidebar(self) -> None:
-        header = ctk.CTkFrame(self.sidebar, fg_color="transparent", height=64)
-        header.pack(fill="x", pady=(16, 10))
-        ctk.CTkLabel(header, text=config.APP_TITLE, font=theme.font(15, "bold"),
-                     text_color=theme.FG_BRIGHT, anchor="w").pack(anchor="w", padx=16)
-        ctk.CTkLabel(header, text="Safe bulk email for offices", font=theme.font(10),
-                     text_color=theme.FG_MUTED, anchor="w").pack(anchor="w", padx=16)
+        header = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        header.pack(fill="x", pady=(18, 12))
+
+        title_row = ctk.CTkFrame(header, fg_color="transparent")
+        title_row.pack(fill="x", padx=18)
+        ctk.CTkLabel(title_row, text="🕊", font=theme.font(20),
+                     text_color=theme.ACCENT).pack(side="left", padx=(0, 8))
+        ctk.CTkLabel(title_row, text=config.APP_TITLE, font=theme.font(18, "bold"),
+                     text_color=theme.FG_BRIGHT, anchor="w").pack(side="left")
+
+        ctk.CTkLabel(header, text=config.APP_TAGLINE, font=theme.font(11),
+                     text_color=theme.FG_MUTED, anchor="w").pack(anchor="w", padx=18, pady=(4, 0))
+        ctk.CTkLabel(header, text=config.APP_VERSION, font=theme.font(10),
+                     text_color=theme.FG_MUTED, fg_color=theme.BG_HOVER,
+                     corner_radius=theme.RADIUS, width=64, height=20).pack(anchor="w", padx=18,
+                                                                          pady=(6, 0))
 
         theme.separator(self.sidebar).pack(fill="x", padx=12, pady=(0, 8))
 
@@ -202,7 +212,7 @@ class AppShell(ctk.CTk):
         if email:
             self.status_account.configure(text=f"{email}" + (f"  ·  {host}" if host else ""))
         else:
-            self.status_account.configure(text="No account configured — open 'Email account'")
+            self.status_account.configure(text="No account configured — open 'My email account'")
 
         try:
             status = warmup.status()

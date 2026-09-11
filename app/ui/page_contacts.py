@@ -37,11 +37,11 @@ class ContactsPage(ctk.CTkFrame):
             segmented_button_unselected_color=theme.BG_SIDEBAR, text_color=theme.FG,
             border_width=1, border_color=theme.BORDER, corner_radius=theme.RADIUS_CARD)
         self.tabs.pack(fill="both", expand=True, padx=theme.PAD_LARGE, pady=(0, theme.PAD))
-        for name in ("Import", "My contacts", "Do not contact"):
+        for name in ("Import", 'My contacts', "Do not contact"):
             self.tabs.add(name)
 
         self._build_import(self.tabs.tab("Import"))
-        self._build_list(self.tabs.tab("My contacts"))
+        self._build_list(self.tabs.tab('My contacts'))
         self._build_suppression(self.tabs.tab("Do not contact"))
 
     # --- import -------------------------------------------------------------

@@ -71,9 +71,9 @@ class AccountPage(ctk.CTkFrame):
         identity.pack(fill="x", pady=(0, 14))
 
         row = FormRow(identity.body, "Your name",
-                      "Shown as the sender name, e.g. Abdullah Kamran")
+                      "The name people see in their inbox, e.g. Sarah Miller")
         row.pack(fill="x", pady=(0, 12))
-        self.name_entry = theme.entry(row.input_area, "Abdullah Kamran")
+        self.name_entry = theme.entry(row.input_area, "Your full name")
         self.name_entry.pack(fill="x")
 
         row = FormRow(identity.body, "Email address",

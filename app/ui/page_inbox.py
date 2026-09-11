@@ -20,7 +20,7 @@ class InboxPage(ctk.CTkFrame):
     def _build(self) -> None:
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=theme.PAD_LARGE, pady=(theme.PAD, 0))
-        theme.heading(header, "Replies & bounces").pack(anchor="w")
+        theme.heading(header, 'Replies & bounces').pack(anchor="w")
         theme.label(header,
                     "Reads your inbox to find bounced addresses, unsubscribe requests and real "
                     "replies. Bounced and opted-out addresses are removed from future sends "
@@ -105,7 +105,7 @@ class InboxPage(ctk.CTkFrame):
             return
         settings = self._settings()
         if settings is None:
-            toast(self, "Add your IMAP details on the 'Email account' page first", "warn")
+            toast(self, "Add your IMAP details on the 'My email account' page first", "warn")
             self.app.show("account")
             return
 

@@ -1,53 +1,64 @@
-"""VS Code-inspired theme tokens and styled widget factories.
+"""Theme tokens and styled widget factories.
+
+A softened take on the VS Code palette: same calm, low-contrast greys, but with
+rounder corners, warmer neutrals and more breathing room, so the app feels
+approachable rather than technical.
 
 Every colour is a (light, dark) tuple so CustomTkinter swaps it automatically
-when the appearance mode changes. Palettes follow VS Code's Light+ / Dark+.
+when the appearance mode changes.
 """
 import sys
 import tkinter.font as tkfont
 
 import customtkinter as ctk
 
-# --- Colour tokens: (Light+, Dark+) -----------------------------------------
-BG = ("#ffffff", "#1e1e1e")            # editor background
-BG_SIDEBAR = ("#f3f3f3", "#252526")    # side bar
-BG_PANEL = ("#f8f8f8", "#252526")      # cards / panels
-BG_INPUT = ("#ffffff", "#3c3c3c")      # text inputs
-BG_HOVER = ("#e8e8e8", "#2a2d2e")      # list hover
-BG_SELECTED = ("#e4e6f1", "#37373d")   # list selection
-BG_CONSOLE = ("#f3f3f3", "#181818")    # terminal panel
+# --- Colour tokens: (light, dark) -------------------------------------------
+BG = ("#f7f8fa", "#1f2125")            # window background
+BG_SIDEBAR = ("#ffffff", "#25272c")    # side bar
+BG_PANEL = ("#ffffff", "#282b31")      # cards / panels
+BG_INPUT = ("#ffffff", "#32353c")      # text inputs
+BG_HOVER = ("#eef1f6", "#2f323a")      # list hover
+BG_SELECTED = ("#e6effb", "#343842")   # list selection
+BG_CONSOLE = ("#f4f6f9", "#1b1d21")    # activity panel
 
-BORDER = ("#e5e5e5", "#3c3c3c")
-BORDER_STRONG = ("#cecece", "#545454")
+BORDER = ("#e3e7ee", "#34373f")
+BORDER_STRONG = ("#ccd3de", "#474b55")
 
-FG = ("#3b3b3b", "#cccccc")            # primary text
-FG_BRIGHT = ("#1f1f1f", "#ffffff")     # headings
-FG_MUTED = ("#6f6f6f", "#858585")      # secondary text
+FG = ("#3f4650", "#d0d4da")            # primary text
+FG_BRIGHT = ("#1f2530", "#f2f4f7")     # headings
+FG_MUTED = ("#79818e", "#8d939d")      # secondary text
 FG_ON_ACCENT = ("#ffffff", "#ffffff")
 
-ACCENT = ("#005fb8", "#0e639c")        # primary button
-ACCENT_HOVER = ("#0258a8", "#1177bb")
-FOCUS = ("#005fb8", "#007fd4")         # focus ring
-STATUS_BAR = ("#0066b8", "#007acc")
+ACCENT = ("#2f7fd8", "#3b86dd")        # primary button
+ACCENT_HOVER = ("#2670c2", "#4e94e6")
+ACCENT_SOFT = ("#e8f1fc", "#2c3a4b")   # tinted background
+FOCUS = ("#2f7fd8", "#5aa0e8")
+STATUS_BAR = ("#2f7fd8", "#2b5f96")
 
-SUCCESS = ("#1a7f37", "#89d185")
-WARNING = ("#bf8803", "#cca700")
-ERROR = ("#cd3131", "#f48771")
-INFO = ("#0066b8", "#4fc1ff")
+# Reassuring green, reserved for the go-ahead actions
+CONFIRM = ("#2e9e63", "#39ad70")
+CONFIRM_HOVER = ("#268a56", "#48bc7e")
 
-# Syntax-ish accents, used for DNS records and console output
-CODE_STRING = ("#a31515", "#ce9178")
-CODE_TYPE = ("#267f99", "#4ec9b0")
-CODE_KEYWORD = ("#0000ff", "#569cd6")
+SUCCESS = ("#2e9e63", "#6fcf97")
+WARNING = ("#b5811f", "#e0b252")
+ERROR = ("#cc4b42", "#ef8a7f")
+INFO = ("#2f7fd8", "#6fb3ef")
+
+# Used for DNS records and console output
+CODE_STRING = ("#9a5b2e", "#e0a878")
+CODE_TYPE = ("#2a7d78", "#6fc7bf")
+CODE_KEYWORD = ("#2f5fd0", "#7aa6ec")
 
 # --- Metrics ----------------------------------------------------------------
-RADIUS = 4
-RADIUS_CARD = 6
-PAD = 12
-PAD_LARGE = 20
-SIDEBAR_WIDTH = 220
-INPUT_HEIGHT = 32
-BUTTON_HEIGHT = 32
+RADIUS = 8
+RADIUS_CARD = 14
+RADIUS_PILL = 18
+PAD = 14
+PAD_LARGE = 24
+SIDEBAR_WIDTH = 232
+INPUT_HEIGHT = 38
+BUTTON_HEIGHT = 38
+BUTTON_HEIGHT_LARGE = 48
 
 
 def _pick_family(candidates: list[str], fallback: str) -> str:
@@ -125,11 +136,22 @@ def label(master, text: str, muted: bool = False, size: int = 13, wrap: bool = F
 
 
 def auto_wrap(widget, container, padding: int = 40) -> None:
-    """Keep a label's wraplength in step with its container, so text never clips."""
+    """Keep a label's wraplength in step with its container, so text never clips.
+
+    The binding outlives the label when the label is destroyed (an empty-state
+    hint being replaced, a page rebuilding), so every access is guarded.
+    """
+    import tkinter as tk
+
     def resize(event) -> None:
-        width = max(200, event.width - padding)
-        if abs(widget.cget("wraplength") - width) > 8:
-            widget.configure(wraplength=width)
+        try:
+            if not widget.winfo_exists():
+                return
+            width = max(200, event.width - padding)
+            if abs(widget.cget("wraplength") - width) > 8:
+                widget.configure(wraplength=width)
+        except (tk.TclError, AttributeError):
+            return  # the widget has gone away; nothing to resize
 
     container.bind("<Configure>", resize, add="+")
 
@@ -148,7 +170,18 @@ def primary_button(master, text: str, command=None, **kwargs) -> ctk.CTkButton:
     kwargs.setdefault("text_color", FG_ON_ACCENT)
     kwargs.setdefault("corner_radius", RADIUS)
     kwargs.setdefault("height", BUTTON_HEIGHT)
-    kwargs.setdefault("font", font(13))
+    kwargs.setdefault("font", font(13, "bold"))
+    return ctk.CTkButton(master, text=text, command=command, **kwargs)
+
+
+def confirm_button(master, text: str, command=None, **kwargs) -> ctk.CTkButton:
+    """The big, green, go-ahead button. Reserved for the main action on a page."""
+    kwargs.setdefault("fg_color", CONFIRM)
+    kwargs.setdefault("hover_color", CONFIRM_HOVER)
+    kwargs.setdefault("text_color", FG_ON_ACCENT)
+    kwargs.setdefault("corner_radius", RADIUS_PILL)
+    kwargs.setdefault("height", BUTTON_HEIGHT_LARGE)
+    kwargs.setdefault("font", font(15, "bold"))
     return ctk.CTkButton(master, text=text, command=command, **kwargs)
 
 

@@ -8,14 +8,17 @@ from __future__ import annotations
 import customtkinter as ctk
 
 from app import theme
-from app.core import credentials, db, importer, scorer, warmup
+from app.core import credentials, db, importer, scorer, shortcut, warmup
+from app.ui.widgets.common import toast
 
 INTRO = (
+    "Welcome. This page walks you through everything, in order — work down the list from the top "
+    "and each step ticks itself off when it is done.\n\n"
     "Email providers judge every message by who sent it, not just what it says. A brand-new "
     "sender pushing out hundreds of identical emails looks exactly like a spammer, and once your "
     "domain gets that reputation it takes months to recover.\n\n"
-    "Work down this list in order. The first four steps are DNS records that prove your mail is "
-    "genuinely yours — they matter more than anything you write."
+    "Take your time. Nothing is sent until you press \"Start Emailing\" on the Send page, and the "
+    "app checks everything before it lets you."
 )
 
 
@@ -79,8 +82,44 @@ class GuidePage(ctk.CTkFrame):
                                            fg_color=theme.BORDER, height=6)
         self.progress.pack(fill="x", pady=(0, 16))
 
+        self._build_launch_card()
+
         self.steps_frame = ctk.CTkFrame(self.scroll, fg_color="transparent")
         self.steps_frame.pack(fill="both", expand=True)
+
+    def _build_launch_card(self) -> None:
+        """How to find and reopen the app — the first thing a new user needs."""
+        card = ctk.CTkFrame(self.scroll, fg_color=theme.ACCENT_SOFT,
+                            corner_radius=theme.RADIUS_CARD, border_width=1,
+                            border_color=theme.BORDER)
+        card.pack(fill="x", pady=(0, 16))
+
+        ctk.CTkLabel(card, text="Opening HomingPigeon next time",
+                     font=theme.font(15, "bold"), text_color=theme.FG_BRIGHT,
+                     anchor="w").pack(anchor="w", padx=18, pady=(16, 6))
+
+        info = ctk.CTkLabel(card, text=shortcut.how_to_launch(), font=theme.font(12),
+                            text_color=theme.FG, anchor="w", justify="left", wraplength=720)
+        info.pack(anchor="w", padx=18)
+        theme.auto_wrap(info, card, padding=56)
+
+        buttons = ctk.CTkFrame(card, fg_color="transparent")
+        buttons.pack(fill="x", padx=18, pady=(14, 12))
+
+        theme.confirm_button(buttons, "Put an icon on my Desktop", self._make_shortcut,
+                             width=250, height=42).pack(side="left")
+        theme.secondary_button(buttons, "Open the app's folder",
+                               lambda: shortcut.open_folder(shortcut.app_location()),
+                               width=180, height=42).pack(side="left", padx=10)
+
+        self.shortcut_status = theme.label(card, "", muted=True)
+        self.shortcut_status.pack(anchor="w", padx=18, pady=(0, 16))
+
+    def _make_shortcut(self) -> None:
+        ok, message = shortcut.create_desktop_shortcut()
+        self.shortcut_status.configure(text=message,
+                                       text_color=theme.SUCCESS if ok else theme.ERROR)
+        toast(self, message, "success" if ok else "error", 6000)
 
     # --- state ---------------------------------------------------------------
     def _steps(self) -> list[dict]:
@@ -99,7 +138,7 @@ class GuidePage(ctk.CTkFrame):
                        "authenticated for your brand and is filtered far more aggressively. Mail "
                        "from your own domain can be signed and verified.",
                 "how": "Set up an address on your company domain with your email provider, then "
-                       "enter it on the 'Email account' page along with the SMTP details.",
+                       "enter it on the 'My email account' page along with the SMTP details.",
                 "done": account_ready and not any(
                     sender_email.endswith(p) for p in
                     ("@gmail.com", "@yahoo.com", "@hotmail.com", "@outlook.com")),
@@ -110,7 +149,7 @@ class GuidePage(ctk.CTkFrame):
                 "why": "SPF lists which servers are allowed to send email for your domain. Without "
                        "it, a receiving server has no way to tell your mail from a forgery, and "
                        "treats it with suspicion.",
-                "how": f"Open Deliverability, run the checks on {domain}, then use the SPF "
+                "how": f"Open 'Domain check', run the checks on {domain}, then use the SPF "
                        f"generator and add the result as a TXT record at your DNS host.",
                 "done": dns_status.get("SPF") == "pass",
                 "action": lambda: self.app.show("deliverability"),
@@ -120,7 +159,7 @@ class GuidePage(ctk.CTkFrame):
                 "why": "DKIM adds a cryptographic signature to every message, proving it really "
                        "came from your domain and was not altered on the way. Gmail and Outlook "
                        "both weight it heavily.",
-                "how": "Open Deliverability → DKIM setup, pick your provider, and follow the exact "
+                "how": "Open 'Domain check' → DKIM setup, pick your provider, and follow the exact "
                        "steps for their admin console. Only your provider can generate the key.",
                 "done": dns_status.get("DKIM") == "pass",
                 "action": lambda: self.app.show("deliverability"),
@@ -130,7 +169,7 @@ class GuidePage(ctk.CTkFrame):
                 "why": "DMARC ties SPF and DKIM together and tells receivers what to do when a "
                        "message fails. Gmail and Yahoo now require one from anyone sending in "
                        "volume — without it, bulk mail is routinely rejected.",
-                "how": "Open Deliverability → DMARC generator. Start with p=none, and move to "
+                "how": "Open 'Domain check' → DMARC generator. Start with p=none, and move to "
                        "quarantine and then reject once your reports look clean.",
                 "done": dns_status.get("DMARC") in ("pass", "warn"),
                 "action": lambda: self.app.show("deliverability"),
@@ -140,7 +179,7 @@ class GuidePage(ctk.CTkFrame):
                 "why": "Bounces are the fastest route to a blacklist. A list full of dead addresses "
                        "tells providers you are mailing people who never opted in. Above roughly 5% "
                        "bounces, filtering gets severe.",
-                "how": "Import your spreadsheet on the Contacts page with the domain check enabled. "
+                "how": "Import your spreadsheet on the 'My contacts' page with the domain check enabled. "
                        "Remove addresses you have no business reason to contact.",
                 "done": importer.contact_count() > 0,
                 "action": lambda: self.app.show("contacts"),
@@ -150,7 +189,7 @@ class GuidePage(ctk.CTkFrame):
                 "why": "Hundreds of byte-identical messages are trivial for filters to fingerprint. "
                        "Varying the wording per recipient is the single most effective content-side "
                        "defence.",
-                "how": "On the Templates page write at least 3 subjects and 2-3 bodies, add "
+                "how": "On the 'My message' page write at least 3 subjects and 2-3 bodies, add "
                        "{{Company}} and {{FirstName}} merge tags, and use spintax like "
                        "{Hi|Hello} for extra variation.",
                 "done": (db.query_one("SELECT COUNT(*) AS n FROM subjects WHERE enabled = 1") or
@@ -162,7 +201,7 @@ class GuidePage(ctk.CTkFrame):
                 "why": "Trigger words, shouting capitals, image-heavy layouts, link shorteners and "
                        "attachments on first contact all push a message toward the spam folder — "
                        "often without you realising.",
-                "how": "Templates → Preview & score. Aim for 85 or above, and fix anything marked "
+                "how": "'My message' → Preview & score. Aim for 85 or above, and fix anything marked "
                        "critical or high before sending.",
                 "done": bool(report and report.score >= 70),
                 "action": lambda: self.app.show("templates"),
@@ -194,7 +233,7 @@ class GuidePage(ctk.CTkFrame):
                 "why": "Continuing to mail addresses that already bounced is the clearest possible "
                        "signal that you are not managing your list. Removing them immediately "
                        "protects the reputation you are building.",
-                "how": "Add your IMAP details on the Email account page, then check the inbox "
+                "how": "Add your IMAP details on the 'My email account' page, then check the inbox "
                        "regularly from the 'Replies & bounces' page.",
                 "done": bool(db.get_setting("imap_host", "")),
                 "action": lambda: self.app.show("account"),

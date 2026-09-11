@@ -12,39 +12,43 @@ from app import theme
 from app.core import composer, db, importer, merge, scorer
 from app.ui.widgets.common import (Section, copy_to_clipboard, get_text, set_text, toast)
 
-DEFAULT_SUBJECTS = [
-    "Custom uniforms & corporate wear for {{Company}}",
-    "{Uniform|Workwear} manufacturing for {{Company}}",
-    "Custom apparel solutions for {{Company}}",
+# Examples are never filled in automatically — the app starts blank and these are
+# only inserted when the user presses "Show me an example".
+EXAMPLE_SUBJECTS = [
+    "{A quick question|Quick question} about {{Company}}",
+    "{Introducing|A short introduction to} our services for {{Company}}",
+    "Would this be useful for {{Company}}?",
 ]
 
-DEFAULT_BODY = """<p>{Hi|Hello} {{FirstName}},</p>
+EXAMPLE_BODY = """<p>{Hi|Hello} {{FirstName}},</p>
 
-<p>{I hope your week is going well.|Hope you are having a productive week.|I hope this note finds you well.}</p>
+<p>{I hope your week is going well.|Hope you are having a productive week.|I hope this finds you well.}</p>
 
-<p>I am reaching out from <strong>Uniformers</strong> here in the UAE. We specialise in custom uniform
-manufacturing and corporate apparel &mdash; polo shirts, safety overalls, schoolwear, healthcare uniforms
-and custom branded merchandise.</p>
+<p>I am reaching out from <strong>[Your Company]</strong>. We help businesses like {{Company}} with
+[describe what you do in one sentence].</p>
 
-<p>Whether {{Company}} needs to refresh current staff uniforms or develop a fully branded apparel line,
-we handle the complete process:</p>
+<p>We handle the whole process:</p>
 
 <ul>
-  <li>Design and fabric consultation</li>
-  <li>Competitive bulk pricing</li>
-  <li>Fast local UAE delivery</li>
+  <li>[First thing you offer]</li>
+  <li>[Second thing you offer]</li>
+  <li>[Third thing you offer]</li>
 </ul>
 
-<p>Would you be open to a short call to discuss your next apparel order?</p>"""
+<p>Would you be open to a short call this week?</p>"""
 
-DEFAULT_SIGNATURE = """<p style="margin-top:20px;">
-  <strong>Your Name</strong><br>
-  <span style="color:#555555;">Your Company &mdash; what you do</span><br>
-  <strong>Phone:</strong> +971 50 000 0000<br>
-  <strong>Email:</strong> you@yourcompany.com<br>
-  <strong>Web:</strong> <a href="https://www.yourcompany.com">www.yourcompany.com</a><br>
-  <em>Your city, UAE</em>
+EXAMPLE_SIGNATURE = """<p style="margin-top:20px;">
+  <strong>[Your Name]</strong><br>
+  <span style="color:#555555;">[Your Company] &mdash; [what you do]</span><br>
+  <strong>Phone:</strong> [your phone number]<br>
+  <strong>Email:</strong> [your email address]<br>
+  <strong>Web:</strong> <a href="https://www.example.com">[your website]</a><br>
+  <em>[Your city and country]</em>
 </p>"""
+
+EMPTY_HINT = ("Nothing here yet.\n\n"
+              "Press \"Show me an example\" to start from a ready-made template you can edit, "
+              "or \"Add\" to write your own from scratch.")
 
 
 class VariantEditor(ctk.CTkFrame):
@@ -133,13 +137,17 @@ class TemplatesPage(ctk.CTkFrame):
             segmented_button_unselected_color=theme.BG_SIDEBAR, text_color=theme.FG,
             border_width=1, border_color=theme.BORDER, corner_radius=theme.RADIUS_CARD)
         self.tabs.pack(fill="both", expand=True, padx=theme.PAD_LARGE, pady=(0, theme.PAD))
-        for name in ("Subjects", "Body", "Signature", "Preview & score"):
+        for name in ("Subjects", "Body", "Signature", 'Preview & score'):
             self.tabs.add(name)
 
         self._build_subjects(self.tabs.tab("Subjects"))
         self._build_bodies(self.tabs.tab("Body"))
         self._build_signature(self.tabs.tab("Signature"))
-        self._build_preview(self.tabs.tab("Preview & score"))
+        self._build_preview(self.tabs.tab('Preview & score'))
+
+        self._subjects_hint = None
+        self._bodies_hint = None
+        self._refresh_empty_hints()
 
         bar = ctk.CTkFrame(self, fg_color="transparent")
         bar.pack(fill="x", padx=theme.PAD_LARGE, pady=(0, theme.PAD))
@@ -185,8 +193,12 @@ class TemplatesPage(ctk.CTkFrame):
         self.subjects_frame = theme.scroll_frame(parent)
         self.subjects_frame.pack(fill="both", expand=True)
 
-        theme.secondary_button(parent, "+ Add subject variant",
-                               lambda: self._add_subject(""), width=180).pack(anchor="w", pady=8)
+        buttons = ctk.CTkFrame(parent, fg_color="transparent")
+        buttons.pack(fill="x", pady=8)
+        theme.primary_button(buttons, "+ Add a subject line",
+                             lambda: self._add_subject(""), width=180).pack(side="left")
+        theme.secondary_button(buttons, "Show me an example", self._example_subjects,
+                               width=180).pack(side="left", padx=8)
 
     def _add_subject(self, text: str, enabled: bool = True) -> None:
         editor = VariantEditor(self.subjects_frame, text, enabled, multiline=False,
@@ -194,13 +206,28 @@ class TemplatesPage(ctk.CTkFrame):
                                index=len(self.subject_editors) + 1)
         editor.pack(fill="x", pady=4)
         self.subject_editors.append(editor)
+        self._refresh_empty_hints()
+
+    def _refresh_empty_hints(self) -> None:
+        """Show friendly placeholder text while a tab has nothing in it yet."""
+        for frame, editors, attr in (
+            (self.subjects_frame, self.subject_editors, "_subjects_hint"),
+            (self.bodies_frame, self.body_editors, "_bodies_hint"),
+        ):
+            hint = getattr(self, attr, None)
+            if editors:
+                if hint is not None:
+                    hint.destroy()
+                    setattr(self, attr, None)
+            elif hint is None:
+                hint = theme.label(frame, EMPTY_HINT, muted=True, wrap=True)
+                hint.pack(anchor="w", pady=20, padx=4)
+                setattr(self, attr, hint)
 
     def _remove_subject(self, editor: VariantEditor) -> None:
-        if len(self.subject_editors) <= 1:
-            toast(self, "You need at least one subject", "warn")
-            return
         self.subject_editors.remove(editor)
         editor.destroy()
+        self._refresh_empty_hints()
         self._mark_dirty()
 
     # --- bodies -------------------------------------------------------------
@@ -214,8 +241,12 @@ class TemplatesPage(ctk.CTkFrame):
         self.bodies_frame = theme.scroll_frame(parent)
         self.bodies_frame.pack(fill="both", expand=True)
 
-        theme.secondary_button(parent, "+ Add body variant",
-                               lambda: self._add_body(""), width=180).pack(anchor="w", pady=8)
+        buttons = ctk.CTkFrame(parent, fg_color="transparent")
+        buttons.pack(fill="x", pady=8)
+        theme.primary_button(buttons, "+ Add a message",
+                             lambda: self._add_body(""), width=180).pack(side="left")
+        theme.secondary_button(buttons, "Show me an example", self._example_body,
+                               width=180).pack(side="left", padx=8)
 
     def _add_body(self, text: str, enabled: bool = True) -> None:
         editor = VariantEditor(self.bodies_frame, text, enabled, multiline=True,
@@ -223,13 +254,12 @@ class TemplatesPage(ctk.CTkFrame):
                                index=len(self.body_editors) + 1)
         editor.pack(fill="x", pady=4)
         self.body_editors.append(editor)
+        self._refresh_empty_hints()
 
     def _remove_body(self, editor: VariantEditor) -> None:
-        if len(self.body_editors) <= 1:
-            toast(self, "You need at least one body", "warn")
-            return
         self.body_editors.remove(editor)
         editor.destroy()
+        self._refresh_empty_hints()
         self._mark_dirty()
 
     # --- signature ----------------------------------------------------------
@@ -243,12 +273,25 @@ class TemplatesPage(ctk.CTkFrame):
         self.signature_box.pack(fill="both", expand=True, pady=(0, 8))
         self.signature_box.bind("<KeyRelease>", lambda e: self._mark_dirty())
 
-        theme.secondary_button(parent, "Insert example signature",
+        theme.secondary_button(parent, "Show me an example",
                                self._insert_example_signature, width=200).pack(anchor="w", pady=(0, 10))
 
     def _insert_example_signature(self) -> None:
-        set_text(self.signature_box, DEFAULT_SIGNATURE)
+        set_text(self.signature_box, EXAMPLE_SIGNATURE)
         self._mark_dirty()
+        toast(self, "Replace everything in [square brackets] with your own details", "info", 6000)
+
+    def _example_subjects(self) -> None:
+        for text in EXAMPLE_SUBJECTS:
+            self._add_subject(text)
+        self._mark_dirty()
+        toast(self, "Example subject lines added — edit them to suit your business", "info", 6000)
+
+    def _example_body(self) -> None:
+        self._add_body(EXAMPLE_BODY)
+        self._mark_dirty()
+        toast(self, "Example message added — replace the [square brackets] with your own words",
+              "info", 6000)
 
     # --- preview ------------------------------------------------------------
     def _build_preview(self, parent) -> None:
@@ -406,7 +449,7 @@ class TemplatesPage(ctk.CTkFrame):
             html = getattr(self, "_preview_html", "")
         if not html:
             return
-        path = Path(tempfile.gettempdir()) / "uniformers_preview.html"
+        path = Path(tempfile.gettempdir()) / "homingpigeon_preview.html"
         path.write_text(html, encoding="utf-8")
         webbrowser.open(path.as_uri())
 
@@ -452,10 +495,8 @@ class TemplatesPage(ctk.CTkFrame):
         row = db.query_one("SELECT * FROM template_sets ORDER BY id LIMIT 1")
 
         if row is None:
-            for subject in DEFAULT_SUBJECTS:
-                self._add_subject(subject)
-            self._add_body(DEFAULT_BODY)
-            set_text(self.signature_box, DEFAULT_SIGNATURE)
+            # First launch: everything stays empty until the user writes or
+            # loads an example. Nothing is pre-filled on their behalf.
             return
 
         self._set_id = row["id"]
@@ -473,13 +514,8 @@ class TemplatesPage(ctk.CTkFrame):
                              (self._set_id,)):
             self._add_body(body["html"], bool(body["enabled"]))
 
-        if not self.subject_editors:
-            for subject in DEFAULT_SUBJECTS:
-                self._add_subject(subject)
-        if not self.body_editors:
-            self._add_body(DEFAULT_BODY)
         self.save_status.configure(text="")
 
     def on_show(self) -> None:
-        if self.tabs.get() == "Preview & score":
+        if self.tabs.get() == 'Preview & score':
             self.refresh_preview()

@@ -207,7 +207,7 @@ def _check_body(html: str, findings: list[Finding], name: str = "Body",
     # The unsubscribe footer is appended at send time, so only complain when it is switched off
     if not footer_added and "unsubscribe" not in lowered:
         findings.append(Finding("high", name, "No unsubscribe wording anywhere in the message.",
-                                "Re-enable the automatic footer on the Campaign page, or add your "
+                                "Re-enable the automatic footer on the 'Sending options' page, or add your "
                                 "own opt-out line — mail without one is treated as spam and, for "
                                 "many jurisdictions, is not legal to send."))
 
@@ -258,10 +258,10 @@ def _check_identity(sender_email: str, reply_to: str, findings: list[Finding],
         for result in dns_results:
             if result.name == "SPF" and result.status == "fail":
                 findings.append(Finding("critical", "Authentication", f"SPF: {result.summary}",
-                                        result.fix or "Fix SPF on the Deliverability page."))
+                                        result.fix or "Fix SPF on the 'Domain check' page."))
             elif result.name == "DKIM" and result.status in ("fail", "warn"):
                 findings.append(Finding("high", "Authentication", f"DKIM: {result.summary}",
-                                        result.fix or "Enable DKIM on the Deliverability page."))
+                                        result.fix or "Enable DKIM on the 'Domain check' page."))
             elif result.name == "DMARC" and result.status == "fail":
                 findings.append(Finding("critical", "Authentication", f"DMARC: {result.summary}",
                                         result.fix or "Publish a DMARC record."))
@@ -278,7 +278,7 @@ def _check_attachment(content: composer.Content, findings: list[Finding]) -> Non
     path = Path(content.attachment_path)
     if not path.exists():
         findings.append(Finding("critical", "Attachment", f"Attachment not found: {path.name}",
-                                "Select the file again on the Campaign page."))
+                                "Select the file again on the 'Sending options' page."))
         return
 
     size = path.stat().st_size
@@ -340,7 +340,7 @@ def score(
 
     if content.attach_mode == "link" and not content.link_url.strip():
         findings.append(Finding("low", "Brochure", "Link mode is selected but no URL is set.",
-                                "Add the brochure URL on the Campaign page, or switch to 'no brochure'."))
+                                "Add the brochure URL on the 'Sending options' page, or switch to 'no brochure'."))
 
     _check_attachment(content, findings)
     _check_variety(content, findings)

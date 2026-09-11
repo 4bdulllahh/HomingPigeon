@@ -2,9 +2,9 @@
 
     python tools/build_exe.py
 
-The result lands in dist/UniformersMailer.exe and needs no Python on the target
-machine. Settings and the database live in %APPDATA%/UniformersMailer, so an
-updated build never overwrites the user's data.
+The result is a single file, dist/HomingPigeon.exe, that needs no Python on the
+target machine. Settings and the database live in %APPDATA%/HomingPigeon, so a
+new build never overwrites the user's data.
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-NAME = "UniformersMailer"
+NAME = "HomingPigeon"
 
 
 def main() -> int:

@@ -61,7 +61,7 @@ class SendPage(ctk.CTkFrame):
         controls = ctk.CTkFrame(self, fg_color="transparent")
         controls.pack(fill="x", padx=theme.PAD_LARGE, pady=(0, 10))
 
-        self.start_button = theme.primary_button(controls, "Start sending", self._start, width=160)
+        self.start_button = theme.confirm_button(controls, "Start Emailing", self._start, width=210)
         self.start_button.pack(side="left")
         self.pause_button = theme.secondary_button(controls, "Pause", self._toggle_pause, width=110)
         self.pause_button.pack(side="left", padx=8)
@@ -107,35 +107,35 @@ class SendPage(ctk.CTkFrame):
         host = db.get_setting("smtp_host", "")
         has_password = credentials.has_secret(credentials.SMTP_PASSWORD)
         checks.append(("Email account configured", bool(email and host and has_password),
-                       "Set your SMTP details on the 'Email account' page"))
+                       "Set your SMTP details on the 'My email account' page"))
 
         count = importer.contact_count()
         checks.append((f"Contacts imported ({count:,} sendable)", count > 0,
-                       "Import your spreadsheet on the 'Contacts' page"))
+                       "Import your spreadsheet on the 'My contacts' page"))
 
         templates = db.query_one("SELECT 1 FROM bodies WHERE enabled = 1")
         checks.append(("Templates written", templates is not None,
-                       "Write at least one subject and body on the 'Templates' page"))
+                       "Write at least one subject and message on the 'My message' page"))
 
         dns_status = db.get_setting("dns_last_status", {}) or {}
         if dns_status:
             failures = [name for name, state in dns_status.items() if state == "fail"]
             checks.append(
                 ("Domain authentication (SPF / DKIM / DMARC)", not failures,
-                 f"Failing: {', '.join(failures)} — fix on the 'Deliverability' page"
+                 f"Failing: {', '.join(failures)} — fix on the 'Domain check' page"
                  if failures else ""))
         else:
             checks.append(("Domain authentication checked", False,
-                           "Run the checks on the 'Deliverability' page — without SPF and DMARC "
+                           "Run the checks on the 'Domain check' page — without SPF and DMARC "
                            "your mail is very likely to be filtered"))
 
         report = scorer.latest_report()
         if report:
             checks.append((f"Spam score {report.score}/100 ({report.grade})", report.score >= 70,
-                           "Improve the content on the 'Templates' page" if report.score < 70 else ""))
+                           "Improve the content on the 'My message' page" if report.score < 70 else ""))
         else:
             checks.append(("Spam score checked", False,
-                           "Open 'Templates' → 'Preview & score' to run the check"))
+                           "Open 'My message' → 'Preview & score' to run the check"))
 
         status = warmup.status()
         checks.append((f"Daily limit: {status.sent_today}/{status.cap} used", not status.at_limit,
@@ -273,7 +273,7 @@ class SendPage(ctk.CTkFrame):
                 self, "Your content scored poorly",
                 f"The last spam check scored {report.score}/100 (grade {report.grade}).\n\n"
                 f"{report.verdict}\n\nSending anyway risks your domain's reputation. You can fix "
-                f"the issues on the Templates page, or continue if you have already reviewed them.",
+                f"the issues on the 'My message' page, or continue if you have already reviewed them.",
                 confirm_text="Send anyway", danger=True,
             ):
                 self.app.show("templates")
@@ -287,7 +287,7 @@ class SendPage(ctk.CTkFrame):
                 f"These checks are failing: {', '.join(failures)}.\n\n"
                 f"Mail from a domain without working authentication is very likely to be "
                 f"spam-foldered or rejected, and repeated attempts damage your domain's "
-                f"reputation for months.\n\nFix them on the Deliverability page first.",
+                f"reputation for months.\n\nFix them on the 'Domain check' page first.",
                 confirm_text="Send anyway", danger=True,
             ):
                 self.app.show("deliverability")
@@ -311,7 +311,7 @@ class SendPage(ctk.CTkFrame):
         self.worker = sender.SendWorker(plan, self.events)
         self.worker.start()
 
-        self.start_button.configure(state="disabled")
+        self.start_button.configure(state="disabled", text="Sending…")
         self.pause_button.configure(state="normal", text="Pause")
         self.stop_button.configure(state="normal")
         self.tile_sent.update_value("0")
@@ -397,7 +397,7 @@ class SendPage(ctk.CTkFrame):
 
         elif event.type == sender.EventType.DONE:
             data = event.data or {}
-            self.start_button.configure(state="normal")
+            self.start_button.configure(state="normal", text="Start Emailing")
             self.pause_button.configure(state="disabled", text="Pause")
             self.stop_button.configure(state="disabled")
             self.tile_next.update_value("—")

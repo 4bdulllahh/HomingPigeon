@@ -1,4 +1,4 @@
-"""Uniformers Mailer — launcher."""
+"""HomingPigeon — launcher."""
 from __future__ import annotations
 
 import sys
@@ -14,7 +14,7 @@ def report(message: str) -> None:
     try:
         import tkinter.messagebox as messagebox
 
-        messagebox.showerror("Uniformers Mailer", message)
+        messagebox.showerror("HomingPigeon", message)
     except Exception:
         pass
 
