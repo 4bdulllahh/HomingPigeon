@@ -11,7 +11,7 @@ import pandas as pd
 from dotenv import load_dotenv
 
 # --- LOAD CONFIGURATION ---
-load_dotenv()
+load_dotenv()1
 
 SMTP_HOST = os.getenv("SMTP_HOST")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 1025))
