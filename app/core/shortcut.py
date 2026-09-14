@@ -13,16 +13,14 @@ from pathlib import Path
 from app import config
 
 
-def is_frozen() -> bool:
-    """True when running from a PyInstaller-built .exe rather than source."""
-    return bool(getattr(sys, "frozen", False))
-
-
 def app_location() -> Path:
     """The folder a user should think of as 'where the app lives'."""
-    if is_frozen():
-        return Path(sys.executable).parent
     return Path(__file__).resolve().parent.parent.parent
+
+
+def is_installed() -> bool:
+    """True when installed by HomingPigeon Setup, which keeps a private Python in the app folder."""
+    return Path(sys.executable).resolve().parent == app_location() / "python"
 
 
 def start_file() -> Path:
@@ -38,24 +36,23 @@ def start_file() -> Path:
 
 def launch_target() -> tuple[str, str, str]:
     """(program, arguments, icon) that will start the app again."""
-    if is_frozen():
-        return sys.executable, "", sys.executable
+    icon = app_location() / "assets" / "icon.ico"
+    if is_installed():
+        pythonw = app_location() / "python" / "pythonw.exe"
+        return str(pythonw), f'-E -s "{app_location() / "run.py"}"', str(icon)
 
-    # Point at the Start file rather than at Python directly: it repairs the setup
-    # by itself if Python is ever updated or an add-on goes missing.
-    base_pythonw = Path(sys.base_prefix) / "pythonw.exe"
-    icon = base_pythonw if base_pythonw.exists() else Path(sys.executable)
+    # Running from the source folder: point at the Start file rather than at Python
+    # directly, because it repairs the setup by itself if anything goes missing.
     return str(start_file()), "", str(icon)
 
 
 def how_to_launch() -> str:
     """Plain-English instructions for reopening the app."""
-    if is_frozen():
+    if is_installed():
         return (
-            f"You are running the ready-made app.\n\n"
-            f"It lives here:\n{sys.executable}\n\n"
-            f"To open it again, double-click {Path(sys.executable).name} in that folder — "
-            f"or press the button below to put an icon on your Desktop."
+            "Open HomingPigeon from the Start menu (press the Windows key and type HomingPigeon), "
+            "or from its Desktop icon.\n\n"
+            "No icon on your Desktop? Press the button below to add one."
         )
     text = (
         f"HomingPigeon lives in this folder:\n{app_location()}\n\n"
@@ -100,7 +97,7 @@ def create_desktop_shortcut() -> tuple[bool, str]:
         f"$s.WorkingDirectory = '{ps_quote(working_dir)}'; "
         f"$s.Description = '{ps_quote(config.APP_TITLE)}'; "
         f"$s.IconLocation = '{ps_quote(icon)},0'; "
-        "$s.WindowStyle = 7; "  # minimised, so the Start file's window stays out of the way
+        f"$s.WindowStyle = {1 if is_installed() else 7}; "  # 7 = minimised, hides the Start file's window
         "$s.Save()"
     )
 

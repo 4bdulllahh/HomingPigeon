@@ -1,17 +1,20 @@
-name: Build Windows app
+name: Build Windows installer
 
-# Builds HomingPigeon.exe automatically.
-#  * every push: checks the code still builds and the tests pass
-#  * every tag like v0.1.0: also publishes the .exe on the Releases page,
-#    which is where the README tells people to download it from.
+# * every push / pull request: run the tests and check the installer still builds
+# * publishing a release on GitHub: build HomingPigeon-vX.Y.zip and attach it to
+#   that release automatically (takes about 5 minutes)
 
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
     branches: [main]
+  release:
+    types: [published]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -22,7 +25,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"
           cache: pip
 
       - name: Install dependencies
@@ -31,18 +34,17 @@ jobs:
       - name: Run tests
         run: python -m pytest tests/ -q
 
-      - name: Build the executable
-        run: python tools/build_exe.py
+      - name: Build the installer
+        run: python tools/build_installer.py
 
-      - name: Upload the build
+      - name: Keep the build (downloadable from the Actions tab)
         uses: actions/upload-artifact@v4
         with:
-          name: HomingPigeon
-          path: dist/HomingPigeon.exe
+          name: HomingPigeon-installer
+          path: dist/HomingPigeon-*.zip
 
-      - name: Publish to Releases (tagged versions only)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Attach to the release
+        if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/HomingPigeon.exe
-          generate_release_notes: true
+          files: dist/HomingPigeon-*.zip

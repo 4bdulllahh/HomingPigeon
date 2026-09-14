@@ -1,0 +1,48 @@
+HomingPigeon {version} - Safe, simple email for your business
+================================================================
+
+HOW TO INSTALL (Windows 10 and 11)
+
+  1. Right-click the downloaded .zip file and choose  Extract All... , then  Extract
+  2. In the folder that opens, double-click  "HomingPigeon Setup.exe"
+  3. Click  Install
+  4. When it's finished, choose where you'd like shortcuts and click  Finish
+
+That's it. Setup downloads what the app needs (about 80 MB) and shows you
+every step while it works. It takes about 2-5 minutes and needs an internet
+connection. No administrator password is needed.
+
+
+"WINDOWS PROTECTED YOUR PC"?
+
+Windows shows this for new programs it hasn't seen many times before.
+Click  More info , then  Run anyway .
+
+
+"PART OF THIS APP HAS BEEN BLOCKED" (Smart App Control)?
+
+Some Windows 11 computers block new programs completely. No problem:
+close the message and double-click
+
+    Install HomingPigeon (if Setup is blocked).bat
+
+instead. It downloads Python from python.org using Windows' own tools, checks
+the download is genuine, and then opens exactly the same Setup window.
+Leave the "files" folder next to it - it needs it.
+
+
+UPDATING
+
+Download the newest release and run its Setup the same way. Your contacts,
+templates and settings are kept.
+
+
+REMOVING
+
+Settings > Apps > Installed apps > HomingPigeon > Uninstall.
+
+
+MAC OR LINUX?
+
+This Setup is for Windows. On the Releases page, download "Source code (zip)",
+unzip it, and double-click the "Start HomingPigeon" file for your computer.

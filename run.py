@@ -24,10 +24,19 @@ def main() -> int:
         import customtkinter as ctk
     except ImportError:
         report("HomingPigeon is not set up yet.\n\n"
-               "Close this, open the HomingPigeon folder and double-click the "
-               "\"Start HomingPigeon\" file for your computer (Windows, Mac or Linux). "
-               "It sets everything up for you.")
+               "On Windows, run \"HomingPigeon Setup.exe\" from the GitHub Releases page again; "
+               "it repairs the installation. On a Mac or Linux, double-click the "
+               "\"Start HomingPigeon\" file in the HomingPigeon folder.")
         return 1
+
+    if sys.platform == "win32":
+        # Give the app its own taskbar identity, so it shows the pigeon rather than Python's icon
+        try:
+            import ctypes
+
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("HomingPigeon.App")
+        except (AttributeError, OSError):
+            pass
 
     from app import config, theme
     from app.core import db
