@@ -4,8 +4,8 @@ from __future__ import annotations
 import customtkinter as ctk
 
 from app import theme
-from app.core import db, imap_sync, importer, scorer, warmup
-from app.ui.widgets.common import DataTable, Section, StatTile
+from app.core import db, imap_sync, importer, prefs, scorer, warmup
+from app.ui.widgets.common import DataTable, Section, StatTile, status_icon
 
 
 class DashboardPage(ctk.CTkFrame):
@@ -99,18 +99,19 @@ class DashboardPage(ctk.CTkFrame):
     def _row(self, parent, label: str, status: str, detail: str, action=None,
              action_label: str = "Fix") -> None:
         row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.pack(fill="x", pady=3)
-        ctk.CTkLabel(row, text=theme.STATUS_ICONS.get(status, "○"), font=theme.font(14, "bold"),
-                     text_color=theme.status_color(status), width=24).pack(side="left")
+        row.pack(fill="x", pady=5)
+        # Icon, heading and button all sit on the heading's line; the detail wraps underneath
+        status_icon(row, status).pack(side="left", anchor="n", padx=(0, 8))
         text = ctk.CTkFrame(row, fg_color="transparent")
-        text.pack(side="left", fill="x", expand=True)
-        ctk.CTkLabel(text, text=label, font=theme.font(12, "bold"), text_color=theme.FG,
-                     anchor="w").pack(anchor="w")
+        text.pack(side="left", fill="x", expand=True, anchor="n")
+        ctk.CTkLabel(text, text=label, font=theme.font(13, "bold"), text_color=theme.FG_BRIGHT,
+                     anchor="w", height=24).pack(anchor="w")
         if detail:
-            ctk.CTkLabel(text, text=detail, font=theme.font(11), text_color=theme.FG_MUTED,
+            ctk.CTkLabel(text, text=detail, font=theme.font(12), text_color=theme.FG_MUTED,
                          anchor="w", wraplength=620, justify="left").pack(anchor="w")
         if action and status != "pass":
-            theme.secondary_button(row, action_label, action, width=90, height=26).pack(side="right")
+            theme.secondary_button(row, action_label, action, width=96, height=30).pack(
+                side="right", anchor="n")
 
     def _refresh_health(self) -> None:
         for widget in self.health_frame.winfo_children():
@@ -130,7 +131,7 @@ class DashboardPage(ctk.CTkFrame):
                           messages.get(state, f"{name} not checked"),
                           action=lambda: self.app.show("deliverability"))
             self._row(self.health_frame, "Last checked", "info",
-                      (checked_at or "").replace("T", " ")[:16])
+                      prefs.format_datetime(checked_at))
         else:
             self._row(self.health_frame, "Domain authentication", "fail",
                       "Not checked yet. SPF, DKIM and DMARC decide whether your mail is trusted.",
@@ -207,7 +208,7 @@ class DashboardPage(ctk.CTkFrame):
         colors = {"error": theme.ERROR, "warn": theme.WARNING}
         for event in events:
             self.activity_table.add_row(
-                [(event["ts"] or "").replace("T", " ")[:16], event["category"] or "",
+                [prefs.format_datetime(event["ts"]), event["category"] or "",
                  event["message"] or ""],
                 colors=[theme.FG_MUTED, colors.get(event["level"], theme.FG_MUTED),
                         colors.get(event["level"], theme.FG)])

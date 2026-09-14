@@ -37,6 +37,16 @@ def toast(widget, message: str, level: str = "info", duration: int = 4000) -> No
 
 
 # --- Status row -------------------------------------------------------------
+def status_icon(master, status: str) -> ctk.CTkLabel:
+    """A pass/warn/fail symbol sized to sit on the same line as a row's bold heading.
+
+    Pack it with anchor="n" next to the heading's column: both are one text line tall,
+    so the symbol lines up with the heading instead of floating between two lines.
+    """
+    return ctk.CTkLabel(master, text=theme.STATUS_ICONS.get(status, "○"), font=theme.font(14, "bold"),
+                        text_color=theme.status_color(status), width=22, height=24, anchor="center")
+
+
 class StatusRow(ctk.CTkFrame):
     """One pass/warn/fail line with an optional expandable detail area."""
 
@@ -51,22 +61,20 @@ class StatusRow(ctk.CTkFrame):
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x")
 
-        icon = theme.STATUS_ICONS.get(status, "○")
-        self.icon_label = ctk.CTkLabel(header, text=icon, font=theme.font(15, "bold"),
-                                       text_color=theme.status_color(status), width=24)
-        self.icon_label.pack(side="left", padx=(0, 6))
+        self.icon_label = status_icon(header, status)
+        self.icon_label.pack(side="left", anchor="n", padx=(0, 8))
 
         text_wrap = ctk.CTkFrame(header, fg_color="transparent")
         text_wrap.pack(side="left", fill="x", expand=True)
         ctk.CTkLabel(text_wrap, text=title, font=theme.font(13, "bold"),
-                     text_color=theme.FG_BRIGHT, anchor="w").pack(anchor="w")
+                     text_color=theme.FG_BRIGHT, anchor="w", height=24).pack(anchor="w")
         ctk.CTkLabel(text_wrap, text=summary, font=theme.font(12), text_color=theme.FG_MUTED,
                      anchor="w", justify="left", wraplength=620).pack(anchor="w")
 
         has_detail = bool(detail or record or fix or extras)
         if has_detail:
-            self.toggle = theme.secondary_button(header, "Details", self._toggle, width=78, height=26)
-            self.toggle.pack(side="right", padx=(8, 0))
+            self.toggle = theme.secondary_button(header, "Details", self._toggle, width=78, height=28)
+            self.toggle.pack(side="right", anchor="n", padx=(8, 0))
 
         self.body = ctk.CTkFrame(self, fg_color=theme.BG_PANEL, corner_radius=theme.RADIUS)
         self._build_body(detail, record, fix, extras or [])
@@ -223,6 +231,135 @@ class FormRow(ctk.CTkFrame):
                          anchor="w", justify="left", wraplength=560).pack(anchor="w", pady=(3, 0))
 
 
+# --- Tabs and choice buttons ------------------------------------------------
+def _style_choice(button: ctk.CTkButton, selected: bool) -> None:
+    if selected:
+        button.configure(fg_color=theme.ACCENT, hover_color=theme.ACCENT_HOVER,
+                         text_color=theme.FG_ON_ACCENT, border_color=theme.ACCENT)
+    else:
+        button.configure(fg_color=theme.BG_PANEL, hover_color=theme.BG_HOVER,
+                         text_color=theme.FG, border_color=theme.BORDER_STRONG)
+
+
+class FlowRow(ctk.CTkFrame):
+    """Lays buttons out left to right and wraps them onto new lines when they don't fit,
+    so rows of buttons still work at the largest text sizes."""
+
+    GAP = 8
+
+    def __init__(self, master, **kwargs):
+        kwargs.setdefault("fg_color", "transparent")
+        super().__init__(master, **kwargs)
+        self._items: list[tuple[ctk.CTkBaseClass, int]] = []
+        self._columns = 0
+        self.bind("<Configure>", lambda _e: self._reflow())
+
+    def add_button(self, text: str, command, height: int = 36, font_size: int = 13) -> ctk.CTkButton:
+        button_font = theme.font(font_size, "bold")
+        width = max(96, button_font.measure(text) + 44)  # unscaled, like every CTk size
+        button = ctk.CTkButton(self, text=text, width=width, height=height, corner_radius=theme.RADIUS,
+                               border_width=1, font=button_font, command=command)
+        self._items.append((button, width))
+        self._reflow(force=True)
+        return button
+
+    def _reflow(self, force: bool = False) -> None:
+        scaling = ctk.ScalingTracker.get_widget_scaling(self)
+        available = self.winfo_width() / scaling if self.winfo_width() > 1 else 10_000
+        row = column = used = 0
+        positions = []
+        for _widget, width in self._items:
+            if column and used + width > available:
+                row, column, used = row + 1, 0, 0
+            positions.append((row, column))
+            used += width + self.GAP
+            column += 1
+        signature = tuple(positions)
+        if not force and signature == getattr(self, "_signature", None):
+            return
+        self._signature = signature
+        for (widget, _width), (r, c) in zip(self._items, positions):
+            widget.grid(row=r, column=c, padx=(0, self.GAP), pady=(0, self.GAP), sticky="w")
+
+
+class ChoiceButtons(FlowRow):
+    """A row of buttons where exactly one is selected, like radio buttons that look like buttons."""
+
+    def __init__(self, master, options: list[tuple[str, str]], value: str | None = None,
+                 command: Callable[[str], None] | None = None, height: int = 36,
+                 font_size: int = 13):
+        super().__init__(master)
+        self.command = command
+        self.buttons: dict[str, ctk.CTkButton] = {}
+        self.value = value if value is not None else (options[0][0] if options else "")
+        for key, text in options:
+            button = self.add_button(text, lambda k=key: self.set(k, notify=True), height, font_size)
+            self.buttons[key] = button
+            _style_choice(button, key == self.value)
+
+    def set(self, key: str, notify: bool = False) -> None:
+        if key not in self.buttons:
+            return
+        self.value = key
+        for name, button in self.buttons.items():
+            _style_choice(button, name == key)
+        if notify and self.command:
+            self.command(key)
+
+    def get(self) -> str:
+        return self.value
+
+
+class TabView(ctk.CTkFrame):
+    """Tabs as a row of real buttons along the top-left, with the content in a card below.
+
+    Drop-in for the parts of CTkTabview the pages use: add(), tab(), set() and get().
+    """
+
+    def __init__(self, master, command: Callable[[str], None] | None = None):
+        super().__init__(master, fg_color="transparent")
+        self.command = command
+        self._frames: dict[str, ctk.CTkFrame] = {}
+        self._current: str | None = None
+
+        self.bar = FlowRow(self)
+        self.bar.pack(fill="x", pady=(0, 4))
+        self.buttons: dict[str, ctk.CTkButton] = {}
+
+        self.card = ctk.CTkFrame(self, fg_color=theme.BG_PANEL, corner_radius=theme.RADIUS_CARD,
+                                 border_width=1, border_color=theme.BORDER)
+        self.card.pack(fill="both", expand=True)
+
+    def add(self, name: str) -> ctk.CTkFrame:
+        frame = ctk.CTkFrame(self.card, fg_color="transparent")
+        self._frames[name] = frame
+        button = self.bar.add_button(name, lambda n=name: self.set(n), height=38)
+        self.buttons[name] = button
+        if self._current is None:
+            self.set(name)
+        else:
+            _style_choice(button, False)
+        return frame
+
+    def tab(self, name: str) -> ctk.CTkFrame:
+        return self._frames[name]
+
+    def get(self) -> str:
+        return self._current or ""
+
+    def set(self, name: str) -> None:
+        if name not in self._frames or name == self._current:
+            return
+        if self._current is not None:
+            self._frames[self._current].pack_forget()
+        self._current = name
+        self._frames[name].pack(fill="both", expand=True, padx=18, pady=(6, 14))
+        for key, button in self.buttons.items():
+            _style_choice(button, key == name)
+        if self.command:
+            self.command(name)
+
+
 # --- Confirm dialog ---------------------------------------------------------
 class ConfirmDialog(ctk.CTkToplevel):
     def __init__(self, master, title: str, message: str, confirm_text: str = "Continue",
@@ -272,6 +409,49 @@ class ConfirmDialog(ctk.CTkToplevel):
     def ask(cls, master, title: str, message: str, confirm_text: str = "Continue",
             danger: bool = False) -> bool:
         dialog = cls(master, title, message, confirm_text, danger=danger)
+        master.wait_window(dialog)
+        return dialog.result
+
+
+class ChoiceDialog(ctk.CTkToplevel):
+    """Like ConfirmDialog, but with several answers. Returns the chosen value, or None."""
+
+    def __init__(self, master, title: str, message: str, choices: list[tuple[str, str, str]]):
+        super().__init__(master)
+        self.result: str | None = None
+        self.title(title)
+        self.configure(fg_color=theme.BG[1] if ctk.get_appearance_mode() == "Dark" else theme.BG[0])
+        self.resizable(False, False)
+        self.transient(master)
+
+        wrapper = ctk.CTkFrame(self, fg_color="transparent")
+        wrapper.pack(fill="both", expand=True, padx=24, pady=20)
+        ctk.CTkLabel(wrapper, text=title, font=theme.font(16, "bold"),
+                     text_color=theme.FG_BRIGHT, anchor="w").pack(anchor="w")
+        ctk.CTkLabel(wrapper, text=message, font=theme.font(13), text_color=theme.FG,
+                     wraplength=500, justify="left", anchor="w").pack(anchor="w", pady=(10, 18))
+
+        buttons = ctk.CTkFrame(wrapper, fg_color="transparent")
+        buttons.pack(fill="x")
+        makers = {"primary": theme.primary_button, "danger": theme.danger_button,
+                  "secondary": theme.secondary_button}
+        for value, text, kind in choices:
+            makers.get(kind, theme.secondary_button)(
+                buttons, text, lambda v=value: self._choose(v)).pack(fill="x", pady=(0, 8))
+
+        self.update_idletasks()
+        ConfirmDialog._centre(self, master)
+        self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", lambda: self._choose(None))
+
+    def _choose(self, value: str | None) -> None:
+        self.result = value
+        self.grab_release()
+        self.destroy()
+
+    @classmethod
+    def ask(cls, master, title: str, message: str, choices: list[tuple[str, str, str]]) -> str | None:
+        dialog = cls(master, title, message, choices)
         master.wait_window(dialog)
         return dialog.result
 

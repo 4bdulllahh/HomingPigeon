@@ -6,8 +6,8 @@ import threading
 import customtkinter as ctk
 
 from app import theme
-from app.core import credentials, db, imap_sync
-from app.ui.widgets.common import DataTable, Section, StatTile, toast
+from app.core import credentials, db, imap_sync, prefs
+from app.ui.widgets.common import DataTable, Section, StatTile, TabView, toast
 
 
 class InboxPage(ctk.CTkFrame):
@@ -52,12 +52,7 @@ class InboxPage(ctk.CTkFrame):
         self.tile_unsubs = StatTile(tiles, "Unsubscribes", "0", accent=theme.WARNING)
         self.tile_unsubs.grid(row=0, column=2, sticky="ew")
 
-        self.tabs = ctk.CTkTabview(
-            self, fg_color=theme.BG_PANEL, segmented_button_fg_color=theme.BG_SIDEBAR,
-            segmented_button_selected_color=theme.ACCENT,
-            segmented_button_selected_hover_color=theme.ACCENT_HOVER,
-            segmented_button_unselected_color=theme.BG_SIDEBAR, text_color=theme.FG,
-            border_width=1, border_color=theme.BORDER, corner_radius=theme.RADIUS_CARD)
+        self.tabs = TabView(self)
         self.tabs.pack(fill="both", expand=True, padx=theme.PAD_LARGE, pady=(0, theme.PAD))
         self.tabs.add("Replies")
         self.tabs.add("Bounces & opt-outs")
@@ -148,7 +143,7 @@ class InboxPage(ctk.CTkFrame):
             for row in replies:
                 self.replies_table.add_row(
                     [row["email"], row["company"] or "", row["person"] or "",
-                     (row["replied_at"] or "").replace("T", " ")[:16]])
+                     prefs.format_datetime(row["replied_at"])])
         else:
             self.replies_table.set_empty_message(
                 "No replies detected yet. Run a check after your first batch.")
@@ -166,7 +161,7 @@ class InboxPage(ctk.CTkFrame):
             for row in rows:
                 self.bounces_table.add_row(
                     [row["email"], row["reason"] or "", labels.get(row["source"], row["source"] or ""),
-                     (row["added_at"] or "").replace("T", " ")[:16]],
+                     prefs.format_datetime(row["added_at"])],
                     colors=[theme.FG, theme.FG_MUTED, theme.WARNING, theme.FG_MUTED])
         else:
             self.bounces_table.set_empty_message("Nothing suppressed yet.")
@@ -174,7 +169,7 @@ class InboxPage(ctk.CTkFrame):
         state = db.query_one("SELECT last_sync_at FROM imap_state WHERE id = 1")
         if state and state["last_sync_at"]:
             self.sync_status.configure(
-                text=f"Last checked {state['last_sync_at'].replace('T', ' ')[:16]}")
+                text=f"Last checked {prefs.format_datetime(state['last_sync_at'])}")
 
     def on_show(self) -> None:
         self._load()

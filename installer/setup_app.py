@@ -21,6 +21,7 @@ runs this script with it. Uninstalling always uses that signed Python too.
 
     HomingPigeon Setup.exe                 install, update or repair
     setup_app.py --uninstall               remove (used by Settings > Apps)
+    ... --uninstall --confirmed [--delete-data]   remove straight away (the app's Settings page)
     ... --target DIR                       install somewhere else (testing)
 """
 from __future__ import annotations
@@ -570,9 +571,16 @@ class UninstallJob(Job):
         self.register = register  # False for test installs elsewhere: leave real shortcuts alone
 
     def step_close(self) -> str:
-        if running_app_pids(self.install_dir):
-            raise StepFailed("HomingPigeon is still open.", "Close HomingPigeon, then click Try again.")
-        return "Closed"
+        # When started from the app's Settings page, the app is closing as this starts: give it
+        # a little while before asking the user to close it.
+        for attempt in range(20):
+            if not running_app_pids(self.install_dir):
+                return "Closed"
+            if attempt == 0:
+                self.log("Waiting for HomingPigeon to close...")
+            self.check_cancel()
+            time.sleep(1)
+        raise StepFailed("HomingPigeon is still open.", "Close HomingPigeon, then click Try again.")
 
     def step_shortcuts(self) -> str:
         if not self.register:
@@ -703,10 +711,13 @@ class StepRow(tk.Frame):
 
 
 class SetupWindow:
-    def __init__(self, uninstall: bool, install_dir: Path, register: bool):
+    def __init__(self, uninstall: bool, install_dir: Path, register: bool,
+                 confirmed: bool = False, delete_data: bool = False):
         self.uninstall = uninstall
         self.install_dir = install_dir
         self.register = register
+        self.confirmed = confirmed  # already confirmed in the app's Settings page
+        self.preset_delete_data = delete_data
         self.events: queue.Queue = queue.Queue()
         self.job: Job | None = None
         self.busy = False
@@ -750,7 +761,9 @@ class SetupWindow:
         self._animate()
         self._poll()
 
-        if uninstall:
+        if uninstall and confirmed:
+            self.root.after(300, self.start_uninstall)
+        elif uninstall:
             self.page_confirm_uninstall()
         else:
             self.page_welcome()
@@ -1122,8 +1135,11 @@ class SetupWindow:
         self._button("Cancel", self.root.destroy)
 
     def start_uninstall(self) -> None:
-        delete_data = self.want_delete_data.get() if hasattr(self, "want_delete_data") else False
-        if delete_data and not messagebox.askyesno(
+        if self.confirmed:
+            delete_data = self.preset_delete_data
+        else:
+            delete_data = self.want_delete_data.get() if hasattr(self, "want_delete_data") else False
+        if delete_data and not self.confirmed and not messagebox.askyesno(
                 APP_NAME, "Permanently delete your contacts, templates and settings too?\n\n"
                           "This can't be undone.", icon="warning", parent=self.root):
             return
@@ -1194,7 +1210,8 @@ def main() -> int:
     except (AttributeError, OSError):
         pass
 
-    window = SetupWindow(uninstall, install_dir, register)
+    window = SetupWindow(uninstall, install_dir, register, confirmed="--confirmed" in args,
+                         delete_data="--delete-data" in args)
     window.run()
 
     if uninstall and window.uninstalled and install_dir.exists():

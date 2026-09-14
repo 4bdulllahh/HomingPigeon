@@ -8,8 +8,9 @@ import customtkinter as ctk
 from tkinter import filedialog
 
 from app import theme
-from app.core import db, exporter, importer
-from app.ui.widgets.common import (ConfirmDialog, DataTable, FormRow, Section, toast)
+from app.core import db, exporter, importer, prefs
+from app.ui.widgets.common import (ConfirmDialog, DataTable, FormRow, Section, TabView,
+                                   toast)
 
 
 class ContactsPage(ctk.CTkFrame):
@@ -30,12 +31,7 @@ class ContactsPage(ctk.CTkFrame):
                             "dead domains before anything is sent.",
                     muted=True, wrap=True).pack(anchor="w", pady=(2, 10))
 
-        self.tabs = ctk.CTkTabview(
-            self, fg_color=theme.BG_PANEL, segmented_button_fg_color=theme.BG_SIDEBAR,
-            segmented_button_selected_color=theme.ACCENT,
-            segmented_button_selected_hover_color=theme.ACCENT_HOVER,
-            segmented_button_unselected_color=theme.BG_SIDEBAR, text_color=theme.FG,
-            border_width=1, border_color=theme.BORDER, corner_radius=theme.RADIUS_CARD)
+        self.tabs = TabView(self)
         self.tabs.pack(fill="both", expand=True, padx=theme.PAD_LARGE, pady=(0, theme.PAD))
         for name in ("Import", 'My contacts', "Do not contact"):
             self.tabs.add(name)
@@ -364,7 +360,7 @@ class ContactsPage(ctk.CTkFrame):
         for row in rows:
             self.suppression_table.add_row(
                 [row["email"], row["reason"] or "", row["source"] or "",
-                 (row["added_at"] or "")[:16].replace("T", " ")])
+                 prefs.format_datetime(row["added_at"])])
 
     def _add_suppression(self) -> None:
         email = self.suppress_entry.get().strip().lower()

@@ -7,7 +7,7 @@ import customtkinter as ctk
 from tkinter import filedialog
 
 from app import config, theme
-from app.core import composer, db, importer, warmup
+from app.core import composer, db, importer, prefs, warmup
 from app.ui.widgets.common import FormRow, Section, toast
 from app.ui.widgets.range_slider import RangeSlider, format_seconds
 
@@ -105,7 +105,7 @@ class CampaignPage(ctk.CTkFrame):
         times.grid_columnconfigure(1, weight=1)
         times.grid_columnconfigure(2, weight=2)
 
-        hours = [f"{h:02d}:00" for h in range(24)]
+        hours = [prefs.format_clock(f"{h:02d}:00") for h in range(24)]
         start_row = FormRow(times, "Start")
         start_row.grid(row=0, column=0, sticky="ew", padx=(0, 10))
         self.start_menu = theme.option_menu(start_row.input_area, hours)
@@ -277,8 +277,8 @@ class CampaignPage(ctk.CTkFrame):
         db.set_setting("link_text", self.link_text_entry.get().strip() or "View our brochure")
         db.set_setting("delay_min_s", low)
         db.set_setting("delay_max_s", high)
-        db.set_setting("window_start", self.start_menu.get())
-        db.set_setting("window_end", self.end_menu.get())
+        db.set_setting("window_start", prefs.parse_clock(self.start_menu.get()))
+        db.set_setting("window_end", prefs.parse_clock(self.end_menu.get()))
         db.set_setting("weekdays_only", self.weekdays_only.get())
         db.set_setting("skip_holidays", self.skip_holidays.get())
         db.set_setting("holidays", self._parse_holidays())
@@ -313,8 +313,8 @@ class CampaignPage(ctk.CTkFrame):
 
         self.slider.set(int(db.get_setting("delay_min_s", 75)),
                         int(db.get_setting("delay_max_s", 150)))
-        self.start_menu.set(db.get_setting("window_start", config.DEFAULT_WINDOW_START))
-        self.end_menu.set(db.get_setting("window_end", config.DEFAULT_WINDOW_END))
+        self.start_menu.set(prefs.format_clock(db.get_setting("window_start", config.DEFAULT_WINDOW_START)))
+        self.end_menu.set(prefs.format_clock(db.get_setting("window_end", config.DEFAULT_WINDOW_END)))
         self.weekdays_only.set(bool(db.get_setting("weekdays_only", True)))
         self.skip_holidays.set(bool(db.get_setting("skip_holidays", True)))
 

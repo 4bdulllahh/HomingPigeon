@@ -93,17 +93,141 @@ def mono_family() -> str:
     return _MONO_FAMILY
 
 
+# Fonts are shared, one object per (family, size, weight), so the "Bold text" setting can
+# restyle every label in the app at once. Size scaling is handled by CustomTkinter.
+_FONTS: dict[tuple[str, int, str], ctk.CTkFont] = {}
+_BOLD_TEXT = False
+
+
+def _shared_font(kind: str, size: int, weight: str) -> ctk.CTkFont:
+    key = (kind, size, weight)
+    cached = _FONTS.get(key)
+    if cached is None:
+        family = ui_family() if kind == "ui" else mono_family()
+        effective = "bold" if (_BOLD_TEXT or weight == "bold") else "normal"
+        cached = _FONTS[key] = ctk.CTkFont(family=family, size=size, weight=effective)
+    return cached
+
+
 def font(size: int = 13, weight: str = "normal") -> ctk.CTkFont:
-    return ctk.CTkFont(family=ui_family(), size=size, weight=weight)
+    return _shared_font("ui", size, weight)
+
+
+# --- Icons ------------------------------------------------------------------
+# Windows ships a crisp icon font; elsewhere simple Unicode symbols stand in.
+ICONS = {
+    "home": ("\ue80f", "\u2302"),      # Home
+    "guide": ("\ue7c1", "\u2691"),     # Flag
+    "account": ("\ue715", "\u2709"),   # Mail
+    "shield": ("\uea18", "\u25c8"),    # Shield
+    "contacts": ("\ue716", "\u2630"),  # People
+    "message": ("\ue70f", "\u270e"),   # Edit
+    "options": ("\ue9e9", "\u2261"),   # Equalizer
+    "send": ("\ue724", "\u27a4"),      # Send
+    "inbox": ("\ue8ca", "\u21a9"),     # Mail reply
+    "settings": ("\ue713", "\u2699"),  # Gear
+}
+_ICON_FAMILY: str | None | bool = False
+
+
+def icon_family() -> str | None:
+    global _ICON_FAMILY
+    if _ICON_FAMILY is False:
+        found = _pick_family(["Segoe Fluent Icons", "Segoe MDL2 Assets"], "")
+        _ICON_FAMILY = found or None
+    return _ICON_FAMILY
+
+
+def icon(name: str) -> str:
+    glyph, fallback = ICONS.get(name, ("", "•"))
+    return glyph if icon_family() else fallback
+
+
+def icon_font(size: int = 16) -> ctk.CTkFont:
+    family = icon_family()
+    if family:
+        key = ("icon", size, "normal")
+        if key not in _FONTS:
+            _FONTS[key] = ctk.CTkFont(family=family, size=size)
+        return _FONTS[key]
+    return font(size)
 
 
 def mono(size: int = 12, weight: str = "normal") -> ctk.CTkFont:
-    return ctk.CTkFont(family=mono_family(), size=size, weight=weight)
+    return _shared_font("mono", size, weight)
+
+
+def set_bold_text(enabled: bool) -> None:
+    global _BOLD_TEXT
+    _BOLD_TEXT = enabled
+    for (kind, _size, weight), shared in _FONTS.items():
+        if kind != "icon":
+            shared.configure(weight="bold" if (enabled or weight == "bold") else "normal")
+
+
+def set_text_scale(scale: float) -> None:
+    """Make everything bigger or smaller: text, buttons, inputs and spacing."""
+    ctk.set_widget_scaling(scale)
 
 
 def apply_appearance(mode: str) -> None:
     """mode is 'Dark', 'Light' or 'System'."""
     ctk.set_appearance_mode(mode)
+
+
+# --- High contrast ----------------------------------------------------------
+# Stronger text, borders and accents for people who find the soft palette hard to read.
+# Colour tokens are read when widgets are built, so the shell rebuilds after a change.
+_HIGH_CONTRAST = {
+    "BG": ("#ffffff", "#0f1012"),
+    "BG_SIDEBAR": ("#eef0f4", "#17181b"),
+    "BG_PANEL": ("#ffffff", "#1a1c20"),
+    "BG_INPUT": ("#ffffff", "#0b0c0e"),
+    "BG_HOVER": ("#dfe5ee", "#2c3038"),
+    "BG_SELECTED": ("#cfe0f7", "#26344a"),
+    "BG_CONSOLE": ("#f4f6f9", "#0b0c0e"),
+    "BORDER": ("#9aa4b2", "#5b606b"),
+    "BORDER_STRONG": ("#5f6977", "#8a909c"),
+    "FG": ("#12161c", "#f4f6f9"),
+    "FG_BRIGHT": ("#000000", "#ffffff"),
+    "FG_MUTED": ("#39414c", "#c9ced6"),
+    "ACCENT": ("#1459b8", "#4c9bf0"),
+    "ACCENT_HOVER": ("#0f4a9c", "#6aaef5"),
+    "ACCENT_SOFT": ("#d6e6fa", "#1f3550"),
+    "FOCUS": ("#1459b8", "#8cc2fa"),
+    "CONFIRM": ("#1d7a48", "#3fbf7a"),
+    "CONFIRM_HOVER": ("#166239", "#5ccf90"),
+    "SUCCESS": ("#1d7a48", "#7fe0a8"),
+    "WARNING": ("#8a5d00", "#ffc861"),
+    "ERROR": ("#b3261e", "#ff9d92"),
+    "INFO": ("#1459b8", "#8cc2fa"),
+}
+_NORMAL = {name: globals()[name] for name in _HIGH_CONTRAST}
+_HIGH_CONTRAST_ON = False
+
+
+def set_high_contrast(enabled: bool) -> None:
+    global _HIGH_CONTRAST_ON
+    _HIGH_CONTRAST_ON = enabled
+    globals().update(_HIGH_CONTRAST if enabled else _NORMAL)
+    STATUS_COLORS.update({
+        "pass": SUCCESS, "ok": SUCCESS, "sent": SUCCESS, "warn": WARNING, "pending": FG_MUTED,
+        "skipped": FG_MUTED, "fail": ERROR, "failed": ERROR, "bounced": ERROR, "info": INFO,
+    })
+
+
+def high_contrast() -> bool:
+    return _HIGH_CONTRAST_ON
+
+
+def apply_preferences() -> None:
+    """Apply the saved Settings. Call once before the main window is built."""
+    from app.core import prefs
+
+    apply_appearance(prefs.get("appearance"))
+    set_text_scale(prefs.text_scale())
+    set_high_contrast(bool(prefs.get("high_contrast")))
+    set_bold_text(bool(prefs.get("bold_text")))
 
 
 # --- Widget factories -------------------------------------------------------
@@ -147,7 +271,10 @@ def auto_wrap(widget, container, padding: int = 40) -> None:
         try:
             if not widget.winfo_exists():
                 return
-            width = max(200, event.width - padding)
+            # event.width is in screen pixels, but CustomTkinter multiplies wraplength by the
+            # text-size scaling, so convert back or large text runs off the edge
+            scaling = ctk.ScalingTracker.get_widget_scaling(widget)
+            width = max(200, int((event.width - padding) / scaling))
             if abs(widget.cget("wraplength") - width) > 8:
                 widget.configure(wraplength=width)
         except (tk.TclError, AttributeError):

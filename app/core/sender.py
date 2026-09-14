@@ -24,7 +24,7 @@ from datetime import date, datetime, time as dtime, timedelta
 from enum import Enum
 
 from app import config
-from app.core import composer, db, merge, tls, warmup
+from app.core import composer, db, merge, prefs, tls, warmup
 
 
 class State(str, Enum):
@@ -387,7 +387,7 @@ class SendWorker(threading.Thread):
             open_now, reason = in_send_window(self.plan)
             if not open_now:
                 resume_at = next_window_open(self.plan)
-                self._log(f"{reason}. Waiting until {resume_at:%a %d %b %H:%M}.", "warn")
+                self._log(f"{reason}. Waiting until {resume_at:%A} {prefs.format_datetime(resume_at)}.", "warn")
                 self._set_state(State.WAITING)
                 wait_seconds = max(30, (resume_at - datetime.now()).total_seconds())
                 if not self._sleep_interruptible(wait_seconds, countdown=False):

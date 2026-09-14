@@ -7,7 +7,7 @@ from datetime import datetime
 import customtkinter as ctk
 
 from app import theme
-from app.core import composer, credentials, db, importer, scorer, sender, warmup
+from app.core import composer, credentials, db, importer, prefs, scorer, sender, warmup
 from app.ui.widgets.common import ConfirmDialog, Section, StatTile, toast
 from app.ui.widgets.range_slider import format_seconds
 
@@ -159,7 +159,7 @@ class SendPage(ctk.CTkFrame):
 
     # --- console ------------------------------------------------------------
     def _log(self, message: str, level: str = "info") -> None:
-        stamp = datetime.now().strftime("%H:%M:%S")
+        stamp = prefs.format_time(datetime.now(), seconds=True)
         self.console.configure(state="normal")
         self.console._textbox.insert("end", f"{stamp}  {message}\n", level)
         self.console.configure(state="disabled")
@@ -241,7 +241,7 @@ class SendPage(ctk.CTkFrame):
         else:
             campaign_id = db.execute(
                 "INSERT INTO campaigns(name, status, created_at) VALUES (?, 'draft', ?)",
-                (f"Campaign {datetime.now():%d %b %Y}", db.now()))
+                (f"Campaign {prefs.format_date(datetime.now())}", db.now()))
 
         # Add any contacts that are not in the campaign yet
         db.execute(

@@ -5,8 +5,9 @@ from pathlib import Path
 
 APP_NAME = "HomingPigeon"
 APP_TITLE = "HomingPigeon"
-APP_VERSION = "v0.2.1 beta"
+APP_VERSION = "v0.3.0 beta"
 APP_TAGLINE = "Safe, simple email for your business"
+REPO_URL = "https://github.com/4bdulllahh/HomingPigeon"
 
 
 def _app_data_dir() -> Path:

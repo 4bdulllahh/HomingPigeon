@@ -10,7 +10,8 @@ import customtkinter as ctk
 
 from app import theme
 from app.core import composer, db, importer, merge, scorer
-from app.ui.widgets.common import (Section, copy_to_clipboard, get_text, set_text, toast)
+from app.ui.widgets.common import (Section, TabView, copy_to_clipboard, get_text, set_text,
+                                   toast)
 
 # Examples are never filled in automatically — the app starts blank and these are
 # only inserted when the user presses "Show me an example".
@@ -130,12 +131,7 @@ class TemplatesPage(ctk.CTkFrame):
                     "each recipient, so hundreds of identical messages never go out — that is what "
                     "spam filters fingerprint.", muted=True, wrap=True).pack(anchor="w", pady=(2, 10))
 
-        self.tabs = ctk.CTkTabview(
-            self, fg_color=theme.BG_PANEL, segmented_button_fg_color=theme.BG_SIDEBAR,
-            segmented_button_selected_color=theme.ACCENT,
-            segmented_button_selected_hover_color=theme.ACCENT_HOVER,
-            segmented_button_unselected_color=theme.BG_SIDEBAR, text_color=theme.FG,
-            border_width=1, border_color=theme.BORDER, corner_radius=theme.RADIUS_CARD)
+        self.tabs = TabView(self)
         self.tabs.pack(fill="both", expand=True, padx=theme.PAD_LARGE, pady=(0, theme.PAD))
         for name in ("Subjects", "Body", "Signature", 'Preview & score'):
             self.tabs.add(name)

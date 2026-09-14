@@ -45,7 +45,7 @@ def main() -> int:
     db.init()
 
     ctk.set_default_color_theme("blue")
-    theme.apply_appearance(db.get_setting("appearance", "Dark"))
+    theme.apply_preferences()  # theme, text size, contrast and bold text from Settings
 
     from app.ui.shell import AppShell
 

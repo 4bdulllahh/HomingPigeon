@@ -7,8 +7,8 @@ import customtkinter as ctk
 
 from app import theme
 from app.core import db, dns_tools
-from app.ui.widgets.common import (FormRow, Section, StatusRow, copy_to_clipboard, get_text,
-                                   open_url, set_text, toast)
+from app.ui.widgets.common import (FormRow, Section, StatusRow, TabView, copy_to_clipboard,
+                                   get_text, open_url, set_text, toast)
 
 
 class DeliverabilityPage(ctk.CTkFrame):
@@ -27,13 +27,7 @@ class DeliverabilityPage(ctk.CTkFrame):
                     "Without them, bulk email is filtered as spam no matter how good the content is.",
                     muted=True, wrap=True).pack(anchor="w", pady=(2, 10))
 
-        self.tabs = ctk.CTkTabview(
-            self, fg_color=theme.BG_PANEL, segmented_button_fg_color=theme.BG_SIDEBAR,
-            segmented_button_selected_color=theme.ACCENT,
-            segmented_button_selected_hover_color=theme.ACCENT_HOVER,
-            segmented_button_unselected_color=theme.BG_SIDEBAR,
-            text_color=theme.FG, border_width=1, border_color=theme.BORDER,
-            corner_radius=theme.RADIUS_CARD)
+        self.tabs = TabView(self)
         self.tabs.pack(fill="both", expand=True, padx=theme.PAD_LARGE, pady=(0, theme.PAD))
 
         for name in ("Check my domain", "SPF generator", "DMARC generator", "DKIM setup"):
