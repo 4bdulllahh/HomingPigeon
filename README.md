@@ -1,6 +1,10 @@
-# 🕊 HomingPigeon
+<p align="center">
+  <img src="assets/logo-256.png" width="160" alt="HomingPigeon logo: a pigeon in a flight cap and goggles, carrying a backpack of letters">
+</p>
 
-**Safe, simple email for your business.**
+<h1 align="center">HomingPigeon</h1>
+
+<p align="center"><b>Safe, simple email for your business.</b></p>
 
 Send outreach email to your contact list without landing in the spam folder or getting your
 company domain blacklisted.
@@ -9,88 +13,79 @@ HomingPigeon does the things that normally go wrong: it checks that your domain 
 correctly, cleans your contact list before you send, makes every message slightly different,
 sends at a human pace, and quietly removes addresses that bounce.
 
-Works on **Windows, Mac and Linux**.
-
-> **Free while in beta (v0.1).** Please report anything confusing or broken.
+> **Free while in beta (v0.2).** Please report anything confusing or broken.
 
 ---
 
-## Getting started (no technical knowledge needed)
+## Install on Windows
 
-You do not need to type any commands.
+You don't need to know anything about coding.
 
-### 1. Download the app
+1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.2.zip`**.
+2. Right-click the downloaded file → **Extract All…** → **Extract**.
+3. In the folder that opens, double-click **`HomingPigeon Setup.exe`**.
+4. Click **Install**. Setup shows you every step while it works: it downloads what the app needs
+   (about 80 MB), checks the download is genuine and sets everything up. About 2–5 minutes.
+5. At the end, choose whether to add HomingPigeon to the **Start menu** and the **Desktop**, and
+   whether to **open it now**. Click **Finish**.
 
-1. Near the top of this page, click the green **Code** button, then **Download ZIP**.
-2. Find the downloaded ZIP file (usually in your **Downloads** folder).
-3. **Unzip it** — this step matters, the app will not start from inside the ZIP:
-   - **Windows:** right-click the ZIP → **Extract All…** → **Extract**.
-   - **Mac:** double-click the ZIP.
-   - **Linux:** right-click the ZIP → **Extract Here**.
-4. Move the unzipped folder somewhere you will find it again, such as **Documents**.
+No administrator password is needed, and nothing else on your computer is changed.
 
-### 2. Double-click the Start file for your computer
+**If Windows shows a warning:**
 
-Open the folder. Inside it, double-click the one file that matches your computer:
+- **"Windows protected your PC"** — click **More info**, then **Run anyway**.
+- **"Part of this app has been blocked"** (Smart App Control, on some Windows 11 PCs) — close the
+  message and double-click **`Install HomingPigeon (if Setup is blocked).bat`** in the same
+  folder instead. It downloads Python from python.org using Windows' own tools, checks it, and
+  opens exactly the same Setup window.
+
+**Updating:** download the newest release and run its Setup. Your contacts, templates and settings
+are kept.
+
+**Removing:** Settings → Apps → Installed apps → HomingPigeon → Uninstall. Your information is
+kept unless you tick the box to delete it too.
+
+---
+
+## Install on Mac or Linux
+
+1. On the **[Releases](../../releases/latest)** page, download **Source code (zip)** and unzip it.
+2. Open the folder and double-click the Start file for your computer:
 
 | Your computer | Double-click this file |
 |---|---|
-| **Windows** | **`Start HomingPigeon - Windows.bat`** |
 | **Mac** | **`Start HomingPigeon - Mac.command`** |
 | **Linux** | **`Start HomingPigeon - Linux.sh`** |
 
-> On Windows the `.bat` ending may be hidden, so the file can just show as
-> **Start HomingPigeon - Windows**.
+The first time, a window opens and gets everything ready (about 2–5 minutes). **Keep it open**
+and stay connected to the internet; the app opens by itself when it's done. If your computer
+doesn't have Python yet, the window offers to install it (Mac) or shows the one command that
+installs it (Linux). From then on, the Start file opens the app straight away.
 
-### 3. The first time only
+**If your computer shows a warning:**
 
-The first time, a small window opens and gets everything ready. **Keep it open** and stay
-connected to the internet. It takes about **2–5 minutes**, then the app opens by itself.
-
-- **If your computer doesn't have Python** (a free program the app is built with), the window
-  offers to install it for you:
-  - **Windows:** press **Y**. It installs by itself.
-  - **Mac:** press **Return**. The Python installer opens — click **Continue** and **Install**
-    (your Mac may ask for your password). Setup carries on when the installer closes.
-  - **Linux:** the window shows the one command to install it.
-- **From then on**, double-clicking the Start file opens the app straight away.
-
-### If your computer shows a warning
-
-Your computer warns about any new file downloaded from the internet. This is normal.
-
-- **Windows — "Windows protected your PC":** click **More info**, then **Run anyway**.
-- **Mac — "cannot be opened" or "Apple could not verify…":** click **Done** (or **OK**), open
+- **Mac — "cannot be opened" or "Apple could not verify…":** click **Done**, open
   **System Settings → Privacy & Security**, scroll down and click **Open Anyway** next to the
-  message about the Start file. On older Macs you can instead **right-click** the file and
-  choose **Open**. You only need to do this once.
-- **Linux — the file opens in a text editor instead of running:** right-click it →
-  **Properties** → **Permissions** → tick **Allow executing file as program**, then
-  double-click it again (choose **Run** if asked).
+  message about the Start file. On older Macs, **right-click** the file and choose **Open**.
+- **Linux — the file opens in a text editor:** right-click it → **Properties** → **Permissions**
+  → tick **Allow executing file as program**, then double-click it again.
 
-### Using the app
+---
 
-The very first time it opens, everything is empty. Go to the **Setup guide** page inside the app
+## Using the app
+
+The very first time it opens, everything is empty. Go to the **Start here** page inside the app
 and follow it from the top — it walks you through every step and ticks them off as you go.
 
 **Everything you type is saved automatically.** Close the app and open it again, and your email
 settings, templates and contacts are all still there. You only set it up once.
 
-**Windows tip:** on the **Setup guide** page, click **"Put an icon on my Desktop"**, and from
-then on just double-click that icon.
-
-### Updating to a new version
-
-Download the new ZIP, unzip it, and use its Start file. You can delete the old folder.
-**Your settings, contacts and templates are kept** — they are stored separately from the app
-(see below). If the new version needs anything extra, the Start file fetches it by itself.
-
 ---
 
 ## Where your information is kept
 
-Your settings, contacts and templates live in a folder separate from the app, so replacing or
-deleting the app folder **never touches your data**:
+Your settings, contacts and templates live in a folder separate from the app, so updating or
+removing the app **never touches your data**:
 
 | Computer | Folder |
 |---|---|
@@ -101,9 +96,9 @@ deleting the app folder **never touches your data**:
 Your email password is stored encrypted. On Windows it uses Windows' own protection (DPAPI), so
 it can only be read by your Windows account on your computer. It is never sent anywhere.
 
-The parts the app needs to run (downloaded by the Start file) are kept in a separate private
-folder — `AppData\Local\HomingPigeon\runtime` on Windows — so they never interfere with any other
-program on your computer.
+The program itself has its own folder with a private copy of Python that only HomingPigeon uses,
+so it never interferes with other programs (on Windows:
+`C:\Users\<your name>\AppData\Local\Programs\HomingPigeon`).
 
 ---
 
@@ -126,10 +121,10 @@ program on your computer.
 
 ## Frequently asked
 
-**Nothing happens / the window closes straight away.**
-Make sure you unzipped the download first (step 1.3) and are double-clicking the Start file
-inside the unzipped folder. If setup stopped part-way (for example the internet dropped),
-double-click the Start file again — it picks up where it left off.
+**Setup stopped part-way.**
+Nothing is broken. Check your internet connection and click **Try again** (or run Setup again) —
+it keeps what was already done and picks up where it left off. The **Open log file** button shows
+exactly what happened.
 
 **Do I need a website or a company domain?**
 You need an email address on your own domain (like `you@yourcompany.com`). Sending business
@@ -159,20 +154,23 @@ public DNS (to check your domain settings).
 ## For developers
 
 ```
-Start HomingPigeon - *  double-click launchers (find/install Python, then run tools/launch.py)
-tools/launch.py         creates the private runtime, installs requirements.txt, starts run.py
-run.py                  app entry point
-app/config.py           app name, paths, limits
-app/theme.py            colours, fonts, widget factories
-app/core/               engine: db, importer, merge, composer, sender, scorer, warmup,
-                        imap_sync, dns_tools, exporter, credentials, shortcut, tls
-app/ui/                 shell + one module per page
-tools/build_exe.py      PyInstaller build (single Windows .exe)
-tests/                  pytest suite
+run.py                     app entry point
+app/config.py              app name, version, paths, limits
+app/theme.py               colours, fonts, widget factories
+app/core/                  engine: db, importer, merge, composer, sender, scorer, warmup,
+                           imap_sync, dns_tools, exporter, credentials, shortcut, tls
+app/ui/                    shell + one module per page
+assets/                    logo.svg and the icons rendered from it
+installer/setup_app.py     the Windows installer (becomes "HomingPigeon Setup.exe")
+installer/install-if-blocked.bat   backup installer for Smart App Control PCs
+tools/build_installer.py   builds Setup.exe and the release zip
+tools/make_icons.py        re-renders assets/ after changing logo.svg
+tools/launch.py            used by the Mac/Linux/Windows "Start HomingPigeon" files
+tests/                     pytest suite
 ```
 
-`requirements.txt` is what the app needs to run (the Start files install it).
-`requirements-dev.txt` adds the build and test tools:
+`requirements.txt` is what the app needs to run. `requirements-dev.txt` adds the build and test
+tools:
 
 ```
 pip install -r requirements-dev.txt
@@ -189,15 +187,16 @@ python -m aiosmtpd -n -l localhost:1025
 
 Then in the app set the server to `localhost`, port `1025`, security **None (testing only)**.
 
-### Building a single Windows .exe
+### Making a release
 
-```
-python tools/build_exe.py
-```
+1. Change `APP_VERSION` in `app/config.py` (for example to `"v0.3 beta"`), commit and push.
+2. On GitHub: **Releases → Draft a new release**. Under **Choose a tag**, type the version
+   (`v0.3.0`) and pick **Create new tag on publish**. Give it a title and notes, then **Publish**.
+3. GitHub Actions builds `HomingPigeon-v0.3.zip` and attaches it to the release by itself
+   (about 5 minutes — watch progress in the **Actions** tab).
 
-This produces **`dist\HomingPigeon.exe`** — one file that runs on any Windows PC with no Python
-installed. Pushing a tag like `v0.1.0` makes GitHub Actions build it and attach it to the
-repository's **Releases** page.
+To build it on your own PC instead: `python tools/build_installer.py`, then drag
+`dist\HomingPigeon-v0.3.zip` into the release's **Attach binaries** box.
 
 ## A note on DKIM
 
