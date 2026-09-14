@@ -1,7 +1,11 @@
 """Application shell: sidebar navigation, page router, status bar."""
 from __future__ import annotations
 
+import sys
+import tkinter as tk
+
 import customtkinter as ctk
+from PIL import Image
 
 from app import config, theme
 from app.core import db, warmup
@@ -76,6 +80,7 @@ class AppShell(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title(f"{config.APP_TITLE} {config.APP_VERSION} — {config.APP_TAGLINE}")
+        self._set_window_icon()
         self.geometry("1180x780")
         self.minsize(1000, 660)
         self.configure(fg_color=theme.BG)
@@ -92,6 +97,17 @@ class AppShell(ctk.CTk):
         self.show("dashboard")
         self.after(1000, self._refresh_status)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _set_window_icon(self) -> None:
+        """The pigeon in the title bar and taskbar (must run before CustomTkinter sets its own)."""
+        try:
+            if sys.platform == "win32":
+                self.iconbitmap(str(config.resource_path("assets/icon.ico")))
+            else:
+                self._icon_photo = tk.PhotoImage(file=str(config.resource_path("assets/logo-256.png")))
+                self.iconphoto(True, self._icon_photo)
+        except (tk.TclError, OSError):
+            pass
 
     # -- layout --------------------------------------------------------------
     def _build_layout(self) -> None:
@@ -114,8 +130,13 @@ class AppShell(ctk.CTk):
 
         title_row = ctk.CTkFrame(header, fg_color="transparent")
         title_row.pack(fill="x", padx=18)
-        ctk.CTkLabel(title_row, text="🕊", font=theme.font(20),
-                     text_color=theme.ACCENT).pack(side="left", padx=(0, 8))
+        try:
+            logo = Image.open(config.resource_path("assets/logo-96.png"))
+            self._logo = ctk.CTkImage(light_image=logo, dark_image=logo, size=(40, 40))
+            ctk.CTkLabel(title_row, text="", image=self._logo).pack(side="left", padx=(0, 8))
+        except OSError:
+            ctk.CTkLabel(title_row, text="🕊", font=theme.font(20),
+                         text_color=theme.ACCENT).pack(side="left", padx=(0, 8))
         ctk.CTkLabel(title_row, text=config.APP_TITLE, font=theme.font(18, "bold"),
                      text_color=theme.FG_BRIGHT, anchor="w").pack(side="left")
 

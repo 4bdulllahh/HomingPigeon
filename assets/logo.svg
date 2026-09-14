@@ -1,0 +1,124 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8f80b8"/>
+      <stop offset="1" stop-color="#5e4f8a"/>
+    </linearGradient>
+    <linearGradient id="head" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5b4d85"/>
+      <stop offset="1" stop-color="#3f3466"/>
+    </linearGradient>
+    <linearGradient id="wing" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6d5d9e"/>
+      <stop offset="1" stop-color="#43386e"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4fb3a0"/>
+      <stop offset="0.55" stop-color="#6f6ab8"/>
+      <stop offset="1" stop-color="#9a5fb0"/>
+    </linearGradient>
+    <linearGradient id="leather" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9c6440"/>
+      <stop offset="1" stop-color="#6e4028"/>
+    </linearGradient>
+    <linearGradient id="pack" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8a5234"/>
+      <stop offset="1" stop-color="#5c3420"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fbeee0"/>
+      <stop offset="1" stop-color="#e9c9b6"/>
+    </linearGradient>
+    <linearGradient id="scarf" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fbf3e4"/>
+      <stop offset="1" stop-color="#e6d3b8"/>
+    </linearGradient>
+    <radialGradient id="lens" cx="0.4" cy="0.35" r="0.75">
+      <stop offset="0" stop-color="#ff8a6e"/>
+      <stop offset="0.55" stop-color="#d9412f"/>
+      <stop offset="1" stop-color="#8e1f1a"/>
+    </radialGradient>
+    <radialGradient id="iris" cx="0.5" cy="0.6" r="0.6">
+      <stop offset="0" stop-color="#ffd166"/>
+      <stop offset="1" stop-color="#f08a12"/>
+    </radialGradient>
+  </defs>
+
+  <g stroke="#261d3a" stroke-width="7" stroke-linejoin="round" stroke-linecap="round">
+    <!-- rolled letters poking out of the backpack -->
+    <g transform="rotate(-14 256 300)">
+      <rect x="58" y="262" width="396" height="62" rx="31" fill="url(#paper)"/>
+      <ellipse cx="423" cy="293" rx="24" ry="31" fill="#fbeee0"/>
+      <path d="M423 293 m-4 0 a4 5 0 1 1 8 0 a9 11 0 1 1 -17 0 a14 17 0 1 1 27 0" fill="none" stroke-width="5"/>
+    </g>
+
+    <!-- backpack -->
+    <path d="M92 332 Q88 270 150 262 L362 262 Q424 270 420 332 L408 500 L104 500 Z" fill="url(#pack)"/>
+    <path d="M104 300 Q256 282 408 300" fill="none" stroke="#4a2918" stroke-width="5" stroke-dasharray="3 10"/>
+
+    <!-- body -->
+    <path d="M256 288 C334 288 390 338 396 420 C400 472 378 508 378 508 L134 508 C134 508 112 472 116 420 C122 338 178 288 256 288 Z" fill="url(#body)"/>
+    <ellipse cx="256" cy="440" rx="82" ry="62" fill="#a79dc6" stroke="none" opacity="0.55"/>
+
+    <!-- folded wings -->
+    <path d="M120 360 C92 410 100 470 140 506 L196 506 C172 460 160 410 168 350 Z" fill="url(#wing)"/>
+    <path d="M392 360 C420 410 412 470 372 506 L316 506 C340 460 352 410 344 350 Z" fill="url(#wing)"/>
+    <path d="M138 430 Q150 460 170 480 M372 430 Q362 460 342 480" fill="none" stroke-width="5"/>
+
+    <!-- backpack straps -->
+    <path d="M168 318 C176 380 196 440 206 506" fill="none" stroke="#261d3a" stroke-width="30"/>
+    <path d="M168 318 C176 380 196 440 206 506" fill="none" stroke="#7a4830" stroke-width="18"/>
+    <path d="M344 318 C336 380 316 440 306 506" fill="none" stroke="#261d3a" stroke-width="30"/>
+    <path d="M344 318 C336 380 316 440 306 506" fill="none" stroke="#7a4830" stroke-width="18"/>
+    <rect x="176" y="398" width="30" height="24" rx="5" fill="#e0b252" stroke-width="5"/>
+    <rect x="306" y="398" width="30" height="24" rx="5" fill="#e0b252" stroke-width="5"/>
+
+    <!-- iridescent neck -->
+    <path d="M178 270 Q256 330 334 270 L340 318 Q256 356 172 318 Z" fill="url(#sheen)"/>
+
+    <!-- head -->
+    <ellipse cx="256" cy="214" rx="108" ry="102" fill="url(#head)"/>
+
+    <!-- scarf -->
+    <path d="M160 292 Q256 344 352 292 Q366 314 356 336 Q256 386 156 336 Q146 314 160 292 Z" fill="url(#scarf)"/>
+    <path d="M300 340 Q326 346 344 338 L352 420 Q336 434 318 424 Z" fill="url(#scarf)"/>
+    <path d="M206 330 Q214 346 212 356 M252 342 Q258 356 256 368" fill="none" stroke-width="4" stroke="#c9ae8c"/>
+
+    <!-- aviator cap ear flaps -->
+    <path d="M162 196 C146 230 146 272 164 292 Q180 302 188 286 L184 212 Z" fill="url(#leather)"/>
+    <path d="M350 196 C366 230 366 272 348 292 Q332 302 324 286 L328 212 Z" fill="url(#leather)"/>
+
+    <!-- aviator cap -->
+    <path d="M148 212 C144 136 196 96 256 96 C316 96 368 136 364 212 C330 190 182 190 148 212 Z" fill="url(#leather)"/>
+    <path d="M256 98 L256 190" fill="none" stroke="#4b2a1a" stroke-width="4" stroke-dasharray="2 9"/>
+    <path d="M190 118 Q236 104 244 108" fill="none" stroke="#c38a62" stroke-width="6"/>
+
+    <!-- goggles strap and goggles -->
+    <path d="M150 176 Q256 150 362 176" fill="none" stroke="#261d3a" stroke-width="24"/>
+    <path d="M150 176 Q256 150 362 176" fill="none" stroke="#3d2c26" stroke-width="12"/>
+    <rect x="238" y="148" width="36" height="16" rx="6" fill="#6b5a52"/>
+    <circle cx="206" cy="156" r="40" fill="#5a4a44"/>
+    <circle cx="306" cy="156" r="40" fill="#5a4a44"/>
+    <circle cx="206" cy="156" r="27" fill="url(#lens)" stroke-width="5"/>
+    <circle cx="306" cy="156" r="27" fill="url(#lens)" stroke-width="5"/>
+    <path d="M192 146 Q198 136 210 136" fill="none" stroke="#ffe3d6" stroke-width="6"/>
+    <path d="M292 146 Q298 136 310 136" fill="none" stroke="#ffe3d6" stroke-width="6"/>
+
+    <!-- eyes (a little heavy-lidded: calm and confident) -->
+    <circle cx="212" cy="236" r="24" fill="url(#iris)"/>
+    <circle cx="300" cy="236" r="24" fill="url(#iris)"/>
+    <circle cx="216" cy="241" r="10" fill="#1a1426" stroke="none"/>
+    <circle cx="296" cy="241" r="10" fill="#1a1426" stroke="none"/>
+    <circle cx="221" cy="236" r="4" fill="#ffffff" stroke="none"/>
+    <circle cx="301" cy="236" r="4" fill="#ffffff" stroke="none"/>
+    <path d="M186 232 Q212 208 238 230 L238 214 L186 214 Z" fill="#4a3d75" stroke="none"/>
+    <path d="M274 230 Q300 208 326 232 L326 214 L274 214 Z" fill="#4a3d75" stroke="none"/>
+    <path d="M186 232 Q212 214 238 230" fill="none" stroke-width="6"/>
+    <path d="M274 230 Q300 214 326 232" fill="none" stroke-width="6"/>
+
+    <!-- beak -->
+    <path d="M234 258 Q256 244 278 258 L265 312 Q256 324 247 312 Z" fill="#3a3150"/>
+    <path d="M252 300 Q256 306 260 300" fill="none" stroke="#6a5f86" stroke-width="3"/>
+    <ellipse cx="256" cy="258" rx="19" ry="10" fill="#ece6f2" stroke-width="5"/>
+  </g>
+</svg>
