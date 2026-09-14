@@ -24,26 +24,23 @@ def is_installed() -> bool:
 
 
 def start_file() -> Path:
-    """The double-click "Start HomingPigeon" file for this operating system."""
-    if sys.platform == "win32":
-        name = "Start HomingPigeon - Windows.bat"
-    elif sys.platform == "darwin":
-        name = "Start HomingPigeon - Mac.command"
-    else:
-        name = "Start HomingPigeon - Linux.sh"
+    """The double-click "Start HomingPigeon" file for Mac or Linux (Windows uses Setup)."""
+    name = "Start HomingPigeon - Mac.command" if sys.platform == "darwin" else "Start HomingPigeon - Linux.sh"
     return app_location() / name
 
 
 def launch_target() -> tuple[str, str, str]:
     """(program, arguments, icon) that will start the app again."""
     icon = app_location() / "assets" / "icon.ico"
+    run_script = app_location() / "run.py"
     if is_installed():
         pythonw = app_location() / "python" / "pythonw.exe"
-        return str(pythonw), f'-E -s "{app_location() / "run.py"}"', str(icon)
+        return str(pythonw), f'-E -s "{run_script}"', str(icon)
 
-    # Running from the source folder: point at the Start file rather than at Python
-    # directly, because it repairs the setup by itself if anything goes missing.
-    return str(start_file()), "", str(icon)
+    # Running from the source folder on Windows (developers): use the current Python.
+    # pythonw.exe runs without leaving a black console window open behind the app.
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    return str(pythonw if pythonw.exists() else sys.executable), f'"{run_script}"', str(icon)
 
 
 def how_to_launch() -> str:
@@ -54,14 +51,17 @@ def how_to_launch() -> str:
             "or from its Desktop icon.\n\n"
             "No icon on your Desktop? Press the button below to add one."
         )
-    text = (
+    if sys.platform == "win32":
+        return (
+            f"You are running HomingPigeon from its source folder:\n{app_location()}\n\n"
+            f"Press the button below to put an icon on your Desktop, then just double-click "
+            f"that icon from now on. (Most people install with HomingPigeon Setup from the "
+            f"GitHub Releases page instead, which adds a Start menu entry too.)"
+        )
+    return (
         f"HomingPigeon lives in this folder:\n{app_location()}\n\n"
         f"To open it again, double-click  {start_file().name}  in that folder."
     )
-    if sys.platform == "win32":
-        text += ("\n\nEasier: press the button below to put an icon on your Desktop, then just "
-                 "double-click that icon from now on.")
-    return text
 
 
 def desktop_dir() -> Path:
@@ -97,7 +97,7 @@ def create_desktop_shortcut() -> tuple[bool, str]:
         f"$s.WorkingDirectory = '{ps_quote(working_dir)}'; "
         f"$s.Description = '{ps_quote(config.APP_TITLE)}'; "
         f"$s.IconLocation = '{ps_quote(icon)},0'; "
-        f"$s.WindowStyle = {1 if is_installed() else 7}; "  # 7 = minimised, hides the Start file's window
+        "$s.WindowStyle = 1; "
         "$s.Save()"
     )
 

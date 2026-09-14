@@ -72,7 +72,7 @@ def main() -> int:
                            ((side - (right - left)) // 2, (side - (bottom - top)) // 2))
     image = square
 
-    for size in (256, 192, 160, 128, 96, 64):
+    for size in (256, 192, 160, 128, 96):
         image.resize((size, size), Image.LANCZOS).save(ASSETS / f"logo-{size}.png")
     image.save(ASSETS / "icon.ico",
                sizes=[(16, 16), (20, 20), (24, 24), (32, 32), (40, 40), (48, 48),

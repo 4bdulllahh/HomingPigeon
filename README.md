@@ -13,7 +13,7 @@ HomingPigeon does the things that normally go wrong: it checks that your domain 
 correctly, cleans your contact list before you send, makes every message slightly different,
 sends at a human pace, and quietly removes addresses that bounce.
 
-> **Free while in beta (v0.2).** Please report anything confusing or broken.
+> **Free while in beta (v0.2.1).** Please report anything confusing or broken.
 
 ---
 
@@ -21,7 +21,7 @@ sends at a human pace, and quietly removes addresses that bounce.
 
 You don't need to know anything about coding.
 
-1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.2.zip`**.
+1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.2.1.zip`**.
 2. Right-click the downloaded file → **Extract All…** → **Extract**.
 3. In the folder that opens, double-click **`HomingPigeon Setup.exe`**.
 4. Click **Install**. Setup shows you every step while it works: it downloads what the app needs
@@ -165,7 +165,7 @@ installer/setup_app.py     the Windows installer (becomes "HomingPigeon Setup.ex
 installer/install-if-blocked.bat   backup installer for Smart App Control PCs
 tools/build_installer.py   builds Setup.exe and the release zip
 tools/make_icons.py        re-renders assets/ after changing logo.svg
-tools/launch.py            used by the Mac/Linux/Windows "Start HomingPigeon" files
+tools/launch.py            used by the Mac and Linux "Start HomingPigeon" files
 tests/                     pytest suite
 ```
 
