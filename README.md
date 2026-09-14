@@ -13,7 +13,7 @@ HomingPigeon does the things that normally go wrong: it checks that your domain 
 correctly, cleans your contact list before you send, makes every message slightly different,
 sends at a human pace, and quietly removes addresses that bounce.
 
-> **Free while in beta (v0.2.1).** Please report anything confusing or broken.
+> **Free while in beta (v0.3.0).** Please report anything confusing or broken.
 
 ---
 
@@ -21,7 +21,7 @@ sends at a human pace, and quietly removes addresses that bounce.
 
 You don't need to know anything about coding.
 
-1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.2.1.zip`**.
+1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.3.0.zip`**.
 2. Right-click the downloaded file → **Extract All…** → **Extract**.
 3. In the folder that opens, double-click **`HomingPigeon Setup.exe`**.
 4. Click **Install**. Setup shows you every step while it works: it downloads what the app needs
@@ -189,14 +189,14 @@ Then in the app set the server to `localhost`, port `1025`, security **None (tes
 
 ### Making a release
 
-1. Change `APP_VERSION` in `app/config.py` (for example to `"v0.3 beta"`), commit and push.
+1. Change `APP_VERSION` in `app/config.py` (for example to `"v0.4.0 beta"`), commit and push.
 2. On GitHub: **Releases → Draft a new release**. Under **Choose a tag**, type the version
-   (`v0.3.0`) and pick **Create new tag on publish**. Give it a title and notes, then **Publish**.
-3. GitHub Actions builds `HomingPigeon-v0.3.zip` and attaches it to the release by itself
+   (`v0.4.0`) and pick **Create new tag on publish**. Give it a title and notes, then **Publish**.
+3. GitHub Actions builds `HomingPigeon-v0.4.0.zip` and attaches it to the release by itself
    (about 5 minutes — watch progress in the **Actions** tab).
 
 To build it on your own PC instead: `python tools/build_installer.py`, then drag
-`dist\HomingPigeon-v0.3.zip` into the release's **Attach binaries** box.
+`dist\HomingPigeon-v0.4.0.zip` into the release's **Attach binaries** box.
 
 ## A note on DKIM
 
