@@ -90,8 +90,8 @@ def test_unresolved_tags_reported():
 def test_extra_columns_become_tags():
     context = merge.build_context({
         "email": "a@b.com", "person": "Ahmed", "company": "Acme",
-        "extra_json": '{"City": "Dubai"}'})
-    assert context["City"] == "Dubai"
+        "extra_json": '{"City": "Lisbon"}'})
+    assert context["City"] == "Lisbon"
 
 
 def test_variant_cycler_avoids_immediate_repeats():
@@ -145,7 +145,7 @@ def test_import_deduplicates_and_keeps_extras():
         "EMAIL": ["dup@example.com", "DUP@example.com", "other@example.com"],
         "NAME OF THE COMPANY": ["Acme", "Acme", "Beta"],
         "CONTACT PERSON": ["Ahmed", "Ahmed", "Sara"],
-        "City": ["Dubai", "Dubai", "Sharjah"],
+        "City": ["Lisbon", "Lisbon", "Porto"],
     })
     mapping = importer.detect_columns(df)
     result = importer.import_dataframe(df, mapping, source_file="t.xlsx", check_mx=False)
@@ -165,11 +165,11 @@ def test_suppressed_addresses_are_not_imported():
 # --- composer ---------------------------------------------------------------
 def _content(**overrides) -> composer.Content:
     base = dict(
-        subject_variants=["Uniforms for {{Company}}"],
-        body_variants=["<p>Hi {{FirstName}},</p><p>We manufacture uniforms in the UAE and would "
+        subject_variants=["Office furniture for {{Company}}"],
+        body_variants=["<p>Hi {{FirstName}},</p><p>We make office furniture and would "
                        "like to discuss your team's requirements at {{Company}}. We handle design, "
-                       "fabric selection, bulk production and local delivery across the Emirates.</p>"],
-        signature_html="<p>Abdullah<br>+971 50 000 0000</p>",
+                       "material selection, bulk production and local delivery across the region.</p>"],
+        signature_html="<p>Sam Taylor<br>+1 555 010 0000</p>",
         attach_mode="link", link_url="https://example.com/b.pdf",
     )
     base.update(overrides)
@@ -177,21 +177,21 @@ def _content(**overrides) -> composer.Content:
 
 
 def test_message_is_multipart_with_text_and_html():
-    identity = composer.SenderIdentity("Abdullah", "a@uniformers.ae", "a@uniformers.ae")
+    identity = composer.SenderIdentity("Sam Taylor", "sam@example.com", "sam@example.com")
     context = merge.build_context({"email": "x@y.com", "person": "Ahmed", "company": "Acme"})
     message, subject, _ = composer.build_message(identity, "x@y.com", context, _content())
 
     types = [p.get_content_type() for p in message.walk()]
     assert "text/plain" in types and "text/html" in types
-    assert subject == "Uniforms for Acme"
+    assert subject == "Office furniture for Acme"
     assert message["List-Unsubscribe"].startswith("<mailto:")
     assert message["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
     assert "X-Mailer" not in message
-    assert "@uniformers.ae>" in message["Message-ID"]
+    assert "@example.com>" in message["Message-ID"]
 
 
 def test_no_literal_merge_tags_survive():
-    identity = composer.SenderIdentity("A", "a@uniformers.ae")
+    identity = composer.SenderIdentity("A", "sam@example.com")
     context = merge.build_context({"email": "x@y.com", "person": "Ahmed", "company": "Acme"})
     message, subject, _ = composer.build_message(identity, "x@y.com", context, _content())
     body = message.get_body(preferencelist=("html",)).get_content()
@@ -216,7 +216,7 @@ def test_html_to_text_keeps_links_and_lists():
 
 
 def test_brochure_link_appears_in_body():
-    identity = composer.SenderIdentity("A", "a@uniformers.ae")
+    identity = composer.SenderIdentity("A", "sam@example.com")
     context = merge.build_context({"email": "x@y.com", "person": "A", "company": "B"})
     message, _, _ = composer.build_message(identity, "x@y.com", context, _content())
     html = message.get_body(preferencelist=("html",)).get_content()
@@ -225,8 +225,8 @@ def test_brochure_link_appears_in_body():
 
 # --- scorer -----------------------------------------------------------------
 def test_clean_content_scores_well():
-    report = scorer.score(_content(), sender_email="a@uniformers.ae",
-                          reply_to="a@uniformers.ae")
+    report = scorer.score(_content(), sender_email="sam@example.com",
+                          reply_to="sam@example.com")
     assert report.score >= 70, [f.message for f in report.findings]
 
 
@@ -242,25 +242,25 @@ def test_spammy_content_scores_badly():
 
 
 def test_scorer_flags_unresolved_tags_as_critical():
-    broken = _content(body_variants=["<p>Hi {{Compny}}, we make uniforms for your team and would "
+    broken = _content(body_variants=["<p>Hi {{Compny}}, we make office furniture for your team and would "
                                      "welcome a conversation about your requirements this year.</p>"])
-    report = scorer.score(broken, sender_email="a@uniformers.ae")
+    report = scorer.score(broken, sender_email="sam@example.com")
     assert any(f.severity == "critical" and f.category == "Merge tags" for f in report.findings)
 
 
 def test_scorer_does_not_complain_about_auto_footer():
-    report = scorer.score(_content(unsubscribe_note=True), sender_email="a@uniformers.ae")
+    report = scorer.score(_content(unsubscribe_note=True), sender_email="sam@example.com")
     assert not any("unsubscribe" in f.message.lower() for f in report.findings)
 
 
 def test_scorer_flags_missing_footer_when_disabled():
-    report = scorer.score(_content(unsubscribe_note=False), sender_email="a@uniformers.ae")
+    report = scorer.score(_content(unsubscribe_note=False), sender_email="sam@example.com")
     assert any("unsubscribe" in f.message.lower() for f in report.findings)
 
 
 def test_attachment_mode_is_flagged():
     report = scorer.score(_content(attach_mode="attach", attachment_path=__file__),
-                          sender_email="a@uniformers.ae")
+                          sender_email="sam@example.com")
     assert any(f.category == "Attachment" for f in report.findings)
 
 

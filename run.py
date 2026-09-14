@@ -23,7 +23,10 @@ def main() -> int:
     try:
         import customtkinter as ctk
     except ImportError:
-        report("CustomTkinter is not installed.\n\nRun:  pip install -r requirements.txt")
+        report("HomingPigeon is not set up yet.\n\n"
+               "Close this, open the HomingPigeon folder and double-click the "
+               "\"Start HomingPigeon\" file for your computer (Windows, Mac or Linux). "
+               "It sets everything up for you.")
         return 1
 
     from app import config, theme

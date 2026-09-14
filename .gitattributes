@@ -1,0 +1,5 @@
+# The Start files must keep the line endings their operating system expects,
+# including in the ZIP that GitHub's "Download ZIP" button produces.
+*.bat     text eol=crlf
+*.command text eol=lf
+*.sh      text eol=lf

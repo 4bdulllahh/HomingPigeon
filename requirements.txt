@@ -1,12 +1,8 @@
+# What the app needs to run. The "Start HomingPigeon" files install these automatically.
 customtkinter>=5.2.0
 pandas>=2.0.0
 openpyxl>=3.1.0
 dnspython>=2.4.0
 cryptography>=41.0.0
 pillow>=10.0.0
-
-# Optional
-tkinterdnd2>=0.3.0    # drag-and-drop file support
-pyinstaller>=6.0.0    # building the .exe
-pytest>=7.0.0         # running the tests
-aiosmtpd>=1.4.0       # local test SMTP server for dry runs
+certifi>=2024.2.2

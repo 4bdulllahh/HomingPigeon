@@ -21,7 +21,7 @@ def main() -> int:
     try:
         import customtkinter
     except ImportError:
-        print("CustomTkinter is required. Run: pip install -r requirements.txt")
+        print("CustomTkinter is required. Run: pip install -r requirements-dev.txt")
         return 1
 
     try:

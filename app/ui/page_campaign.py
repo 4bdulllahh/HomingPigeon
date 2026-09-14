@@ -11,21 +11,6 @@ from app.core import composer, db, importer, warmup
 from app.ui.widgets.common import FormRow, Section, toast
 from app.ui.widgets.range_slider import RangeSlider, format_seconds
 
-UAE_HOLIDAYS_2026 = [
-    ("2026-01-01", "New Year's Day"),
-    ("2026-03-19", "Eid al-Fitr (approx.)"),
-    ("2026-03-20", "Eid al-Fitr (approx.)"),
-    ("2026-03-21", "Eid al-Fitr (approx.)"),
-    ("2026-05-26", "Arafat Day (approx.)"),
-    ("2026-05-27", "Eid al-Adha (approx.)"),
-    ("2026-05-28", "Eid al-Adha (approx.)"),
-    ("2026-06-16", "Islamic New Year (approx.)"),
-    ("2026-08-25", "Prophet's Birthday (approx.)"),
-    ("2026-12-01", "Commemoration Day"),
-    ("2026-12-02", "National Day"),
-    ("2026-12-03", "National Day holiday"),
-]
-
 
 class CampaignPage(ctk.CTkFrame):
     def __init__(self, master, app):
@@ -145,11 +130,9 @@ class CampaignPage(ctk.CTkFrame):
                     muted=True, size=11).pack(anchor="w")
         self.holidays_box = theme.textbox(holiday_wrap, height=90, monospace=True)
         self.holidays_box.pack(fill="x", pady=(4, 6))
-        theme.secondary_button(holiday_wrap, "Load UAE 2026 holidays", self._load_uae_holidays,
-                               width=200, height=26).pack(anchor="w")
         theme.label(holiday_wrap,
-                    "Islamic holiday dates are approximate and confirmed closer to the time — "
-                    "check them against the official UAE calendar.",
+                    "Add the public holidays of the country your recipients are in, "
+                    "for example  2026-12-25",
                     muted=True, size=11).pack(anchor="w", pady=(4, 0))
 
         # --- volume ---------------------------------------------------------
@@ -247,11 +230,6 @@ class CampaignPage(ctk.CTkFrame):
         self.pace_note.configure(
             text=f"About {per_hour} emails per hour. Today's limit of {cap} would take "
                  f"roughly {hours:.1f} hours.{warning}", text_color=color)
-
-    def _load_uae_holidays(self) -> None:
-        text = "\n".join(f"{date}  # {name}" for date, name in UAE_HOLIDAYS_2026)
-        self.holidays_box.delete("1.0", "end")
-        self.holidays_box.insert("1.0", text)
 
     def _toggle_warmup(self) -> None:
         if self.warmup_enabled.get():

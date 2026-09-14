@@ -24,7 +24,7 @@ from datetime import date, datetime, time as dtime, timedelta
 from enum import Enum
 
 from app import config
-from app.core import composer, db, merge, warmup
+from app.core import composer, db, merge, tls, warmup
 
 
 class State(str, Enum):
@@ -131,14 +131,14 @@ def friendly_smtp_error(error: Exception, settings: SmtpSettings) -> str:
 def open_smtp(settings: SmtpSettings) -> smtplib.SMTP:
     security = settings.resolved_security()
     if security == "ssl":
-        context = ssl.create_default_context()
+        context = tls.secure_context()
         server = smtplib.SMTP_SSL(settings.host, settings.port,
                                   timeout=settings.timeout, context=context)
     else:
         server = smtplib.SMTP(settings.host, settings.port, timeout=settings.timeout)
         server.ehlo()
         if security == "starttls":
-            server.starttls(context=ssl.create_default_context())
+            server.starttls(context=tls.secure_context())
             server.ehlo()
     if settings.username:
         server.login(settings.username, settings.password)

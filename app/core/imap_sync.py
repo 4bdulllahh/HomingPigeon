@@ -10,12 +10,11 @@ import email
 import imaplib
 import re
 import socket
-import ssl
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from email.message import Message
 
-from app.core import db
+from app.core import db, tls
 
 UNSUBSCRIBE_PHRASES = [
     "unsubscribe", "remove me", "opt out", "opt-out", "take me off", "stop emailing",
@@ -75,11 +74,11 @@ class SyncResult:
 def connect(settings: ImapSettings) -> imaplib.IMAP4:
     if settings.use_ssl:
         client = imaplib.IMAP4_SSL(settings.host, settings.port,
-                                   ssl_context=ssl.create_default_context(),
+                                   ssl_context=tls.secure_context(),
                                    timeout=settings.timeout)
     else:
         client = imaplib.IMAP4(settings.host, settings.port, timeout=settings.timeout)
-        client.starttls(ssl.create_default_context())
+        client.starttls(tls.secure_context())
     client.login(settings.username, settings.password)
     return client
 

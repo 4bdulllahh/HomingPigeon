@@ -25,17 +25,27 @@ def app_location() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
-def launch_target() -> tuple[str, str]:
-    """(program, arguments) that will start the app again."""
-    if is_frozen():
-        return sys.executable, ""
+def start_file() -> Path:
+    """The double-click "Start HomingPigeon" file for this operating system."""
+    if sys.platform == "win32":
+        name = "Start HomingPigeon - Windows.bat"
+    elif sys.platform == "darwin":
+        name = "Start HomingPigeon - Mac.command"
+    else:
+        name = "Start HomingPigeon - Linux.sh"
+    return app_location() / name
 
-    project = app_location()
-    run_script = project / "run.py"
-    # pythonw.exe runs without leaving a black console window open behind the app
-    pythonw = Path(sys.executable).with_name("pythonw.exe")
-    program = str(pythonw if pythonw.exists() else sys.executable)
-    return program, f'"{run_script}"'
+
+def launch_target() -> tuple[str, str, str]:
+    """(program, arguments, icon) that will start the app again."""
+    if is_frozen():
+        return sys.executable, "", sys.executable
+
+    # Point at the Start file rather than at Python directly: it repairs the setup
+    # by itself if Python is ever updated or an add-on goes missing.
+    base_pythonw = Path(sys.base_prefix) / "pythonw.exe"
+    icon = base_pythonw if base_pythonw.exists() else Path(sys.executable)
+    return str(start_file()), "", str(icon)
 
 
 def how_to_launch() -> str:
@@ -47,15 +57,14 @@ def how_to_launch() -> str:
             f"To open it again, double-click {Path(sys.executable).name} in that folder — "
             f"or press the button below to put an icon on your Desktop."
         )
-    project = app_location()
-    return (
-        f"You are running HomingPigeon from its source folder.\n\n"
-        f"The folder is:\n{project}\n\n"
-        f"To open it again: open that folder, double-click the address bar at the top, "
-        f"type  cmd  and press Enter. Then type  python run.py  and press Enter.\n\n"
-        f"Easier: press the button below to put an icon on your Desktop, then just "
-        f"double-click that icon from now on."
+    text = (
+        f"HomingPigeon lives in this folder:\n{app_location()}\n\n"
+        f"To open it again, double-click  {start_file().name}  in that folder."
     )
+    if sys.platform == "win32":
+        text += ("\n\nEasier: press the button below to put an icon on your Desktop, then just "
+                 "double-click that icon from now on.")
+    return text
 
 
 def desktop_dir() -> Path:
@@ -68,14 +77,15 @@ def desktop_dir() -> Path:
 def create_desktop_shortcut() -> tuple[bool, str]:
     """Create (or refresh) a Desktop shortcut. Returns (ok, message)."""
     if sys.platform != "win32":
-        return False, "Desktop shortcuts are only supported on Windows."
+        return False, (f"Desktop icons can only be made on Windows. To open the app, "
+                       f"double-click '{start_file().name}' in the app's folder.")
 
     desktop = desktop_dir()
     if not desktop.exists():
         return False, f"Could not find your Desktop folder at {desktop}."
 
     link = desktop / f"{config.APP_TITLE}.lnk"
-    program, arguments = launch_target()
+    program, arguments, icon = launch_target()
     working_dir = str(app_location())
 
     # Escape single quotes for the PowerShell string literals below
@@ -89,7 +99,8 @@ def create_desktop_shortcut() -> tuple[bool, str]:
         f"$s.Arguments = '{ps_quote(arguments)}'; "
         f"$s.WorkingDirectory = '{ps_quote(working_dir)}'; "
         f"$s.Description = '{ps_quote(config.APP_TITLE)}'; "
-        f"$s.IconLocation = '{ps_quote(program)},0'; "
+        f"$s.IconLocation = '{ps_quote(icon)},0'; "
+        "$s.WindowStyle = 7; "  # minimised, so the Start file's window stays out of the way
         "$s.Save()"
     )
 
@@ -110,11 +121,13 @@ def create_desktop_shortcut() -> tuple[bool, str]:
 
 
 def open_folder(path: Path | str) -> None:
-    """Open a folder in Windows Explorer."""
+    """Open a folder in Explorer, Finder or the Linux file manager."""
     path = Path(path)
     try:
         if sys.platform == "win32":
             os.startfile(path)  # noqa: S606 - opening a local folder for the user
+        elif sys.platform == "darwin":
+            subprocess.run(["open", str(path)], check=False)
         else:
             subprocess.run(["xdg-open", str(path)], check=False)
     except OSError:
