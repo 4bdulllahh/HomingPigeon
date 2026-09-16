@@ -180,6 +180,25 @@ CREATE TABLE IF NOT EXISTS imap_state (
     last_sync_at   TEXT,
     folder         TEXT DEFAULT 'INBOX'
 );
+
+-- Every message the inbox check read, so it can be reread in the app instead of
+-- only counted. The body is stored as plain text and capped when it is saved.
+CREATE TABLE IF NOT EXISTS inbox_messages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    folder      TEXT,
+    uid         INTEGER,
+    from_name   TEXT,
+    from_email  TEXT COLLATE NOCASE,
+    subject     TEXT,
+    body        TEXT,
+    received_at TEXT,
+    kind        TEXT,
+    known       INTEGER DEFAULT 0,
+    seen        INTEGER DEFAULT 0,
+    saved_at    TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_uid ON inbox_messages(folder, uid);
+CREATE INDEX IF NOT EXISTS idx_inbox_when ON inbox_messages(received_at DESC, id DESC);
 """
 
 
@@ -269,6 +288,60 @@ def unsuppress(email: str) -> None:
 
 def suppression_list() -> list[sqlite3.Row]:
     return query("SELECT * FROM suppression ORDER BY added_at DESC")
+
+
+# --- Inbox ------------------------------------------------------------------
+# How many messages to keep. A year of checking a busy mailbox would otherwise
+# grow the database without limit, and nobody scrolls back past a few hundred.
+INBOX_KEEP = 800
+
+
+def save_message(folder: str, uid: int, *, from_name: str, from_email: str, subject: str,
+                 body: str, received_at: str, kind: str, known: bool) -> None:
+    """Record one message. Re-reading the same UID updates it rather than duplicating."""
+    execute(
+        "INSERT INTO inbox_messages(folder, uid, from_name, from_email, subject, body, "
+        "received_at, kind, known, seen, saved_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?) "
+        "ON CONFLICT(folder, uid) DO UPDATE SET "
+        "from_name = excluded.from_name, from_email = excluded.from_email, "
+        "subject = excluded.subject, body = excluded.body, kind = excluded.kind, "
+        "known = excluded.known",
+        (folder, int(uid), from_name, from_email, subject, body, received_at, kind,
+         1 if known else 0, now()),
+    )
+
+
+def inbox_messages(kind: str | None = None, limit: int = INBOX_KEEP) -> list[sqlite3.Row]:
+    if kind:
+        return query(
+            "SELECT * FROM inbox_messages WHERE kind = ? "
+            "ORDER BY received_at DESC, id DESC LIMIT ?", (kind, limit))
+    return query("SELECT * FROM inbox_messages ORDER BY received_at DESC, id DESC LIMIT ?",
+                 (limit,))
+
+
+def inbox_unseen() -> int:
+    row = query_one("SELECT COUNT(*) AS n FROM inbox_messages WHERE seen = 0")
+    return row["n"] if row else 0
+
+
+def mark_message_seen(message_id: int, seen: bool = True) -> None:
+    execute("UPDATE inbox_messages SET seen = ? WHERE id = ?", (1 if seen else 0, message_id))
+
+
+def mark_all_messages_seen() -> None:
+    execute("UPDATE inbox_messages SET seen = 1 WHERE seen = 0")
+
+
+def trim_inbox(keep: int = INBOX_KEEP) -> None:
+    execute(
+        "DELETE FROM inbox_messages WHERE id NOT IN ("
+        "SELECT id FROM inbox_messages ORDER BY received_at DESC, id DESC LIMIT ?)", (keep,))
+
+
+def clear_inbox() -> None:
+    execute("DELETE FROM inbox_messages")
 
 
 # --- Campaign stats ---------------------------------------------------------

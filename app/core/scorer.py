@@ -1,7 +1,7 @@
 """Pre-send spam scoring.
 
 A local rule engine approximating what content filters react to. It is not a
-SpamAssassin clone and does not claim to be — it catches the mistakes that
+SpamAssassin clone and does not claim to be. It catches the mistakes that
 actually get office outreach filtered, and every finding comes with a fix.
 """
 from __future__ import annotations
@@ -59,12 +59,12 @@ class ScoreReport:
     @property
     def verdict(self) -> str:
         if self.score >= 85:
-            return "Good — this should reach the inbox."
+            return "Good. This should reach the inbox."
         if self.score >= 70:
             return "Acceptable, but worth improving before a large send."
         if self.score >= 50:
-            return "Risky — likely to land in spam for some recipients."
-        return "Poor — fix the critical items before sending."
+            return "Risky. Likely to land in spam for some recipients."
+        return "Poor. Fix the critical items before sending."
 
     @property
     def status(self) -> str:
@@ -110,7 +110,7 @@ def _check_subject(subject: str, findings: list[Finding]) -> None:
     letters = [c for c in stripped if c.isalpha()]
     if letters and sum(1 for c in letters if c.isupper()) / len(letters) > 0.5 and len(letters) > 6:
         findings.append(Finding("high", "Subject", "Subject is mostly capital letters.",
-                                "Use normal sentence case — shouting is a classic spam signal."))
+                                "Use normal sentence case. Shouting is a classic spam signal."))
 
     if stripped.count("!") > 1:
         findings.append(Finding("medium", "Subject", "Subject contains multiple exclamation marks.",
@@ -130,7 +130,7 @@ def _check_subject(subject: str, findings: list[Finding]) -> None:
     if re.search(r"(re|fwd):", lowered):
         findings.append(Finding("high", "Subject",
                                 "Subject fakes a reply or forward (Re:/Fwd:).",
-                                "Never fake a thread on a first contact — it is treated as deception."))
+                                "Never fake a thread on a first contact. It is treated as deception."))
 
 
 def _check_body(html: str, findings: list[Finding], name: str = "Body",
@@ -146,7 +146,7 @@ def _check_body(html: str, findings: list[Finding], name: str = "Body",
         findings.append(Finding("medium", name, f"{name} is only {len(words)} words.",
                                 "Very short cold emails with a link look like phishing. Aim for 80-200 words."))
     elif len(words) > 400:
-        findings.append(Finding("low", name, f"{name} is {len(words)} words — long for a cold email.",
+        findings.append(Finding("low", name, f"{name} is {len(words)} words, which is long for a cold email.",
                                 "Trim to under 200 words; long first emails get ignored."))
 
     lowered = text.lower()
@@ -201,14 +201,14 @@ def _check_body(html: str, findings: list[Finding], name: str = "Body",
     for match in re.finditer(r"<img\s[^>]*>", html, re.IGNORECASE):
         if "alt=" not in match.group(0).lower():
             findings.append(Finding("low", name, "An image has no alt text.",
-                                    "Add alt text — images are blocked by default in most clients."))
+                                    "Add alt text. Images are blocked by default in most clients."))
             break
 
     # The unsubscribe footer is appended at send time, so only complain when it is switched off
     if not footer_added and "unsubscribe" not in lowered:
         findings.append(Finding("high", name, "No unsubscribe wording anywhere in the message.",
                                 "Re-enable the automatic footer on the 'Sending options' page, or add your "
-                                "own opt-out line — mail without one is treated as spam and, for "
+                                "own opt-out line. Mail without one is treated as spam and, for "
                                 "many jurisdictions, is not legal to send."))
 
 
@@ -354,7 +354,7 @@ def score(
         signature_text = _text_of(content.signature_html).lower()
         if not re.search(r"\+?\d[\d\s\-()]{7,}", signature_text):
             findings.append(Finding("low", "Structure", "The signature has no phone number.",
-                                    "Add a contact number — it distinguishes real business mail."))
+                                    "Add a contact number. It distinguishes real business mail."))
 
     # Deduplicate identical findings raised by several variants
     unique: dict[tuple[str, str], Finding] = {}

@@ -1,4 +1,4 @@
-"""HomingPigeon Setup — the Windows installer.
+"""HomingPigeon Setup: the Windows installer.
 
 Built into "HomingPigeon Setup.exe" by tools/build_installer.py. The app's own
 files travel inside the .exe; everything else is downloaded while the user
@@ -90,7 +90,6 @@ CONFIRM = "#39ad70"
 CONFIRM_HOVER = "#48bc7e"
 SECONDARY = "#34373f"
 SECONDARY_HOVER = "#40444d"
-SUCCESS = "#6fcf97"
 ERROR = "#ef8a7f"
 
 
@@ -299,7 +298,7 @@ def build_named_exe(install_dir: Path, version: str = "", log=None) -> Path:
     """Make python/HomingPigeon.exe, the program the shortcuts point at.
 
     Task Manager names a running program after its executable, so launching the
-    app through pythonw.exe listed it as "python" — which is alarming if you are
+    app through pythonw.exe listed it as "python", which is alarming if you are
     checking what is running on your computer. A copy under the app's own name
     fixes the process name everywhere; rewriting the copy's version resource
     also fixes the description, but breaks its signature, so that step is
@@ -845,7 +844,7 @@ class InstallJob(Job):
                                       log=self.log)
             self.log(f"  the app will start from {started.name}")
         except OSError as error:
-            # Cosmetic only — the shortcuts fall back to pythonw.exe
+            # Cosmetic only. The shortcuts fall back to pythonw.exe
             self.log(f"  could not create it ({error}); using pythonw.exe.")
 
         self.progress(0.3)
@@ -1052,7 +1051,10 @@ class SetupWindow:
         self.scale = self.root.winfo_fpixels("1i") / 96
         self.root.title(f"{APP_NAME} Setup" if not uninstall else f"Remove {APP_NAME}")
         self.root.configure(bg=BG)
-        width, height = int(740 * self.scale), int(640 * self.scale)
+        # Tall enough that the activity log shows a dozen lines without
+        # scrolling, and clamped so it still fits a 768-pixel laptop screen.
+        width = int(760 * self.scale)
+        height = min(int(780 * self.scale), self.root.winfo_screenheight() - int(80 * self.scale))
         x = (self.root.winfo_screenwidth() - width) // 2
         y = (self.root.winfo_screenheight() - height) // 3
         self.root.geometry(f"{width}x{height}+{x}+{max(y, 0)}")
@@ -1136,7 +1138,15 @@ class SetupWindow:
     def _clear(self) -> None:
         for widget in list(self.body.winfo_children()) + list(self.footer.winfo_children()):
             widget.destroy()
+        # Everything below belonged to the page just torn down. The worker
+        # thread keeps posting log and progress events for a moment after Setup
+        # has moved on, and writing to a destroyed widget killed the event pump.
         self.primary = None
+        self.detail = None
+        self.log_text = None
+        self.percent = None
+        self.bar = None
+        self.rows = []
 
     def _heading(self, title: str, subtitle: str) -> None:
         self.title_label.configure(text=title)
@@ -1148,6 +1158,21 @@ class SetupWindow:
         inner = tk.Frame(outer, bg=PANEL, padx=int(18 * s), pady=int(14 * s))
         inner.pack(fill="both", expand=True, padx=1, pady=1)
         return outer, inner
+
+    def _status(self, text: str) -> None:
+        """Show a line of progress, if the current page has somewhere to put it.
+
+        Every page rebuild destroys the body, so the label from a previous page
+        is a dead Tcl command. Writing to one used to raise inside the Finish
+        handler, which left the app launched but Setup still on screen.
+        """
+        label = getattr(self, "detail", None)
+        try:
+            if label is not None:
+                label.configure(text=text)
+                self.root.update_idletasks()
+        except tk.TclError:
+            self.detail = None
 
     def _footer_note(self, text: str) -> None:
         tk.Label(self.footer, text=text, bg=BG, fg=FG_MUTED, font=self.fonts["small"]).pack(side="left")
@@ -1190,7 +1215,7 @@ class SetupWindow:
             action = "Repair" if same else "Update"
         else:
             title = f"Install {APP_NAME} v{self.new_version}"
-            subtitle = "Safe, simple email for your business. Setup takes about 2–5 minutes."
+            subtitle = "Safe, simple email for your business. Setup takes about 2 to 5 minutes."
             action = "Install"
         self._heading(title, subtitle)
 
@@ -1219,19 +1244,9 @@ class SetupWindow:
             detail.pack(anchor="w", fill="x")
             col.bind("<Configure>", lambda e, d=detail: d.configure(wraplength=e.width))
 
-        reassurance = tk.Frame(self.body, bg=BG)
-        reassurance.pack(anchor="w", fill="x", pady=(int(14 * s), 0))
-        promises = ["No administrator password needed", "Nothing else on your computer is changed",
-                    "You'll see every step as it happens", "Remove it any time from Settings > Apps"]
-        for index, promise in enumerate(promises):
-            cell = tk.Frame(reassurance, bg=BG)
-            cell.grid(row=index // 2, column=index % 2, sticky="w", padx=(0, int(24 * s)), pady=int(2 * s))
-            tk.Label(cell, text="✓", bg=BG, fg=SUCCESS, font=self.fonts["bold"]).pack(side="left")
-            tk.Label(cell, text=promise, bg=BG, fg=FG, font=self.fonts["small"]).pack(
-                side="left", padx=(int(6 * s), 0))
-
-        tk.Label(self.body, text="Needs an internet connection and about 400 MB of free space.",
-                 bg=BG, fg=FG_MUTED, font=self.fonts["small"], anchor="w").pack(anchor="w", pady=(int(10 * s), 0))
+        tk.Label(self.body, text="No administrator password needed. Needs an internet connection "
+                                 "and about 400 MB of free space.",
+                 bg=BG, fg=FG_MUTED, font=self.fonts["small"], anchor="w").pack(anchor="w", pady=(int(14 * s), 0))
 
         self._footer_note(f"v{self.new_version}  ·  Free beta")
         self._button(action, self.start_install, "confirm", primary=True)
@@ -1281,12 +1296,12 @@ class SetupWindow:
         self.detail = tk.Label(self.body, text="", bg=BG, fg=FG_MUTED, font=self.fonts["small"], anchor="w")
         self.detail.pack(fill="x")
 
-        tk.Label(self.body, text="What's happening", bg=BG, fg=FG, font=self.fonts["bold"],
+        tk.Label(self.body, text="Activity log", bg=BG, fg=FG, font=self.fonts["bold"],
                  anchor="w").pack(anchor="w", pady=(int(10 * s), int(4 * s)))
         log_frame = tk.Frame(self.body, bg=BORDER)
         log_frame.pack(fill="both", expand=True)
         self.log_text = tk.Text(log_frame, bg=CONSOLE, fg="#aab1bb", font=self.fonts["mono"], relief="flat",
-                                wrap="word", padx=int(10 * s), pady=int(8 * s), height=6,
+                                wrap="word", padx=int(10 * s), pady=int(8 * s), height=13,
                                 insertbackground=CONSOLE, highlightthickness=0, borderwidth=0)
 
         self.log_text.configure(state="disabled")  # scrolls with the mouse wheel
@@ -1305,6 +1320,8 @@ class SetupWindow:
         threading.Thread(target=job.run, daemon=True).start()
 
     def _draw_bar(self) -> None:
+        if getattr(self, "bar", None) is None:
+            return
         width = self.bar.winfo_width()
         h = self.bar_height
         y = h // 2 + 1
@@ -1322,13 +1339,16 @@ class SetupWindow:
         """
         def check() -> None:
             try:
-                self.log_follow = self.log_text.yview()[1] > 0.999
+                if self.log_text is not None:
+                    self.log_follow = self.log_text.yview()[1] > 0.999
             except tk.TclError:
                 pass
 
         self.root.after_idle(check)
 
     def _append_log(self, line: str) -> None:
+        if getattr(self, "log_text", None) is None:
+            return
         self.log_text.configure(state="normal")
         tag = "heading" if line.startswith("== ") else "problem" if line.startswith("PROBLEM") else ""
         self.log_text.insert("end", line + "\n", tag)
@@ -1336,7 +1356,7 @@ class SetupWindow:
         if self.log_follow:
             # yview_moveto goes to the very bottom every time; see("end") only
             # scrolls far enough to reveal the last line, which on a wrapped
-            # line can stop a fraction short — and once it did, the old
+            # line can stop a fraction short, and once it did, the old
             # "are we at the bottom?" test said no and the log never moved again.
             self.log_text.yview_moveto(1.0)
 
@@ -1349,12 +1369,14 @@ class SetupWindow:
                     self._append_log(event[1])
                 elif kind == "progress":
                     self.bar_fraction = event[1]
-                    self._draw_bar()
-                    self.percent.configure(text=f"{int(event[1] * 100)}%")
-                    self.detail.configure(text=event[2])
+                    if self.percent is not None:
+                        self._draw_bar()
+                        self.percent.configure(text=f"{int(event[1] * 100)}%")
+                    self._status(event[2])
                 elif kind == "step":
                     _, index, state, detail = event
-                    self.rows[index].set(state, detail)
+                    if index < len(self.rows):
+                        self.rows[index].set(state, detail)
                 elif kind == "finished":
                     self.busy = False
                     self.bob_speed = 0.09
@@ -1377,7 +1399,7 @@ class SetupWindow:
                 row.set("failed", "Didn't finish")
         self._heading("Removal didn't finish" if self.uninstall else "Setup didn't finish", f"{message} {hint}".strip())
         self.subtitle_label.configure(fg=ERROR)
-        self.detail.configure(text="Nothing is broken. Anything already done is kept, so trying again is quicker.")
+        self._status("Nothing is broken. Anything already done is kept, so trying again is quicker.")
         for widget in self.footer.winfo_children():
             widget.destroy()
         self._button("Try again", self.retry, "primary", primary=True)
@@ -1437,25 +1459,51 @@ class SetupWindow:
         where.pack(anchor="w", fill="x", pady=(int(14 * s), 0))
         where.bind("<Configure>", lambda e: where.configure(wraplength=e.width))
 
+        self.detail = tk.Label(self.body, text="", bg=BG, fg=FG_MUTED, font=self.fonts["small"],
+                               anchor="w")
+        self.detail.pack(fill="x", pady=(int(8 * s), 0))
+
         self._footer_note(f"v{self.new_version}  ·  Thanks for trying the beta!")
         self._button("Finish", self.finish, "confirm", primary=True)
 
     def finish(self) -> None:
-        start_menu, desktop = self._shortcut_places
-        problems = []
-        for wanted, folder in ((self.want_start.get(), start_menu), (self.want_desktop.get(), desktop)):
-            if not wanted:
-                continue
-            try:
-                make_shortcut(folder / f"{APP_NAME}.lnk", self.install_dir)
-            except (OSError, subprocess.TimeoutExpired) as error:
-                problems.append(f"{folder}: {error}")
-        if self.want_launch.get():
-            problems.extend(self._launch_app())
-        if problems:
-            messagebox.showwarning(APP_NAME, "Almost done, but:\n\n" + "\n".join(problems),
-                                   parent=self.root)
-        self.root.destroy()
+        """Make the shortcuts, open the app, and close Setup no matter what.
+
+        Closing is in a ``finally`` on purpose. Anything that goes wrong here is
+        worth a warning, but none of it is a reason to leave Setup sitting on
+        screen with a Finish button that looks like it did nothing.
+        """
+        problems: list[str] = []
+        try:
+            if self.primary is not None:
+                self.primary.set_enabled(False)   # no second click while we work
+            start_menu, desktop = self._shortcut_places
+            for wanted, folder in ((self.want_start.get(), start_menu),
+                                   (self.want_desktop.get(), desktop)):
+                if not wanted:
+                    continue
+                try:
+                    make_shortcut(folder / f"{APP_NAME}.lnk", self.install_dir)
+                except (OSError, subprocess.TimeoutExpired) as error:
+                    problems.append(f"{folder}: {error}")
+            if self.want_launch.get():
+                problems.extend(self._launch_app())
+            if problems:
+                self._reveal()
+                messagebox.showwarning(APP_NAME, "Almost done, but:\n\n" + "\n".join(problems),
+                                       parent=self.root)
+        except Exception as error:  # noqa: BLE001 - Setup still has to close
+            print(f"Problem finishing up: {type(error).__name__}: {error}")
+        finally:
+            self.root.destroy()
+
+    def _reveal(self) -> None:
+        """Bring Setup back after it hid itself, so a warning has a parent window."""
+        try:
+            self.root.deiconify()
+            self.root.lift()
+        except tk.TclError:
+            pass
 
     def _launch_app(self) -> list[str]:
         """Open the app, and wait long enough to know it really stayed open.
@@ -1464,16 +1512,25 @@ class SetupWindow:
         drew a window, or one killed along with Setup's job object, looked
         exactly like success and the user was left staring at the desktop.
         """
+        self._status(f"Opening {APP_NAME}...")
         try:
             process = start_app(self.install_dir)
         except OSError as error:
             return [f"Couldn't open the app: {error}"]
 
-        self.detail.configure(text=f"Opening {APP_NAME}...")
+        # Setup disappears now rather than in four seconds' time, so Finish
+        # feels like it closed Setup and opened the app. It is hidden, not
+        # gone: the watch below still needs a live event loop, and a launch
+        # that fails brings the window back to say so.
+        try:
+            self.root.withdraw()
+        except tk.TclError:
+            pass
+
         deadline = time.monotonic() + LAUNCH_CONFIRM_SECONDS
         while time.monotonic() < deadline:
             if process.poll() is None:
-                self.root.update()      # keep the window responsive while waiting
+                self.root.update()      # keep the event loop turning while waiting
                 time.sleep(0.1)
                 continue
             reason = why_app_failed(self.install_dir)
@@ -1539,7 +1596,7 @@ class SetupWindow:
         if self.busy and self.job:
             if messagebox.askyesno("Cancel?", "Stop now? Nothing will be broken, and you can run Setup "
                                               "again later to finish.", parent=self.root):
-                self.detail.configure(text="Stopping...")
+                self._status("Stopping...")
                 self.job.cancel()
             return
         self.root.destroy()

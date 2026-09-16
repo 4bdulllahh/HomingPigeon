@@ -25,7 +25,7 @@ LEVEL_TOKENS = {"info": "fg", "success": "success", "warn": "warning", "error": 
 
 STATE_LABELS = {
     "running": "Sending", "paused": "Paused", "waiting": "Waiting",
-    "error": "Stopped — problem detected", "stopped": "Stopped",
+    "error": "Stopped, problem detected", "stopped": "Stopped",
     "finished": "Finished", "idle": "Idle",
 }
 STATE_TONES = {
@@ -58,10 +58,10 @@ class SendPage(Page):
         tiles = QHBoxLayout(tiles_holder)
         tiles.setContentsMargins(0, 0, 0, 0)
         tiles.setSpacing(8)
-        self.tile_queue = StatTile("In this batch", "—")
+        self.tile_queue = StatTile("In this batch", "-")
         self.tile_sent = StatTile("Sent", "0", tone="success")
         self.tile_failed = StatTile("Failed", "0", tone="error")
-        self.tile_next = StatTile("Next email in", "—")
+        self.tile_next = StatTile("Next email in", "-")
         for tile in (self.tile_queue, self.tile_sent, self.tile_failed, self.tile_next):
             tiles.addWidget(tile, 1)
         self.root.addWidget(tiles_holder)
@@ -127,11 +127,11 @@ class SendPage(Page):
             failures = [name for name, state in dns_status.items() if state == "fail"]
             checks.append(
                 ("Domain authentication (SPF / DKIM / DMARC)", not failures,
-                 f"Failing: {', '.join(failures)} — fix on the 'Domain check' page"
+                 f"Failing: {', '.join(failures)}. Fix these on the 'Domain check' page"
                  if failures else ""))
         else:
             checks.append(("Domain authentication checked", False,
-                           "Run the checks on the 'Domain check' page — without SPF and "
+                           "Run the checks on the 'Domain check' page. Without SPF and "
                            "DMARC your mail is very likely to be filtered"))
 
         report = scorer.latest_report()
@@ -145,7 +145,7 @@ class SendPage(Page):
 
         status = warmup.status()
         checks.append((f"Daily limit: {status.sent_today}/{status.cap} used", not status.at_limit,
-                       "Today's limit is reached — sending resumes tomorrow"))
+                       "Today's limit is reached. Sending resumes tomorrow"))
         return checks
 
     def _render_checks(self) -> None:
@@ -168,7 +168,7 @@ class SendPage(Page):
             set_tone(text, "muted" if ok else "bright")
             line.addWidget(text)
             if not ok and fix:
-                line.addWidget(hint(f"— {fix}", wrap=False))
+                line.addWidget(hint(f"Fix: {fix}", wrap=False))
             line.addStretch(1)
             self.checks_layout.addWidget(holder)
 
@@ -312,7 +312,7 @@ class SendPage(Page):
             self, "Start sending?",
             f"{pending:,} contacts are waiting.\n\n"
             f"Today's limit allows {limit}, so {batch} will be sent now, at "
-            f"{format_seconds(plan.delay_min_s)}–{format_seconds(plan.delay_max_s)} intervals "
+            f"{format_seconds(plan.delay_min_s)} to {format_seconds(plan.delay_max_s)} intervals "
             f"between {plan.window_start} and {plan.window_end}.\n\n"
             f"You can pause or stop at any time; progress is saved after every email.",
             confirm_text=f"Send {batch} emails",
@@ -335,7 +335,7 @@ class SendPage(Page):
         self.pump.start()
 
         self.start_button.setEnabled(False)
-        self.start_button.setText("Sending…")
+        self.start_button.setText("Sending...")
         self.pause_button.setEnabled(True)
         self.pause_button.setText("Pause")
         self.stop_button.setEnabled(True)
@@ -418,7 +418,7 @@ class SendPage(Page):
             self.pause_button.setEnabled(False)
             self.pause_button.setText("Pause")
             self.stop_button.setEnabled(False)
-            self.tile_next.update_value("—")
+            self.tile_next.update_value("-")
             self._render_checks()
             self.window_.refresh_status()
 
@@ -431,7 +431,7 @@ class SendPage(Page):
             sent = data.get("sent", 0)
             if sent:
                 self.notify(
-                    f"Finished — {sent} sent, {data.get('failed', 0)} failed",
+                    f"Finished: {sent} sent, {data.get('failed', 0)} failed",
                     "success" if not data.get("failed") else "warn")
 
     # --- lifecycle ----------------------------------------------------------

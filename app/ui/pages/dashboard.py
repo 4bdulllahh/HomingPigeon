@@ -105,13 +105,13 @@ class DashboardPage(Page):
         tone = "error" if bounce_rate > 0.05 else ("warning" if bounce_rate > 0.02 else "success")
         self.tile_bounces.update_value(
             f"{bounce_rate * 100:.1f}%",
-            "keep below 5%" if bounce_rate <= 0.05 else "too high — clean your list",
+            "keep below 5%" if bounce_rate <= 0.05 else "too high, clean your list",
             tone=tone)
 
         email = db.get_setting("sender_email", "")
         self.greeting.setText(
             f"Sending as {email}" if email
-            else "No account configured yet — start with the setup guide.")
+            else "No account configured yet. Start with the setup guide.")
 
     def _row(self, label: str, status: str, detail: str, action=None,
              action_label: str = "Fix") -> None:
@@ -150,7 +150,7 @@ class DashboardPage(Page):
                 messages = {
                     "pass": f"{name} is published and valid.",
                     "warn": f"{name} needs attention.",
-                    "fail": f"{name} is missing or broken — this is why mail lands in spam.",
+                    "fail": f"{name} is missing or broken. This is why mail lands in spam.",
                 }
                 self._row(name, state, messages.get(state, f"{name} not checked"),
                           action=lambda: self.go("deliverability"))
@@ -166,7 +166,7 @@ class DashboardPage(Page):
                       report.verdict, action=lambda: self.go("templates"), action_label="Review")
             if scorer.is_stale():
                 self._row("Score is out of date", "warn",
-                          "Re-run the check — DNS and content drift over time.",
+                          "Re-run the check. DNS and content drift over time.",
                           action=lambda: self.go("templates"), action_label="Re-check")
         else:
             self._row("Content not scored yet", "warn",
@@ -178,7 +178,7 @@ class DashboardPage(Page):
                   "pass" if status.enabled else "warn",
                   "Volume rises gradually so receiving servers learn to trust you."
                   if status.enabled
-                  else "Warm-up is off — you are sending at a fixed manual limit.",
+                  else "Warm-up is off. You are sending at a fixed manual limit.",
                   action=lambda: self.go("campaign"), action_label="Settings")
 
         if not db.get_setting("imap_host", ""):
@@ -204,7 +204,7 @@ class DashboardPage(Page):
         total = stats.get("total", 0)
 
         self.campaign_body.addWidget(muted(
-            f"{record['name']} — {sent:,} sent, {pending:,} pending, "
+            f"{record['name']}: {sent:,} sent, {pending:,} pending, "
             f"{stats.get('bounced', 0):,} bounced"))
 
         bar = QProgressBar()

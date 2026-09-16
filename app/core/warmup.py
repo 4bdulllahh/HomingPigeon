@@ -14,7 +14,7 @@ from app.core import db
 # Day index -> messages allowed that day. Held at the last value afterwards.
 DEFAULT_RAMP = [20, 20, 30, 30, 40, 50, 60, 70, 85, 100, 115, 130, 150, 175, 200]
 
-# Provider ceilings (recipients per day) — the ramp never exceeds these
+# Provider ceilings (recipients per day). The ramp never exceeds these
 PROVIDER_LIMITS = {
     "Google Workspace": 2000,
     "Gmail (free)": 500,
@@ -45,8 +45,8 @@ class WarmupStatus:
 
     def describe(self) -> str:
         if not self.enabled:
-            return f"Warm-up off — daily cap {self.cap}"
-        return f"Warm-up day {self.day_index} — {self.sent_today}/{self.cap} sent today"
+            return f"Warm-up off, daily cap {self.cap}"
+        return f"Warm-up day {self.day_index}: {self.sent_today}/{self.cap} sent today"
 
 
 def _ramp() -> list[int]:

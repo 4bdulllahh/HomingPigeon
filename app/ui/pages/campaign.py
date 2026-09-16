@@ -47,7 +47,7 @@ class CampaignPage(Page):
         section = Section(
             "Brochure",
             "Attaching a PDF to a first email from an unknown sender is one of the strongest spam "
-            "signals there is. Linking to it instead is measurably safer — the attachment "
+            "signals there is. Linking to it instead is measurably safer. The attachment "
             "option is here when you need it.")
 
         self.attach_group = QButtonGroup(self)
@@ -82,7 +82,7 @@ class CampaignPage(Page):
         attach_layout.setSpacing(6)
         self.attach_label = muted("No file selected", wrap=False)
         attach_layout.addWidget(row(self.attach_label, None,
-                                    secondary_button("Choose PDF…", self._choose_attachment, 150)))
+                                    secondary_button("Choose PDF...", self._choose_attachment, 150)))
         self.attach_warning = hint("")
         attach_layout.addWidget(self.attach_warning)
         section.add(self.attach_panel)
@@ -113,7 +113,7 @@ class CampaignPage(Page):
             self.attach_label.setText(file_path.name)
             set_tone(self.attach_label, "error")
             self.attach_warning.setText(
-                f"✕ {size / 1_048_576:.1f} MB — over the {limit // 1_048_576} MB limit. "
+                f"✕ {size / 1_048_576:.1f} MB, over the {limit // 1_048_576} MB limit. "
                 f"Compress the PDF or switch to a link.")
             set_tone(self.attach_warning, "error")
             return
@@ -131,7 +131,7 @@ class CampaignPage(Page):
         section = Section(
             "Delay between emails",
             "A random wait is chosen inside this range before each send. Random, human-like "
-            "timing is far less detectable than a fixed interval — never set both handles "
+            "timing is far less detectable than a fixed interval. Never set both handles "
             "equal for a real campaign.")
 
         self.slider = RangeSlider(75, 150)
@@ -170,7 +170,7 @@ class CampaignPage(Page):
         cap = warmup.effective_cap()
         hours = (cap * average) / 3600 if per_hour else 0
         if low == high:
-            warning = "  ⚠ A fixed interval is a bot signature — widen the range."
+            warning = "  ⚠ A fixed interval is a bot signature. Widen the range."
             tone = "warning"
         else:
             warning, tone = "", "muted"

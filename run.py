@@ -1,4 +1,4 @@
-"""HomingPigeon — launcher."""
+"""HomingPigeon launcher."""
 from __future__ import annotations
 
 import sys
@@ -50,7 +50,7 @@ def install_crash_guard() -> None:
     """Stop one unhandled error from killing the whole app.
 
     PyQt calls ``qFatal()`` when a Python exception escapes a slot, which aborts
-    the process with no message at all — the user just sees the window vanish.
+    the process with no message at all. The user just sees the window vanish.
     Logging it and carrying on is nearly always the better answer: the action
     that failed is lost, but the campaign, the contact list and anything typed
     but not yet saved are not.

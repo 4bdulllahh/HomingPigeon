@@ -98,8 +98,8 @@ class ChoiceDialog(QDialog):
 class InfoDialog(QDialog):
     """A read-only explainer: a title, scrolling sections and one Close button.
 
-    Used where a number on screen needs its reasoning shown — the spam score,
-    for instance — without sending the user to a separate page or a website.
+    Used where a number on screen needs its reasoning shown, such as the spam score,
+    without sending the user to a separate page or a website.
     """
 
     def __init__(self, parent: QWidget | None, title: str, intro: str,

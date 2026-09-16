@@ -14,9 +14,9 @@ from app.workers import jobs
 from app.workers.base import Task
 
 DMARC_POLICIES = [
-    "none — monitor only (start here)",
-    "quarantine — send failures to spam",
-    "reject — refuse failures outright",
+    "none: monitor only (start here)",
+    "quarantine: send failures to spam",
+    "reject: refuse failures outright",
 ]
 
 
@@ -66,7 +66,7 @@ class DeliverabilityPage(Page):
         self.results_area = ScrollPage(spacing=4)
         self.results_area.add(muted(
             "Enter your domain above and run the checks.\n\n"
-            "The app reads your public DNS records directly — nothing is sent to any "
+            "The app reads your public DNS records directly. Nothing is sent to any "
             "third-party service."))
         self.results_area.add_stretch()
         layout.addWidget(self.results_area, 1)
@@ -80,8 +80,8 @@ class DeliverabilityPage(Page):
 
         db.set_setting("check_domain", domain)
         self.check_button.setEnabled(False)
-        self.check_button.setText("Checking…")
-        self.verdict.setText("Querying DNS…")
+        self.check_button.setText("Checking...")
+        self.verdict.setText("Querying DNS...")
         set_tone(self.verdict, "muted")
         self.results_area.clear()
 
@@ -151,7 +151,7 @@ class DeliverabilityPage(Page):
         ip_row.add(self.spf_ip_box)
         section.add(ip_row)
 
-        self.spf_strict = checkbox("Use -all (strict — reject anything not listed)", False,
+        self.spf_strict = checkbox("Use -all (strict: reject anything not listed)", False,
                                    on_change=lambda _c: self._update_spf())
         section.add(self.spf_strict)
         section.add(muted(
@@ -233,7 +233,7 @@ class DeliverabilityPage(Page):
         section = Section(
             "How to enable DKIM",
             "DKIM signs every outgoing message with a private key held by whoever runs your mail "
-            "server. If you use a hosted provider, only they can generate that key — the app "
+            "server. If you use a hosted provider, only they can generate that key, so the app "
             "cannot do it for you, so here are the exact steps for each provider.")
 
         provider_row = FormRow("Your email provider")
@@ -296,7 +296,7 @@ class DeliverabilityPage(Page):
             return
 
         self.dkim_button.setEnabled(False)
-        self.dkim_button.setText("Generating…")
+        self.dkim_button.setText("Generating...")
 
         def reset() -> None:
             self.dkim_button.setEnabled(True)
@@ -312,7 +312,7 @@ class DeliverabilityPage(Page):
         self.dkim_record_output.setPlainText(result["record"])
         self.dkim_key_note.setText(
             f"Private key saved to:\n{result['private_key_path']}\n\n"
-            f"Keep this file secret — anyone holding it can sign mail as your domain. "
+            f"Keep this file secret. Anyone holding it can sign mail as your domain. "
             f"Point your mail server's DKIM module at it.")
         set_tone(self.dkim_key_note, "warning")
         self.notify("Key pair generated", "success")

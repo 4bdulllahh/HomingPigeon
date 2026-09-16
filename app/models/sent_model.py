@@ -1,7 +1,7 @@
 """A table model for the record of every email the app has actually sent.
 
-The data already existed — ``campaign_recipients`` has carried the status, the
-timestamp, the subject used and the error text since the first version — but
+The data already existed. ``campaign_recipients`` has carried the status, the
+timestamp, the subject used and the error text since the first version, but
 there was nowhere to read it. This turns it into a list the user can scan,
 filter and export back into the spreadsheet their leads live in.
 
@@ -221,7 +221,7 @@ class SentModel(QAbstractTableModel):
                 "person": row["person"] or "",
                 "_outcome": label,
                 "_tone": tone,
-                "_when": prefs.format_datetime(row["sent_at"]) if row["sent_at"] else "—",
+                "_when": prefs.format_datetime(row["sent_at"]) if row["sent_at"] else "-",
                 "subject_used": row["subject_used"] or "",
                 "attempts": str(row["attempts"] or 0),
                 "last_error": row["last_error"] or "",

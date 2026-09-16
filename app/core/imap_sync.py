@@ -3,10 +3,15 @@
 Bounces are parsed from the standard delivery-status report rather than guessed
 from subject lines, so hard failures are classified accurately and only hard
 failures go to the suppression list.
+
+Every message read is also saved to ``inbox_messages`` as plain text, so the
+app has a real inbox to show rather than only the counts it acted on.
 """
 from __future__ import annotations
 
 import email
+import email.header
+import email.utils
 import imaplib
 import re
 import socket
@@ -14,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from email.message import Message
 
-from app.core import db, tls
+from app.core import composer, db, tls
 
 UNSUBSCRIBE_PHRASES = [
     "unsubscribe", "remove me", "opt out", "opt-out", "take me off", "stop emailing",
@@ -33,6 +38,9 @@ BOUNCE_SUBJECTS = [
 ]
 
 EMAIL_IN_TEXT = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+
+# How much of each message body to keep for reading in the app.
+STORED_BODY_LIMIT = 8000
 
 
 @dataclass
@@ -91,7 +99,7 @@ def test_connection(settings: ImapSettings) -> tuple[bool, str]:
             if status != "OK":
                 return False, f"Signed in, but folder '{settings.folder}' could not be opened."
             count = int(data[0]) if data and data[0] else 0
-            return True, f"Connected to {settings.host} — {count:,} messages in {settings.folder}."
+            return True, f"Connected to {settings.host}, {count:,} messages in {settings.folder}."
         finally:
             try:
                 client.logout()
@@ -104,7 +112,7 @@ def test_connection(settings: ImapSettings) -> tuple[bool, str]:
                            "you need an app password here too.")
         return False, f"IMAP error: {text}"
     except (socket.gaierror, socket.timeout, OSError) as error:
-        return False, f"Could not reach {settings.host}:{settings.port} — {error}"
+        return False, f"Could not reach {settings.host}:{settings.port}: {error}"
 
 
 # --- Parsing ----------------------------------------------------------------
@@ -120,19 +128,42 @@ def _decode_header(value: str | None) -> str:
     return "".join(parts)
 
 
+def _decode_part(part: Message) -> str:
+    """The text of one message part, whatever it claims its encoding is.
+
+    Mail in the wild lies about charsets. A made-up charset name makes
+    ``bytes.decode`` raise LookupError rather than UnicodeDecodeError, which
+    used to escape the sync and abandon the whole inbox check over one bad
+    message. A part labelled ASCII that is not ASCII is almost always UTF-8,
+    and guessing that beats showing a line of replacement characters.
+    """
+    try:
+        payload = part.get_payload(decode=True)
+    except Exception:  # noqa: BLE001 - an unreadable part is worth skipping, not raising
+        return ""
+    if not payload:
+        return ""
+
+    charset = (part.get_content_charset() or "utf-8").strip().lower()
+    if charset in ("ascii", "us-ascii", "ansi_x3.4-1968", "646"):
+        charset = "utf-8"
+    for candidate in (charset, "utf-8", "cp1252"):
+        try:
+            return payload.decode(candidate)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return payload.decode("utf-8", "replace")
+
+
 def _body_text(message: Message, limit: int = 20000) -> str:
     chunks: list[str] = []
     for part in message.walk():
         if part.get_content_maintype() == "multipart":
             continue
         if part.get_content_type() in ("text/plain", "text/html", "message/delivery-status"):
-            try:
-                payload = part.get_payload(decode=True)
-            except Exception:
-                continue
-            if payload:
-                charset = part.get_content_charset() or "utf-8"
-                chunks.append(payload.decode(charset, "replace"))
+            text = _decode_part(part)
+            if text:
+                chunks.append(text)
         elif part.get_content_type() == "message/rfc822":
             for attached in part.get_payload():
                 if isinstance(attached, Message):
@@ -140,6 +171,50 @@ def _body_text(message: Message, limit: int = 20000) -> str:
         if sum(len(c) for c in chunks) > limit:
             break
     return "\n".join(chunks)[:limit]
+
+
+def sender_name(message: Message) -> str:
+    """The display name on the From line, without the address."""
+    raw = _decode_header(message.get("From", ""))
+    name = re.sub(r"<[^>]*>", "", raw).strip().strip('"').strip()
+    return name if name and "@" not in name else ""
+
+
+def received_at(message: Message) -> str:
+    """The message date as an ISO string, falling back to now if it is unreadable."""
+    try:
+        moment = email.utils.parsedate_to_datetime(message.get("Date", ""))
+    except (TypeError, ValueError):
+        moment = None
+    if moment is None:
+        return db.now()
+    if moment.tzinfo is not None:
+        moment = moment.astimezone().replace(tzinfo=None)
+    return moment.isoformat(timespec="seconds")
+
+
+def readable_body(message: Message, limit: int = STORED_BODY_LIMIT) -> str:
+    """The message as plain text: the text part if there is one, else the HTML converted.
+
+    Delivery-status blocks are skipped here. They are what :func:`parse_bounce`
+    reads, and they are machine noise to anyone looking at a bounce on screen.
+    """
+    plain: list[str] = []
+    html: list[str] = []
+    for part in message.walk():
+        kind = part.get_content_type()
+        if kind not in ("text/plain", "text/html"):
+            continue
+        text = _decode_part(part)
+        if text:
+            (plain if kind == "text/plain" else html).append(text)
+
+    body = "\n".join(plain).strip() or composer.html_to_text("\n".join(html)).strip()
+    if not body:
+        body = _body_text(message, limit=limit).strip()
+    body = body.replace("\r\n", "\n").replace("\r", "\n").replace("\xa0", " ")
+    body = re.sub(r"\n{3,}", "\n\n", body)
+    return body[:limit]
 
 
 def is_bounce(message: Message) -> bool:
@@ -289,12 +364,24 @@ def sync(settings: ImapSettings, days_back: int = 30, progress=None) -> SyncResu
                 continue
 
             result.scanned += 1
-            _classify(message, result)
+            kind, known = _classify(message, result)
+            try:
+                db.save_message(
+                    settings.folder, int(uid),
+                    from_name=sender_name(message),
+                    from_email=sender_address(message),
+                    subject=_decode_header(message.get("Subject", "")) or "(no subject)",
+                    body=readable_body(message),
+                    received_at=received_at(message),
+                    kind=kind, known=known)
+            except Exception as error:  # noqa: BLE001 - never lose a sync over one message
+                db.log_event("warn", "imap", f"Could not save a message: {error}")
 
         db.execute(
             "UPDATE imap_state SET last_uid = ?, last_sync_at = ?, folder = ? WHERE id = 1",
             (highest, db.now(), settings.folder),
         )
+        db.trim_inbox()
         if progress:
             progress(len(uids), len(uids))
     except Exception as error:  # noqa: BLE001
@@ -313,11 +400,12 @@ def sync(settings: ImapSettings, days_back: int = 30, progress=None) -> SyncResu
     return result
 
 
-def _classify(message: Message, result: SyncResult) -> None:
+def _classify(message: Message, result: SyncResult) -> tuple[str, bool]:
+    """Act on one message and report ``(kind, is_a_known_contact)`` for the inbox list."""
     if is_bounce(message):
         address, hard, detail = parse_bounce(message)
         if not address:
-            return
+            return "bounce", False
         if hard:
             result.hard_bounces.append((address, detail))
             db.suppress(address, f"Hard bounce: {detail}"[:200], source="bounce")
@@ -331,25 +419,28 @@ def _classify(message: Message, result: SyncResult) -> None:
         else:
             result.soft_bounces.append((address, detail))
             db.execute("UPDATE contacts SET bounced_at = ? WHERE email = ?", (db.now(), address))
-        return
+        return "bounce", True
 
     address = sender_address(message)
     if not address:
-        return
+        return "other", False
 
     known = db.query_one("SELECT id FROM contacts WHERE email = ?", (address,))
     if not known:
-        return  # not one of ours; ignore ordinary inbox traffic
+        # Not one of ours. It is still saved and readable in the app; it just
+        # does not count as a reply and nothing is done about it.
+        return "other", False
 
     if is_unsubscribe(message):
         result.unsubscribes.append(address)
         db.suppress(address, "Requested unsubscribe by reply", source="reply")
         db.execute("UPDATE contacts SET valid = 0 WHERE email = ?", (address,))
-        return
+        return "optout", True
 
     subject = _decode_header(message.get("Subject", ""))
     result.replies.append((address, subject))
     db.execute("UPDATE contacts SET replied_at = ? WHERE email = ?", (db.now(), address))
+    return "reply", True
 
 
 def replied_contacts(limit: int = 200) -> list:

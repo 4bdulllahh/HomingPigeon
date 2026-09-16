@@ -16,7 +16,7 @@ from typing import Callable
 from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QMainWindow, QPushButton,
-                             QStackedWidget, QVBoxLayout, QWidget)
+                             QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 
 from app import config
 from app.core import db, prefs, warmup
@@ -34,7 +34,7 @@ NAV_ITEMS = [
     ("campaign", "options", "Sending options", "Speed, timing, brochure"),
     ("send", "send", "Send emails", "Start and watch it run"),
     ("sent", "history", "Sent emails", "Everything you have sent"),
-    ("inbox", "inbox", "Replies & bounces", "Who answered, who failed"),
+    ("inbox", "inbox", "My inbox", "Replies, bounces and mail"),
 ]
 SETTINGS_ITEM = ("settings", "settings", "Settings", "Theme, text size, uninstall")
 
@@ -51,10 +51,19 @@ class NavButton(QPushButton):
 
         scale = theme.text_scale()
         show_subtitle = scale <= theme.SUBTITLE_MAX_SCALE
-        self.setFixedHeight(round((52 if show_subtitle else 40) * scale))
+        # The height comes from theme.nav_height(), the same value the
+        # stylesheet writes into min-height, and is asked for through the size
+        # hints rather than setFixedHeight. Qt re-polishes a widget whenever
+        # the application stylesheet changes or a dynamic property is flipped,
+        # and polishing replaces size constraints set in code with the
+        # stylesheet's. That is what used to collapse every entry to the height
+        # of an ordinary button and clip both lines of text.
+        self._height = theme.nav_height()
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(round(9 * scale), 0, round(10 * scale), 0)
+        layout.setContentsMargins(round(10 * scale), round(9 * scale), round(10 * scale),
+                                  round(9 * scale))
         layout.setSpacing(round(11 * scale))
 
         self.icon_label = QLabel(theme.icon(icon_name))
@@ -64,7 +73,7 @@ class NavButton(QPushButton):
 
         text = QVBoxLayout()
         text.setContentsMargins(0, 0, 0, 0)
-        text.setSpacing(round(1 * scale))
+        text.setSpacing(round(3 * scale))
         self.title_label = QLabel(title)
         text.addWidget(self.title_label)
         # Parented to the button from the outset. A parentless QLabel that is
@@ -100,6 +109,16 @@ class NavButton(QPushButton):
             f"font-weight: {'700' if (active or theme.bold_text()) else '600'}; "
             f"color: {theme.color('accent') if active else theme.color('fg')};")
 
+    def sizeHint(self):  # noqa: N802 - Qt naming
+        hint = super().sizeHint()
+        hint.setHeight(self._height)
+        return hint
+
+    def minimumSizeHint(self):  # noqa: N802 - Qt naming
+        hint = super().minimumSizeHint()
+        hint.setHeight(self._height)
+        return hint
+
     def set_badge(self, show: bool) -> None:
         self.badge.setText("●" if show else "")
         self.badge.setStyleSheet(
@@ -113,7 +132,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"{config.APP_TITLE} {config.APP_VERSION} — {config.APP_TAGLINE}")
+        self.setWindowTitle(f"{config.APP_TITLE} {config.APP_VERSION}  ·  {config.APP_TAGLINE}")
         self._set_icon()
 
         self._builders: dict[str, Callable[[], QWidget]] = {}
@@ -149,8 +168,11 @@ class MainWindow(QMainWindow):
     def _size_to_screen(self) -> None:
         screen = QApplication.primaryScreen()
         available = screen.availableGeometry() if screen else None
+        # availableGeometry already excludes the taskbar, so only the title bar
+        # and a little breathing room need subtracting. The extra height is what
+        # lets the whole menu, and a readable message pane, fit on screen.
         width = min(1280, (available.width() - 80) if available else 1280)
-        height = min(860, (available.height() - 120) if available else 860)
+        height = min(920, (available.height() - 60) if available else 920)
         self.resize(width, height)
         self.setMinimumSize(min(1000, width), min(640, height))
 
@@ -216,13 +238,33 @@ class MainWindow(QMainWindow):
         layout.addWidget(separator())
         layout.addSpacing(round(6 * scale))
 
+        # The menu scrolls. Ten roomy entries do not fit a short laptop screen at
+        # the largest text sizes, and a clipped menu hides the pages at the
+        # bottom of it with no way to reach them. Settings stays pinned below.
+        scroller = QScrollArea()
+        scroller.setWidgetResizable(True)
+        scroller.setFrameShape(QFrame.Shape.NoFrame)
+        scroller.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroller.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroller.viewport().setAutoFillBackground(False)
+
+        items = QWidget()
+        items.setProperty("role", "plain")
+        item_layout = QVBoxLayout(items)
+        item_layout.setContentsMargins(0, 0, 0, 0)
+        item_layout.setSpacing(round(6 * scale))
+
         for key, icon_name, label, subtitle in NAV_ITEMS:
             button = NavButton(key, icon_name, label, subtitle)
             button.clicked.connect(lambda _checked=False, k=key: self.show_page(k))
-            layout.addWidget(button)
+            item_layout.addWidget(button)
             self._nav[key] = button
+        item_layout.addStretch(1)
 
-        layout.addStretch(1)
+        scroller.setWidget(items)
+        self._nav_scroll = scroller
+        layout.addWidget(scroller, 1)
+        layout.addSpacing(round(6 * scale))
         layout.addWidget(separator())
         layout.addSpacing(round(6 * scale))
 
@@ -306,6 +348,11 @@ class MainWindow(QMainWindow):
             self._nav[self.current].set_active(False)
         self.current = key
         self._nav[key].set_active(True)
+        # Reaching a page from somewhere other than the menu (a button on the
+        # Home page, say) must bring its menu entry into view on a short screen.
+        scroller = getattr(self, "_nav_scroll", None)
+        if scroller is not None and self._nav[key].parentWidget() is scroller.widget():
+            scroller.ensureWidgetVisible(self._nav[key])
         self.stack.setCurrentWidget(page)
         db.set_setting("last_page", key)
 
@@ -327,7 +374,7 @@ class MainWindow(QMainWindow):
         if email:
             self.status_account.setText(email + (f"  ·  {host}" if host else ""))
         else:
-            self.status_account.setText("No account configured — open 'My email account'")
+            self.status_account.setText("No account configured. Open 'My email account'")
 
         try:
             self.status_middle.setText(warmup.status().describe())
@@ -351,6 +398,8 @@ class MainWindow(QMainWindow):
             "account": not bool(db.get_setting("sender_email", "")),
             "contacts": importer.contact_count() == 0,
             "templates": db.query_one("SELECT 1 FROM bodies WHERE enabled = 1") is None,
+            # Not a setup step: this one means "there is mail you have not read"
+            "inbox": db.inbox_unseen() > 0,
         }
         for key, button in self._nav.items():
             button.set_badge(bool(incomplete.get(key)))

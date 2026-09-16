@@ -32,7 +32,7 @@ def start_file() -> Path:
 def launch_program() -> Path:
     """The program an installed copy starts from.
 
-    Setup makes ``python/HomingPigeon.exe`` — a copy of pythonw.exe under the
+    Setup makes ``python/HomingPigeon.exe``, a copy of pythonw.exe under the
     app's own name, so Windows lists the app as HomingPigeon rather than as
     Python. Installs made before that existed, and the machines where it could
     not be created, still have only pythonw.exe.
@@ -126,7 +126,7 @@ def create_desktop_shortcut() -> tuple[bool, str]:
         detail = (result.stderr or result.stdout or "").strip()[:200]
         return False, f"Could not create the shortcut. {detail}".strip()
 
-    return True, f"Done — look for the '{config.APP_TITLE}' icon on your Desktop."
+    return True, f"Done. Look for the '{config.APP_TITLE}' icon on your Desktop."
 
 
 def open_folder(path: Path | str) -> None:

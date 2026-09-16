@@ -373,3 +373,81 @@ def test_version_resource_is_a_well_formed_tree():
     assert kind == 0                    # binary value
     assert struct.unpack("<L", data[40:44])[0] == 0xFEEF04BD
     assert "HomingPigeon".encode("utf-16-le") in data
+
+
+# --- sidebar ----------------------------------------------------------------
+def test_menu_entries_are_tall_enough_for_two_lines_of_text(qt_app, store):
+    """Guards the bug where re-polishing collapsed every entry to a button's height.
+
+    Qt replaces size constraints set in code with the stylesheet's own
+    ``min-height`` every time it polishes a widget, which it does whenever the
+    application stylesheet changes or a dynamic property is flipped. Both lines
+    of text were being clipped as a result, so the height has to come from the
+    stylesheet and from the widget's size hints, and the two must agree.
+    """
+    from app.ui.main_window import NavButton
+
+    qt_app.setStyleSheet(theme.stylesheet())
+    button = NavButton("account", "account", "My email account", "Connect your email")
+    button.show()
+    try:
+        wanted = theme.nav_height()
+        needed = button.layout().minimumSize().height()
+        assert button.sizeHint().height() == wanted
+        assert button.minimumSizeHint().height() == wanted
+        assert wanted >= needed, "an entry is shorter than its own two lines of text"
+
+        # A restyle, which is what happens on every theme change and on every
+        # selection change, must not shrink it.
+        button.set_active(True)
+        button.set_active(False)
+        assert button.minimumSizeHint().height() == wanted
+        assert f"min-height: {wanted}px" in theme.stylesheet()
+    finally:
+        button.deleteLater()
+
+
+def test_the_menu_can_always_be_scrolled_to_reach_every_page(qt_app, store):
+    """A menu taller than the window must never hide the pages at the bottom."""
+    from PyQt6.QtWidgets import QScrollArea
+
+    from app.ui.main_window import MainWindow
+
+    theme.set_text_scale(1.5)          # the largest text size, the tightest fit
+    qt_app.setStyleSheet(theme.stylesheet())
+    window = MainWindow()
+    window.resize(1000, 640)
+    window.show()
+    try:
+        scroller = window._nav_scroll
+        assert isinstance(scroller, QScrollArea)
+        assert scroller.widgetResizable()
+        # Every menu entry lives inside the scrolling area, so none can be cut off
+        for key, button in window._nav.items():
+            if key == "settings":
+                continue          # pinned below the menu on purpose
+            assert button.parentWidget() is scroller.widget(), key
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+# --- house style ------------------------------------------------------------
+def test_no_em_dashes_or_typographic_ellipses_anywhere():
+    """These read as machine-written, so the app and its docs use plain punctuation."""
+    from pathlib import Path as _Path
+
+    root = _Path(__file__).resolve().parent.parent
+    skip = {"build", "dist", ".git", "__pycache__", ".pytest_cache"}
+    # Built from code points so that this test is not itself an offender
+    banned = {chr(0x2014), chr(0x2013), chr(0x2026)}   # em dash, en dash, ellipsis
+    offenders = []
+    for pattern in ("*.py", "*.md", "*.txt", "*.bat", "*.sh", "*.command"):
+        for path in root.rglob(pattern):
+            if any(part in skip for part in path.parts):
+                continue
+            text = path.read_text(encoding="utf-8")
+            for number, line in enumerate(text.splitlines(), 1):
+                if banned & set(line):
+                    offenders.append(f"{path.relative_to(root).as_posix()}:{number}")
+    assert not offenders, "use '.', ',', ':' or '...' instead: " + ", ".join(offenders[:10])

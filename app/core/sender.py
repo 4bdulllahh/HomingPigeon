@@ -111,13 +111,13 @@ def friendly_smtp_error(error: Exception, settings: SmtpSettings) -> str:
 
     if isinstance(error, smtplib.SMTPConnectError):
         return (f"Could not connect to {settings.host}:{settings.port}. The port may be blocked by "
-                f"your network or firewall — many ISPs block port 25. Try 587.")
+                f"your network or firewall. Many ISPs block port 25. Try 587.")
     if isinstance(error, smtplib.SMTPServerDisconnected):
         return "The server closed the connection unexpectedly. This often means the wrong port or security setting."
     if isinstance(error, smtplib.SMTPNotSupportedError):
         return f"The server does not support the requested feature: {error}"
     if isinstance(error, ssl.SSLError):
-        return (f"TLS handshake failed. Port 465 needs SSL and port 587 needs STARTTLS — "
+        return (f"TLS handshake failed. Port 465 needs SSL and port 587 needs STARTTLS, so "
                 f"you currently have {settings.resolved_security()} on port {settings.port}.")
     if isinstance(error, socket.timeout):
         return f"Timed out connecting to {settings.host}:{settings.port}. Check the host name and your connection."
@@ -180,9 +180,9 @@ def in_send_window(plan: SendPlan, moment: datetime | None = None) -> tuple[bool
     end = _parse_time(plan.window_end, dtime(18, 0))
 
     if plan.weekdays_only and moment.weekday() >= 5:
-        return False, "Weekend — sending is paused until Monday"
+        return False, "Weekend, so sending is paused until Monday"
     if plan.skip_holidays and moment.date().isoformat() in holidays():
-        return False, "Public holiday — sending is paused"
+        return False, "Public holiday, so sending is paused"
 
     current = moment.time()
     if start <= end:
@@ -190,7 +190,7 @@ def in_send_window(plan: SendPlan, moment: datetime | None = None) -> tuple[bool
     else:  # window crosses midnight
         inside = current >= start or current <= end
     if not inside:
-        return False, f"Outside the sending window ({plan.window_start}–{plan.window_end})"
+        return False, f"Outside the sending window ({plan.window_start} to {plan.window_end})"
     return True, ""
 
 
@@ -288,7 +288,7 @@ class SendWorker(threading.Thread):
             except Exception:
                 pass  # fall through and reconnect
         self._close_server()
-        self._log(f"Connecting to {self.plan.smtp.host}:{self.plan.smtp.port}…")
+        self._log(f"Connecting to {self.plan.smtp.host}:{self.plan.smtp.port}...")
         self._server = open_smtp(self.plan.smtp)
         self._since_reconnect = 0
         self._log("Connected and authenticated.", "success")
@@ -399,7 +399,7 @@ class SendWorker(threading.Thread):
             if db.is_suppressed(email):
                 self._mark(contact["id"], "skipped", last_error="On the suppression list")
                 self.skipped += 1
-                self._log(f"Skipped {email} — on the suppression list.", "warn")
+                self._log(f"Skipped {email}: on the suppression list.", "warn")
                 continue
 
             try:
@@ -444,9 +444,9 @@ class SendWorker(threading.Thread):
                 self._consecutive_failures += 1
                 if permanent:
                     db.suppress(email, f"Rejected by server ({code})", source="send")
-                    self._log(f"Rejected permanently: {email} — {detail}", "error")
+                    self._log(f"Rejected permanently: {email}, {detail}", "error")
                 else:
-                    self._log(f"Temporary failure: {email} — {detail}", "warn")
+                    self._log(f"Temporary failure: {email}, {detail}", "warn")
             except (smtplib.SMTPServerDisconnected, smtplib.SMTPConnectError) as error:
                 self._mark(contact["id"], "retry", last_error=str(error)[:400])
                 self._consecutive_failures += 1
@@ -464,7 +464,7 @@ class SendWorker(threading.Thread):
                 self._mark(contact["id"], "sent", sent_at=db.now(), subject_used=subject,
                            body_variant=variant, message_id=message["Message-ID"], last_error=None)
                 warmup.record_sent(1)
-                self._emit(Event(EventType.SENT, f"{email} — {subject}", "success",
+                self._emit(Event(EventType.SENT, f"{email}: {subject}", "success",
                                  data={"email": email, "subject": subject}))
 
             processed += 1
@@ -477,7 +477,7 @@ class SendWorker(threading.Thread):
             if self._consecutive_failures >= config.MAX_CONSECUTIVE_FAILURES:
                 self._log(
                     f"Stopped: {self._consecutive_failures} failures in a row. Something is wrong "
-                    f"with the connection or the account — continuing would damage your sending "
+                    f"with the connection or the account. Continuing would damage your sending "
                     f"reputation.", "error")
                 self._set_state(State.ERROR)
                 break

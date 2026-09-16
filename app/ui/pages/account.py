@@ -143,7 +143,7 @@ class AccountPage(Page):
 
         # --- imap -----------------------------------------------------------
         imap = Section(
-            "Incoming mail (IMAP) — optional but strongly recommended",
+            "Incoming mail (IMAP): optional, but strongly recommended",
             "Lets the app read your inbox to detect bounces, unsubscribe replies and genuine "
             "replies. Bounced addresses are removed automatically, which is the single most "
             "effective way to protect your sending reputation.")
@@ -245,7 +245,7 @@ class AccountPage(Page):
             host=self.smtp_host_box.text().strip(),
             port=port,
             # Same fallback the send worker uses, so a passing test guarantees a
-            # working send — otherwise a blank username would test one way and send another.
+            # working send. Otherwise a blank username would test one way and send another.
             username=self.username_box.text().strip() or self.email_box.text().strip(),
             password=self.password_box.text(),
             security=self._security_value(),
@@ -274,8 +274,8 @@ class AccountPage(Page):
             return
 
         self.test_button.setEnabled(False)
-        self.test_button.setText("Testing…")
-        self.smtp_result.setText("Connecting…")
+        self.test_button.setText("Testing...")
+        self.smtp_result.setText("Connecting...")
         set_tone(self.smtp_result, "muted")
 
         Task(jobs.test_smtp, settings).start(
@@ -289,7 +289,7 @@ class AccountPage(Page):
         set_tone(self.smtp_result, "success" if ok else "error")
         if ok:
             self.save(silent=True)
-            self.notify("Connection successful — settings saved", "success")
+            self.notify("Connection successful, settings saved", "success")
 
     def _test_imap(self) -> None:
         settings = self._imap_settings()
@@ -299,8 +299,8 @@ class AccountPage(Page):
             return
 
         self.imap_test_button.setEnabled(False)
-        self.imap_test_button.setText("Testing…")
-        self.imap_result.setText("Connecting…")
+        self.imap_test_button.setText("Testing...")
+        self.imap_result.setText("Connecting...")
         set_tone(self.imap_result, "muted")
 
         Task(jobs.test_imap, settings).start(

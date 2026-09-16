@@ -226,7 +226,7 @@ class FormRow(QWidget):
 class StatTile(Card):
     """A big number with a caption and a one-line hint."""
 
-    def __init__(self, caption: str, value: str = "—", note: str = "", tone: str | None = None,
+    def __init__(self, caption: str, value: str = "-", note: str = "", tone: str | None = None,
                  parent=None):
         super().__init__(parent, kind="card", padding=14)
         self.layout_.setSpacing(1)
@@ -251,7 +251,7 @@ class ProgressRow(QWidget):
     """A slim progress bar with the percentage printed beside it.
 
     QProgressBar draws its own "42%" centred *inside* the track, and the app's
-    track is six pixels tall — so the text was clipped to a smear across the
+    track is six pixels tall, so the text was clipped to a smear across the
     middle of the bar. Keeping the bar thin and putting the number next to it
     is legible at every text size and in all four themes.
     """

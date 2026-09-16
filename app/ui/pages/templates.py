@@ -20,7 +20,7 @@ from app.ui.widgets.inputs import (Debouncer, checkbox, get_text, line_edit, rea
 from app.workers import jobs
 from app.workers.base import Task
 
-# Examples are never filled in automatically — the app starts blank and these are
+# Examples are never filled in automatically. The app starts blank and these are
 # only inserted when the user presses "Show me an example".
 EXAMPLE_SUBJECTS = [
     "{A quick question|Quick question} about {{Company}}",
@@ -65,7 +65,7 @@ EMPTY_HINT = ("Nothing here yet.\n\n"
 SCORE_HELP_INTRO = (
     "Every message starts at 100. The checks below run over your subjects, your message, "
     "your signature and your domain settings, and each problem found takes points off. "
-    "Nothing is sent anywhere — the whole check runs on your computer.")
+    "Nothing is sent anywhere. The whole check runs on your computer.")
 
 SCORE_HELP_SECTIONS = [
     ("How much each problem costs", [
@@ -78,7 +78,7 @@ SCORE_HELP_SECTIONS = [
     ("Your subject lines", [
         "Keep them under about 60 characters, or phones cut them off.",
         "Sentence case only. Mostly-capitals reads as shouting and is penalised heavily.",
-        "At most one exclamation mark — ideally none.",
+        "At most one exclamation mark, ideally none.",
         "Avoid promotional wording: free, urgent, act now, limited time, discount, "
         "guarantee, winner, click here.",
         "Never fake a thread with 'Re:' or 'Fwd:' on a first contact. That is treated as "
@@ -86,7 +86,7 @@ SCORE_HELP_SECTIONS = [
         "Put {{Company}} in the subject so no two recipients get an identical one.",
     ]),
     ("Your message", [
-        "Aim for 80–200 words. Very short mail with a link looks like phishing; very long "
+        "Aim for 80 to 200 words. Very short mail with a link looks like phishing; very long "
         "first emails get ignored.",
         "Write in plain business language. Five or more sales-pitch phrases is a heavy penalty.",
         "One or two links at most, to your own domain, over https. Link shorteners and raw "
@@ -95,10 +95,10 @@ SCORE_HELP_SECTIONS = [
         "spam pattern, and most email programs block images by default anyway.",
         "Keep a clear opt-out line. The app adds one for you unless you switch it off.",
     ]),
-    ("Variety — the one most people miss", [
+    ("Variety, the one most people miss", [
         "Hundreds of identical messages are what filters fingerprint, and it is the most "
         "common reason a perfectly polite campaign gets blocked.",
-        "Write 3 or more subject lines and 2–3 versions of the message.",
+        "Write 3 or more subject lines and 2 or 3 versions of the message.",
         "Use spintax like {Hi|Hello|Good morning} to multiply the combinations further.",
         "The check wants at least 10 genuinely different versions of the email.",
     ]),
@@ -106,7 +106,7 @@ SCORE_HELP_SECTIONS = [
         "Send from your own company domain. A free Gmail or Outlook address cannot pass "
         "DMARC for your brand and is filtered much harder for bulk sending.",
         "Keep Reply-To on the same domain as From. A mismatch is a phishing pattern.",
-        "Fix SPF, DKIM and DMARC on the Domain check page — failures there are the single "
+        "Fix SPF, DKIM and DMARC on the Domain check page. Failures there are the single "
         "biggest cause of mail landing in spam, and they cost critical points here.",
         "Give a real signature: name, company, phone number and address.",
     ]),
@@ -119,7 +119,7 @@ SCORE_HELP_SECTIONS = [
 
 SCORE_HELP_FOOTER = (
     "This is a guide based on what mail filters are known to react to, not a guarantee. "
-    "Re-run the check after any change — the score updates as you type.")
+    "Re-run the check after any change. The score updates as you type.")
 
 
 class VariantEditor(Card):
@@ -202,7 +202,7 @@ class TemplatesPage(Page):
         self.add_header(
             "Templates",
             "Write several subjects and bodies. The app picks a different combination for each "
-            "recipient, so hundreds of identical messages never go out — that is what spam "
+            "recipient, so hundreds of identical messages never go out. That is what spam "
             "filters fingerprint.")
 
         self.tabs = TabBar()
@@ -384,13 +384,13 @@ class TemplatesPage(Page):
         for text in EXAMPLE_SUBJECTS:
             self._add_subject(text)
         self._content_changed()
-        self.notify("Example subject lines added — edit them to suit your business",
+        self.notify("Example subject lines added. Edit them to suit your business",
                     "info", 6000)
 
     def _example_body(self) -> None:
         self._add_body(EXAMPLE_BODY)
         self._content_changed()
-        self.notify("Example message added — replace the [square brackets] with your own words",
+        self.notify("Example message added. Replace the [square brackets] with your own words",
                     "info", 6000)
 
     # --- preview ------------------------------------------------------------
@@ -426,7 +426,7 @@ class TemplatesPage(Page):
         help_button = small_button("?  How this works", self._explain_score)
         help_button.setToolTip("What the score measures, and how to write a better email")
         right.add(row(subheading("Spam score"), None, help_button))
-        self.score_label = muted("—", wrap=False)
+        self.score_label = muted("-", wrap=False)
         self.score_label.setProperty("role", "score")
         right.add(self.score_label)
         self.score_verdict = muted("Refresh to check")
@@ -491,8 +491,8 @@ class TemplatesPage(Page):
         identity = self._identity()
 
         self.preview_contact.setText(
-            f"Previewing as: {contact.get('person') or '—'} · "
-            f"{contact.get('company') or '—'} · {contact.get('email')}")
+            f"Previewing as: {contact.get('person') or '-'} · "
+            f"{contact.get('company') or '-'} · {contact.get('email')}")
 
         # Rendering and scoring both parse the whole message; neither belongs on
         # the UI thread while the user is still typing.
@@ -521,7 +521,7 @@ class TemplatesPage(Page):
         self.score_label.setText(str(report.score))
         self.score_label.setStyleSheet(
             f"color: {colour}; font-size: {theme.px(36)}px; font-weight: 700;")
-        self.score_verdict.setText(f"Grade {report.grade} — {report.verdict}")
+        self.score_verdict.setText(f"Grade {report.grade}: {report.verdict}")
         self.score_verdict.setStyleSheet(f"color: {colour};")
 
         clear_layout(self.findings_area.body_layout)
@@ -549,7 +549,7 @@ class TemplatesPage(Page):
     def _open_in_browser(self) -> None:
         if not self._preview_html:
             self.refresh_preview()
-            self.notify("Building the preview — press again in a moment", "info", 3000)
+            self.notify("Building the preview. Press again in a moment", "info", 3000)
             return
         path = Path(tempfile.gettempdir()) / "homingpigeon_preview.html"
         path.write_text(self._preview_html, encoding="utf-8")

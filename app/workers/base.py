@@ -1,7 +1,7 @@
 """Background work primitives.
 
-Nothing that can block — a DNS lookup, an SMTP handshake, reading a 50 MB
-spreadsheet, scoring an email body — may run on the UI thread. Everything in
+Nothing that can block, such as a DNS lookup, an SMTP handshake, reading a 50 MB
+spreadsheet, scoring an email body, may run on the UI thread. Everything in
 this package runs on a ``QThreadPool`` worker and talks back to the UI through
 ``pyqtSignal``, which Qt queues onto the main thread automatically. That is the
 only safe way to touch a widget from another thread.

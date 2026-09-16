@@ -123,7 +123,7 @@ class RangeSlider(QWidget):
         if self.low == self.high:
             return f"Exactly {format_seconds(self.low)} between each email"
         per_hour = int(3600 / ((self.low + self.high) / 2))
-        return (f"{format_seconds(self.low)} – {format_seconds(self.high)} between each email"
+        return (f"{format_seconds(self.low)} to {format_seconds(self.high)} between each email"
                 f"   ·   roughly {per_hour} per hour")
 
     # --- painting -----------------------------------------------------------

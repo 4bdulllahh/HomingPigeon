@@ -388,3 +388,164 @@ def test_warmup_records_sends():
     before = warmup.status().sent_today
     warmup.record_sent(3)
     assert warmup.status().sent_today == before + 3
+
+
+# --- the stored inbox -------------------------------------------------------
+def _sample_message(raw: str):
+    import email
+
+    return email.message_from_string(raw)
+
+
+REPLY_MESSAGE = """From: "Lead Person" <lead@inboxtest.test>
+To: me@mine.test
+Subject: Re: Quick question
+Date: Tue, 15 Sep 2026 14:32:11 +0100
+Content-Type: text/plain; charset="utf-8"
+
+Yes please send the brochure.
+"""
+
+HTML_MESSAGE = """From: Someone <html@inboxtest.test>
+Subject: =?utf-8?q?A_caf=C3=A9_note?=
+Date: Mon, 14 Sep 2026 09:00:00 +0000
+MIME-Version: 1.0
+Content-Type: text/html; charset="utf-8"
+
+<html><body><style>p{color:red}</style><p>Hello&nbsp;&amp; welcome</p></body></html>
+"""
+
+
+def test_reply_is_classified_and_readable():
+    from app.core import imap_sync
+
+    db.execute("INSERT INTO contacts(email, company, person, valid) VALUES (?,?,?,1)",
+               ("lead@inboxtest.test", "Acme", "Lead Person"))
+    message = _sample_message(REPLY_MESSAGE)
+    result = imap_sync.SyncResult()
+
+    kind, known = imap_sync._classify(message, result)
+    assert (kind, known) == ("reply", True)
+    assert imap_sync.sender_name(message) == "Lead Person"
+    assert imap_sync.readable_body(message) == "Yes please send the brochure."
+    assert imap_sync.received_at(message).startswith("2026-09-15T")
+
+
+def test_html_only_message_is_stored_as_text():
+    from app.core import imap_sync
+
+    message = _sample_message(HTML_MESSAGE)
+    body = imap_sync.readable_body(message)
+    assert "<p>" not in body and "color:red" not in body
+    assert "Hello" in body and "welcome" in body
+    # A header encoded per RFC 2047 has to come back as the characters it means
+    assert "café" in imap_sync._decode_header(message.get("Subject"))
+
+
+def test_mail_from_a_stranger_is_kept_but_not_counted_as_a_reply():
+    from app.core import imap_sync
+
+    result = imap_sync.SyncResult()
+    kind, known = imap_sync._classify(_sample_message(HTML_MESSAGE), result)
+    assert (kind, known) == ("other", False)
+    assert result.replies == []
+
+
+def test_saved_message_survives_a_second_fetch_of_the_same_uid():
+    db.clear_inbox()
+    db.save_message("INBOX", 42, from_name="A", from_email="a@x.test", subject="First",
+                    body="one", received_at="2026-09-16T10:00:00", kind="reply", known=True)
+    stored = db.inbox_messages()[0]
+    assert db.inbox_unseen() == 1
+
+    db.mark_message_seen(stored["id"])
+    db.save_message("INBOX", 42, from_name="A", from_email="a@x.test", subject="Second",
+                    body="two", received_at="2026-09-16T10:00:00", kind="reply", known=True)
+
+    rows = db.inbox_messages()
+    assert len(rows) == 1                 # the same UID is the same message
+    assert rows[0]["subject"] == "Second"  # with its content brought up to date
+    assert rows[0]["seen"] == 1            # and still marked as read
+    assert db.inbox_unseen() == 0
+
+
+def test_inbox_filters_and_trim():
+    db.clear_inbox()
+    for n, kind in enumerate(("reply", "bounce", "optout", "other", "reply")):
+        db.save_message("INBOX", 200 + n, from_name=f"S{n}", from_email="s@x.test",
+                        subject=f"M{n}", body="b", received_at=f"2026-09-{n + 1:02d}T10:00:00",
+                        kind=kind, known=False)
+    assert len(db.inbox_messages()) == 5
+    assert len(db.inbox_messages("reply")) == 2
+    assert len(db.inbox_messages("bounce")) == 1
+    assert db.inbox_messages("no-such-kind") == []
+
+    db.trim_inbox(2)
+    kept = db.inbox_messages()
+    assert len(kept) == 2
+    assert [r["subject"] for r in kept] == ["M4", "M3"]  # the newest survive
+
+    db.mark_all_messages_seen()
+    assert db.inbox_unseen() == 0
+
+
+def test_a_badly_labelled_message_does_not_abort_the_check():
+    """Mail in the wild lies about charsets, and one bad message used to lose the lot.
+
+    A made-up charset name makes bytes.decode raise LookupError rather than
+    UnicodeDecodeError, which escaped the sync and abandoned the whole inbox
+    check. A part labelled ASCII that is not ASCII is almost always UTF-8.
+    """
+    from app.core import imap_sync
+
+    made_up = _sample_message(
+        "From: Lead <lead@inboxtest.test>\n"
+        "Subject: Re: charset\n"
+        'Content-Type: text/plain; charset="totally-made-up"\n'
+        "\n"
+        "plain words\n")
+    assert imap_sync.readable_body(made_up) == "plain words"
+    assert imap_sync.is_unsubscribe(made_up) is False   # this reads the body too
+
+    mislabelled = _sample_message(
+        "From: Lead <lead@inboxtest.test>\n"
+        "Subject: Re: accents\n"
+        'Content-Type: text/plain; charset="us-ascii"\n'
+        "\n"
+        "Caf\u00e9 r\u00e9sum\u00e9\n")
+    assert imap_sync.readable_body(mislabelled) == "Caf\u00e9 r\u00e9sum\u00e9"
+
+
+def test_only_the_readable_parts_of_a_message_are_kept():
+    """An attached file must not end up in the body text, and plain text wins."""
+    from app.core import imap_sync
+
+    message = _sample_message(
+        "From: Lead <lead@inboxtest.test>\n"
+        "Subject: Re: attached\n"
+        "MIME-Version: 1.0\n"
+        'Content-Type: multipart/mixed; boundary="A"\n'
+        "\n"
+        "--A\n"
+        'Content-Type: multipart/alternative; boundary="B"\n'
+        "\n"
+        "--B\n"
+        "Content-Type: text/plain\n"
+        "\n"
+        "The plain version.\n"
+        "--B\n"
+        "Content-Type: text/html\n"
+        "\n"
+        "<p>The HTML version.</p>\n"
+        "--B--\n"
+        "\n"
+        "--A\n"
+        'Content-Type: application/pdf; name="prices.pdf"\n'
+        "Content-Transfer-Encoding: base64\n"
+        "\n"
+        "JVBERi0xLjQK\n"
+        "\n"
+        "--A--\n")
+    body = imap_sync.readable_body(message)
+    assert body == "The plain version."
+    assert "JVBERi" not in body

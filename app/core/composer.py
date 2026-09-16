@@ -2,7 +2,7 @@
 
 Every message is multipart/alternative (HTML + a generated plain-text part),
 carries proper List-Unsubscribe headers, and deliberately omits any X-Mailer
-header — bulk tools that advertise themselves in the headers get filtered.
+header. Bulk tools that advertise themselves in the headers get filtered.
 """
 from __future__ import annotations
 
@@ -146,7 +146,7 @@ def check_attachment(path: str | Path) -> int:
     size = file_path.stat().st_size
     if size > config.MAX_ATTACHMENT_BYTES:
         raise AttachmentTooLarge(
-            f"{file_path.name} is {size / 1_048_576:.1f} MB — the limit is "
+            f"{file_path.name} is {size / 1_048_576:.1f} MB. The limit is "
             f"{config.MAX_ATTACHMENT_BYTES / 1_048_576:.0f} MB"
         )
     return size

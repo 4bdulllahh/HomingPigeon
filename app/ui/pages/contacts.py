@@ -55,10 +55,10 @@ class ContactsPage(Page):
         picker = Section("1. Choose your file",
                          "Excel (.xlsx, .xls) or CSV. The original file is only read, never changed.")
         self.file_label = muted("No file selected", wrap=False)
-        picker.add(row(self.file_label, None, primary_button("Browse…", self._browse, 120)))
+        picker.add(row(self.file_label, None, primary_button("Browse...", self._browse, 120)))
 
         self.sheet_row = FormRow("Sheet")
-        self.sheet_picker = combo(["—"], on_change=lambda _t: self._load_preview())
+        self.sheet_picker = combo(["-"], on_change=lambda _t: self._load_preview())
         self.sheet_row.add(self.sheet_picker)
         self.sheet_row.setVisible(False)
         picker.add(self.sheet_row)
@@ -66,7 +66,7 @@ class ContactsPage(Page):
 
         self.mapping_section = Section(
             "2. Check the columns",
-            "Detected automatically — change any that are wrong. Every other column is kept "
+            "Detected automatically. Change any that are wrong. Every other column is kept "
             "and becomes available as a merge tag in your templates.")
         self.mapping_section.setVisible(False)
         area.add(self.mapping_section)
@@ -114,7 +114,7 @@ class ContactsPage(Page):
         self._path = Path(path)
         self.file_label.setText(self._path.name)
         set_tone(self.file_label, "bright")
-        self.import_status.setText("Opening the file…")
+        self.import_status.setText("Opening the file...")
 
         Task(jobs.read_sheet_names, self._path).start(
             on_result=self._sheets_ready,
@@ -129,10 +129,10 @@ class ContactsPage(Page):
         if not self._path:
             return
         sheet = self.sheet_picker.currentText()
-        self.import_status.setText("Reading the sheet…")
+        self.import_status.setText("Reading the sheet...")
         set_tone(self.import_status, "muted")
 
-        Task(jobs.read_preview, self._path, None if sheet in ("CSV", "—") else sheet).start(
+        Task(jobs.read_preview, self._path, None if sheet in ("CSV", "-") else sheet).start(
             on_result=self._preview_ready,
             on_error=lambda message: self._fail(f"Could not read the sheet: {message}"))
 
@@ -217,11 +217,11 @@ class ContactsPage(Page):
             return
 
         self.import_button.setEnabled(False)
-        self.import_button.setText("Importing…")
+        self.import_button.setText("Importing...")
         self.cancel_button.setVisible(True)
         self.progress.setVisible(True)
         self.progress.set_busy()              # sweeping until the first report
-        self.import_status.setText("Starting…")
+        self.import_status.setText("Starting...")
         set_tone(self.import_status, "muted")
 
         worker = jobs.ImportWorker(self._dataframe, mapping,
@@ -270,7 +270,7 @@ class ContactsPage(Page):
         if result.problems:
             lines = [f"{email or '(blank)':40} {reason}" for email, reason in result.problems[:200]]
             if len(result.problems) > 200:
-                lines.append(f"… and {len(result.problems) - 200:,} more")
+                lines.append(f"... and {len(result.problems) - 200:,} more")
             self.problems_box.setPlainText("\n".join(lines))
             self.problems_box.setVisible(True)
         else:
@@ -298,7 +298,7 @@ class ContactsPage(Page):
 
         # Filtering happens as you type, debounced so a long list is not
         # re-queried on every keystroke.
-        self.search_box = line_edit("Search by email, company or person — filters as you type")
+        self.search_box = line_edit("Search by email, company or person. Filters as you type")
         self.search_box.setClearButtonEnabled(True)
         self._search_debounce = Debouncer(220, self)
         self._search_debounce.connect(self._apply_search)
@@ -307,8 +307,8 @@ class ContactsPage(Page):
 
         self.delete_button = danger_button("Delete selected", self._delete_selected, 150)
         self.delete_button.setEnabled(False)
-        self.clear_button = danger_button("Clear whole list…", self._clear_list, 160)
-        export_button = secondary_button("Export…", self._export_contacts, 110)
+        self.clear_button = danger_button("Clear whole list...", self._clear_list, 160)
+        export_button = secondary_button("Export...", self._export_contacts, 110)
 
         controls = QHBoxLayout()
         controls.setSpacing(8)
@@ -324,7 +324,7 @@ class ContactsPage(Page):
         self.contacts_model.counts_changed.connect(self._update_counts)
         self.contacts_table = DataTable(
             self.contacts_model,
-            "No contacts yet — import a spreadsheet on the Import tab.",
+            "No contacts yet. Import a spreadsheet on the Import tab.",
             multi_select=True)
         self.contacts_table.selection_changed.connect(self._selection_changed)
         self.contacts_table.set_context_menu(self._contact_menu)
@@ -443,14 +443,14 @@ class ContactsPage(Page):
             return
 
         # Deleting 100,000 rows and their campaign history takes seconds, and
-        # doing it on the UI thread froze the window — which is what looked
+        # doing it on the UI thread froze the window, which is what looked
         # like a crash. It runs on a worker, and the view lets go of its rows
         # first so nothing is left pointing at records that no longer exist.
         self.contacts_table.clear_selection()
         self.contacts_model.set_rows_empty()
         self.clear_button.setEnabled(False)
-        self.clear_button.setText("Clearing…")
-        self.contacts_summary.setText("Clearing the contact list…")
+        self.clear_button.setText("Clearing...")
+        self.contacts_summary.setText("Clearing the contact list...")
 
         Task(ContactsModel.clear_all).start(
             on_result=self._clear_done, on_error=self._clear_failed,
@@ -458,14 +458,14 @@ class ContactsPage(Page):
 
     def _clear_finished(self) -> None:
         self.clear_button.setEnabled(True)
-        self.clear_button.setText("Clear whole list…")
+        self.clear_button.setText("Clear whole list...")
 
     def _clear_done(self, removed: int) -> None:
         self.contacts_model.reload()
         self._selection_changed()
         self.window_.refresh_status()
         self._refresh_completer()
-        self.notify(f"{removed:,} contacts removed — ready for a new import", "success")
+        self.notify(f"{removed:,} contacts removed, ready for a new import", "success")
 
     def _clear_failed(self, message: str) -> None:
         self.contacts_model.reload()
@@ -510,14 +510,14 @@ class ContactsPage(Page):
 
         # Suggests addresses from the contact list as you type, so an address can
         # be found and suppressed without hunting for the exact spelling.
-        self.suppress_box = line_edit("Start typing an address — suggestions come from your "
+        self.suppress_box = line_edit("Start typing an address. Suggestions come from your "
                                       "contact list")
         self.suppress_box.returnPressed.connect(self._add_suppression)
         update_completer(self.suppress_box, [])
 
         add_button = primary_button("Add", self._add_suppression, 90)
         remove_button = secondary_button("Remove selected", self._remove_suppression, 160)
-        import_button = secondary_button("Import list…", self._import_suppression, 130)
+        import_button = secondary_button("Import list...", self._import_suppression, 130)
         export_button = secondary_button("Export", self._export_suppression, 100)
 
         controls = QHBoxLayout()

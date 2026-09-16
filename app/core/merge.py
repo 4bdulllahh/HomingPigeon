@@ -207,7 +207,7 @@ def validate_spintax(text: str) -> str | None:
             if depth < 0:
                 return f"Unmatched closing brace at position {index}"
     if depth > 0:
-        return f"{depth} unclosed brace(s) — every {{ needs a matching }}"
+        return f"{depth} unclosed brace(s). Every {{ needs a matching }}"
     return None
 
 

@@ -172,7 +172,7 @@ def validate_email(email: str) -> tuple[bool, str]:
         return False, "not a valid address format"
     domain = email.split("@", 1)[1].lower()
     if domain in TYPO_DOMAINS:
-        return False, f"likely typo — did you mean {TYPO_DOMAINS[domain]}?"
+        return False, f"likely typo, did you mean {TYPO_DOMAINS[domain]}?"
     if domain.endswith("."):
         return False, "domain ends with a dot"
     return True, ""

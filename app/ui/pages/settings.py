@@ -82,7 +82,7 @@ class SettingsPage(Page):
                                          on_change=self.window_.change_appearance))
 
         control = self._setting(section, "Text size",
-                                "Makes everything in the app bigger — text, buttons and boxes.")
+                                "Makes everything in the app bigger: text, buttons and boxes.")
         self._put(control, ChoiceButtons(
             [(key, label) for key, label, _scale in prefs.TEXT_SIZES],
             prefs.get("text_size"), on_change=self.window_.change_text_size))
@@ -174,12 +174,12 @@ class SettingsPage(Page):
 
         control = self._setting(
             section, "Backups",
-            "Save a copy of everything to a file you choose — a USB stick or cloud folder is "
+            "Save a copy of everything to a file you choose. A USB stick or cloud folder is "
             "ideal. Email passwords aren't included in backups; you type them in again after "
             "restoring.")
         self._put(control, row(
-            primary_button("Back up my information…", self._backup, 230),
-            secondary_button("Restore from a backup…", self._restore, 215), None))
+            primary_button("Back up my information...", self._backup, 230),
+            secondary_button("Restore from a backup...", self._restore, 215), None))
 
         control = self._setting(
             section, "Saved passwords",
@@ -257,7 +257,7 @@ class SettingsPage(Page):
 
     def _check_updates(self) -> None:
         self.update_button.setEnabled(False)
-        self.update_button.setText("Checking…")
+        self.update_button.setText("Checking...")
         self.update_status.setText("")
         self.download_button.setVisible(False)
 
@@ -297,7 +297,7 @@ class SettingsPage(Page):
             card.add(muted(
                 "Removes HomingPigeon, its shortcuts and its private copy of Python from this "
                 "computer. You'll be asked whether to keep your contacts, templates and settings."))
-            card.add(row(danger_button("Uninstall HomingPigeon…", self._uninstall, 250), None))
+            card.add(row(danger_button("Uninstall HomingPigeon...", self._uninstall, 250), None))
         else:
             card.add(muted(
                 f"This copy wasn't installed with HomingPigeon Setup, so there's nothing to "
@@ -307,7 +307,7 @@ class SettingsPage(Page):
             card.add(row(
                 secondary_button("Open the app's folder",
                                  lambda: shortcut.open_folder(shortcut.app_location()), 200),
-                danger_button("Delete my saved information…", self._delete_data_only, 270),
+                danger_button("Delete my saved information...", self._delete_data_only, 270),
                 None))
         return card
 
@@ -318,7 +318,7 @@ class SettingsPage(Page):
         choice = ChoiceDialog.ask(
             self, "Uninstall HomingPigeon?",
             "HomingPigeon, its shortcuts and its private copy of Python will be removed.\n\n"
-            "What should happen to your saved information — contacts, templates, settings "
+            "What should happen to your saved information: contacts, templates, settings "
             "and campaign history?",
             [("keep", "Uninstall, and keep my information", "primary"),
              ("delete", "Uninstall, and delete my information too", "danger"),

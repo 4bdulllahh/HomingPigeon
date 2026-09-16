@@ -1,7 +1,7 @@
 """Sent emails: the record of everything that actually went out, and what came back.
 
 The Send page shows a campaign while it runs and then forgets it. This is the
-history — one row per email, with the address, the time, the subject that was
+history: one row per email, with the address, the time, the subject that was
 used and whether it was answered, bounced or failed. It is deliberately shaped
 like the contact list, including the spreadsheet's own columns, so what is on
 screen can be matched back to the master file the leads came from.
@@ -53,14 +53,14 @@ class SentPage(Page):
         controls.setSpacing(8)
 
         self.search_box = line_edit(
-            "Search by email, company, person or subject — filters as you type")
+            "Search by email, company, person or subject. Filters as you type")
         self.search_box.setClearButtonEnabled(True)
         self._search_debounce = Debouncer(220, self)
         self._search_debounce.connect(self._apply_search)
         self.search_box.textChanged.connect(lambda _t: self._search_debounce.poke())
         self.search_box.returnPressed.connect(self._search_debounce.flush)
         controls.addWidget(self.search_box, 1)
-        controls.addWidget(secondary_button("Export to Excel…", self._export, 170))
+        controls.addWidget(secondary_button("Export to Excel...", self._export, 170))
         self.root.addWidget(controls_holder)
 
         self.filters = ChoiceButtons(FILTERS, "all", on_change=self._apply_filter)
@@ -80,7 +80,7 @@ class SentPage(Page):
 
         self.root.addWidget(hint(
             "Scroll sideways for the rest of your spreadsheet's columns. Right-click a row to "
-            "copy the address. 'Export to Excel…' saves the whole list, filter and all."))
+            "copy the address. 'Export to Excel...' saves the whole list, filter and all."))
 
         self.table.deselect_on_click_outside(self, self.summary)
 
@@ -110,7 +110,7 @@ class SentPage(Page):
             f"{counts['replied']:,}", f"{counts['replied'] / total * 100:.1f}% reply rate")
         self.tile_bounced.update_value(
             f"{counts['bounced']:,}", "keep below 5%"
-            if counts["bounced"] / total <= 0.05 else "too high — clean your list")
+            if counts["bounced"] / total <= 0.05 else "too high, clean your list")
         self.tile_failed.update_value(f"{counts['failed']:,}", "never reached the server")
         self._update_summary()
 
@@ -160,7 +160,7 @@ class SentPage(Page):
             return
         from app.core import exporter
 
-        self.notify("Building the spreadsheet…", "info", 2000)
+        self.notify("Building the spreadsheet...", "info", 2000)
         Task(exporter.export_sent, path).start(
             on_result=lambda saved: self.notify(f"Saved to {Path(saved).name}", "success"),
             on_error=lambda message: self.notify(f"Export failed: {message}", "error"))

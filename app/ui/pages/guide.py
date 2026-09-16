@@ -15,7 +15,7 @@ from app.ui.widgets.common import (Card, clear_layout, confirm_button, hint, mut
                                    secondary_button, set_tone, subheading)
 
 INTRO = (
-    "Welcome. This page walks you through everything, in order — work down the list from the "
+    "Welcome. This page walks you through everything, in order. Work down the list from the "
     "top and each step ticks itself off when it is done.\n\n"
     "Email providers judge every message by who sent it, not just what it says. A brand-new "
     "sender pushing out hundreds of identical emails looks exactly like a spammer, and once your "
@@ -83,7 +83,7 @@ class GuidePage(Page):
         area.add_stretch()
 
     def _launch_card(self) -> QWidget:
-        """How to find and reopen the app — the first thing a new user needs."""
+        """How to find and reopen the app, the first thing a new user needs."""
         card = Card(kind="tint-card", padding=18)
         card.add(subheading("Opening HomingPigeon next time"))
         card.add(muted(shortcut.how_to_launch()))
@@ -154,7 +154,7 @@ class GuidePage(Page):
                 "title": "Publish a DMARC record",
                 "why": "DMARC ties SPF and DKIM together and tells receivers what to do when a "
                        "message fails. Gmail and Yahoo now require one from anyone sending in "
-                       "volume — without it, bulk mail is routinely rejected.",
+                       "volume. Without it, bulk mail is routinely rejected.",
                 "how": "Open 'Domain check' → DMARC generator. Start with p=none, and move to "
                        "quarantine and then reject once your reports look clean.",
                 "done": dns_status.get("DMARC") in ("pass", "warn"),
@@ -186,7 +186,7 @@ class GuidePage(Page):
                 "title": "Check your spam score",
                 "why": "Trigger words, shouting capitals, image-heavy layouts, link shorteners "
                        "and attachments on first contact all push a message toward the spam "
-                       "folder — often without you realising.",
+                       "folder, often without you realising.",
                 "how": "'My message' → Preview & score. Aim for 85 or above, and fix anything "
                        "marked critical or high before sending.",
                 "done": bool(report and report.score >= 70),
@@ -220,7 +220,7 @@ class GuidePage(Page):
                        "possible signal that you are not managing your list. Removing them "
                        "immediately protects the reputation you are building.",
                 "how": "Add your IMAP details on the 'My email account' page, then check the "
-                       "inbox regularly from the 'Replies & bounces' page.",
+                       "inbox regularly from the 'My inbox' page.",
                 "done": bool(db.get_setting("imap_host", "")),
                 "action": lambda: self.go("account"),
             },

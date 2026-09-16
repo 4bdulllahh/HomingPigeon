@@ -5,7 +5,7 @@ current appearance/contrast setting, and :func:`stylesheet` turns it into a
 single QSS string applied with ``QApplication.setStyleSheet``.
 
 That is the whole point of this module. Switching theme, contrast, bold text or
-text size never destroys or rebuilds a widget — it re-renders one string and
+text size never destroys or rebuilds a widget. It re-renders one string and
 hands it to Qt, which repaints in a single frame. The old CustomTkinter build
 had to tear down and rebuild every page, which is what made Settings feel slow.
 """
@@ -29,6 +29,24 @@ BUTTON_HEIGHT_LARGE = 44
 
 # Above this text scale the sidebar subtitles are hidden so the menu still fits
 SUBTITLE_MAX_SCALE = 1.15
+# Sidebar entry heights, with and without the second line of text. Generous on
+# purpose: two lines of text need clear space above and below, or the highlight
+# looks like it is squeezing them. 54 leaves about ten pixels either side and
+# still lets all ten entries fit the window at the default text size.
+NAV_HEIGHT = 54
+NAV_HEIGHT_COMPACT = 42
+
+
+def nav_height() -> int:
+    """The height of one sidebar entry at the current text scale.
+
+    Read by both the stylesheet and :class:`~app.ui.main_window.NavButton`, so
+    the QSS ``min-height`` and the widget's size hint can never disagree. They
+    have to agree: re-polishing a widget replaces size constraints set in code
+    with whatever the stylesheet asks for.
+    """
+    scale = text_scale()
+    return round((NAV_HEIGHT if scale <= SUBTITLE_MAX_SCALE else NAV_HEIGHT_COMPACT) * scale)
 
 
 # --- Colour tokens ----------------------------------------------------------
@@ -342,6 +360,7 @@ def stylesheet() -> str:
     tiny = px(11)
     control_h = round(INPUT_HEIGHT * s)
     button_h = round(BUTTON_HEIGHT * s)
+    nav_h = nav_height()
     # A radius larger than half the box makes Qt give up and draw a square, so
     # the tick box and radio dot are sized together rather than independently.
     box = px(16)
@@ -537,8 +556,8 @@ QPushButton[choice="on"]:hover {{ background-color: {t['accent_hover']}; }}
 /* ---------- sidebar ---------- */
 QFrame#Sidebar {{ background-color: {t['bg_sidebar']}; border-right: 1px solid {t['border']}; }}
 QFrame#Sidebar QLabel {{ background: transparent; }}
-/* Both states carry the same 3px left edge — transparent when the entry is not
-   the current one — so the icons stay on one vertical line as the highlight moves. */
+/* Both states carry the same 3px left edge, transparent when the entry is not
+   the current one, so the icons stay on one vertical line as the highlight moves. */
 QPushButton[nav="off"] {{
     background-color: transparent;
     border: none;
@@ -546,6 +565,7 @@ QPushButton[nav="off"] {{
     border-radius: {RADIUS}px;
     text-align: left;
     padding: 0;
+    min-height: {nav_h}px;
 }}
 QPushButton[nav="off"]:hover {{ background-color: {t['bg_hover']}; }}
 QPushButton[nav="on"] {{
@@ -555,6 +575,7 @@ QPushButton[nav="on"] {{
     border-radius: {RADIUS}px;
     text-align: left;
     padding: 0;
+    min-height: {nav_h}px;
 }}
 QPushButton[nav="on"]:hover {{ background-color: {t['accent_soft']}; }}
 
@@ -639,7 +660,7 @@ QTableView {{
 QTableView::item {{ padding: {px(4)}px {px(6)}px; border: none; }}
 QTableView::item:hover {{ background-color: {t['bg_hover']}; }}
 /* Qt fades the selection to the inactive palette the moment the table loses
-   focus — which is the moment the user reaches for the Delete button. Painting
+   focus, which is the moment the user reaches for the Delete button. Painting
    both states the same is what makes a picked row stay obviously picked. */
 QTableView::item:selected {{
     background-color: {t['row_selected']};

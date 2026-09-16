@@ -115,7 +115,7 @@ class SendPump(QThread):
     """Bridges the send worker's event queue onto Qt signals.
 
     ``app.core.sender.SendWorker`` is a plain ``threading.Thread`` writing into a
-    ``queue.Queue``, and it stays exactly that — the sending logic is not touched
+    ``queue.Queue``, and it stays exactly that. The sending logic is not touched
     by this migration. This thread blocks on that queue and re-emits each event
     as a signal, so the UI never polls and never blocks.
     """

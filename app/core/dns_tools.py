@@ -104,7 +104,7 @@ def check_mx(domain: str) -> CheckResult:
     provider = identify_provider(records)
     return CheckResult(
         "MX (mail routing)", "pass",
-        f"{len(records)} mail server(s) found" + (f" — {provider}" if provider else ""),
+        f"{len(records)} mail server(s) found" + (f" ({provider})" if provider else ""),
         "Mail for this domain is routed correctly.",
         record="\n".join(lines),
     )
@@ -178,7 +178,7 @@ def check_spf(domain: str) -> CheckResult:
     if len(records) > 1:
         return CheckResult(
             "SPF", "fail",
-            f"{len(records)} SPF records — must be exactly one",
+            f"{len(records)} SPF records, but there must be exactly one",
             "Publishing more than one SPF record is a permanent error (permerror): receivers "
             "treat SPF as broken and ignore it entirely. This is a common and silent mistake.",
             record="\n\n".join(records),
@@ -215,7 +215,7 @@ def check_spf(domain: str) -> CheckResult:
     if qualifier == "+":
         return CheckResult(
             "SPF", "fail",
-            "SPF ends with +all — this authorises the entire internet",
+            "SPF ends with +all, which authorises the entire internet",
             "+all tells receivers that any server may send as your domain. It is worse than "
             "having no SPF at all and is often treated as a spam signal on its own.",
             record=record, extras=extras,
@@ -291,7 +291,7 @@ def generate_spf(providers: list[str], ipv4: list[str] | None = None,
         try:
             ipaddress.ip_network(address, strict=False)
         except ValueError:
-            warnings.append(f"'{address}' is not a valid IPv4 address or range — skipped")
+            warnings.append(f"'{address}' is not a valid IPv4 address or range, so it was skipped")
             continue
         terms.append(f"ip4:{address}")
 
@@ -302,7 +302,7 @@ def generate_spf(providers: list[str], ipv4: list[str] | None = None,
         try:
             ipaddress.ip_network(address, strict=False)
         except ValueError:
-            warnings.append(f"'{address}' is not a valid IPv6 address or range — skipped")
+            warnings.append(f"'{address}' is not a valid IPv6 address or range, so it was skipped")
             continue
         terms.append(f"ip6:{address}")
 
@@ -314,7 +314,7 @@ def generate_spf(providers: list[str], ipv4: list[str] | None = None,
     if lookups > 10:
         warnings.append(f"This record uses about {lookups} DNS lookups; the limit is 10.")
     if len(record) > 255:
-        warnings.append("Record is longer than 255 characters — your DNS host must split it into "
+        warnings.append("Record is longer than 255 characters, so your DNS host must split it into "
                         "multiple strings within the same TXT record.")
     return record, warnings
 
@@ -369,7 +369,7 @@ def check_dkim(domain: str, selectors: list[str] | None = None) -> CheckResult:
             "No DKIM record found on the selectors tested",
             "DKIM signs each message so receivers can prove it was not altered and really came "
             "from your domain. It is also required for DMARC to pass in most setups.\n\n"
-            "This check probes common selector names — if your provider uses an unusual one, "
+            "This check probes common selector names. If your provider uses an unusual one, "
             "enter it manually before concluding DKIM is missing.",
             fix="Enable DKIM in your email provider's admin console, then publish the TXT record "
                 "they give you. See the DKIM section below for the exact steps per provider.",
@@ -434,7 +434,7 @@ DKIM_PROVIDER_STEPS: dict[str, str] = {
 def generate_dkim_keypair(selector: str, domain: str, bits: int = 2048) -> dict[str, str]:
     """Generate an RSA keypair and the TXT record for the public half.
 
-    Only useful when you run your own mail server — hosted providers (Google,
+    Only useful when you run your own mail server. Hosted providers (Google,
     Microsoft, Zoho) hold the signing key themselves and generate it for you.
     """
     from cryptography.hazmat.primitives import serialization
@@ -488,7 +488,7 @@ def check_dmarc(domain: str) -> CheckResult:
 
     if len(records) > 1:
         return CheckResult(
-            "DMARC", "fail", f"{len(records)} DMARC records — must be exactly one",
+            "DMARC", "fail", f"{len(records)} DMARC records, but there must be exactly one",
             "Multiple DMARC records make the policy invalid and it is ignored.",
             record="\n\n".join(records), fix="Delete all but one record.",
         )
@@ -525,7 +525,7 @@ def check_dmarc(domain: str) -> CheckResult:
             "DMARC", "warn", "DMARC is monitoring only (p=none)",
             "A p=none policy publishes a record and collects reports, but instructs receivers to "
             "take no action on failures. It satisfies the basic requirement and is the correct "
-            "place to start — it just does not protect your domain from being spoofed yet.",
+            "place to start. It just does not protect your domain from being spoofed yet.",
             record=record, extras=extras,
             fix="After a few weeks of clean reports, move to p=quarantine, then p=reject."
                 + ("" if rua else " Add a rua= address so you actually receive those reports."),
@@ -653,7 +653,7 @@ def full_report(domain: str, smtp_host: str = "", dkim_selectors: list[str] | No
 
 def overall_grade(results: list[CheckResult]) -> tuple[Status, str]:
     if any(r.status == "fail" for r in results):
-        return "fail", "Not ready to send — fix the failures below first."
+        return "fail", "Not ready to send. Fix the failures below first."
     if any(r.status == "warn" for r in results):
         return "warn", "Usable, but there are improvements worth making."
     return "pass", "Your domain is properly authenticated."

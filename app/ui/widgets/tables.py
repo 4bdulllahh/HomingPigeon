@@ -177,8 +177,8 @@ class DataTable(QWidget):
         """Also give up the selection when the user clicks elsewhere on the page.
 
         A press on a child widget is delivered to that child, so buttons and
-        inputs keep working; only presses that reach the page background — the
-        empty space around the table — arrive here.
+        inputs keep working; only presses that reach the page background, the
+        empty space around the table, arrive here.
         """
         for widget in watched:
             widget.installEventFilter(self)
