@@ -61,9 +61,11 @@ def test_defaults_when_nothing_is_saved():
 
 
 def test_update_check_version_comparison():
-    from app.ui.page_settings import _version
+    from app.services.maintenance import is_newer, version_tuple
 
-    assert _version("v0.2.1 beta") == (0, 2, 1)
-    assert _version("v0.3.0") > _version("v0.2.1 beta")
-    assert _version("v0.2.0") < _version("v0.2.1 beta")
-    assert _version("v0.2.1") == _version("v0.2.1 beta")
+    assert version_tuple("v0.2.1 beta") == (0, 2, 1)
+    assert version_tuple("v0.3.0") > version_tuple("v0.2.1 beta")
+    assert version_tuple("v0.2.0") < version_tuple("v0.2.1 beta")
+    assert version_tuple("v0.2.1") == version_tuple("v0.2.1 beta")
+    assert is_newer("v0.4.0", "v0.3.0 beta")
+    assert not is_newer("v0.3.0", "v0.3.0 beta")

@@ -29,13 +29,25 @@ def start_file() -> Path:
     return app_location() / name
 
 
+def launch_program() -> Path:
+    """The program an installed copy starts from.
+
+    Setup makes ``python/HomingPigeon.exe`` — a copy of pythonw.exe under the
+    app's own name, so Windows lists the app as HomingPigeon rather than as
+    Python. Installs made before that existed, and the machines where it could
+    not be created, still have only pythonw.exe.
+    """
+    private = app_location() / "python"
+    named = private / f"{config.APP_NAME}.exe"
+    return named if named.exists() else private / "pythonw.exe"
+
+
 def launch_target() -> tuple[str, str, str]:
     """(program, arguments, icon) that will start the app again."""
     icon = app_location() / "assets" / "icon.ico"
     run_script = app_location() / "run.py"
     if is_installed():
-        pythonw = app_location() / "python" / "pythonw.exe"
-        return str(pythonw), f'-E -s "{run_script}"', str(icon)
+        return str(launch_program()), f'-E -s "{run_script}"', str(icon)
 
     # Running from the source folder on Windows (developers): use the current Python.
     # pythonw.exe runs without leaving a black console window open behind the app.

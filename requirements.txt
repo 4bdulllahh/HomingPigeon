@@ -1,5 +1,5 @@
 # What the app needs to run. The "Start HomingPigeon" files install these automatically.
-customtkinter>=5.2.0
+PyQt6>=6.6.0
 pandas>=2.0.0
 openpyxl>=3.1.0
 dnspython>=2.4.0

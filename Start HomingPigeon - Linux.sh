@@ -35,9 +35,9 @@ done
 if [ -z "$PY" ]; then
     echo
     echo "  HomingPigeon needs Python 3.10 or newer. Install it, then run this file again:"
-    echo "    Ubuntu / Debian / Mint:  sudo apt install python3 python3-venv python3-tk"
-    echo "    Fedora:                  sudo dnf install python3 python3-tkinter"
-    echo "    Arch:                    sudo pacman -S python tk"
+    echo "    Ubuntu / Debian / Mint:  sudo apt install python3 python3-venv libxcb-cursor0"
+    echo "    Fedora:                  sudo dnf install python3 xcb-util-cursor"
+    echo "    Arch:                    sudo pacman -S python xcb-util-cursor"
     pause_and_exit
 fi
 

@@ -1,15 +1,17 @@
-"""Two-handle range slider.
+"""Two-handle range slider for the delay between emails.
 
-CustomTkinter only ships a single-handle slider, so this is drawn on a canvas.
-Values snap to a step table rather than a linear scale: most people want fine
-control around 1-5 minutes and coarse control above that, and a linear 15s-60m
-slider makes the useful part unusably cramped.
+Qt ships a single-handle QSlider, so this paints its own. Values snap to a step
+table rather than a linear scale: most people want fine control around 1-5
+minutes and coarse control above that, and a linear 15s-60m slider makes the
+useful part unusably cramped.
 """
 from __future__ import annotations
 
-import customtkinter as ctk
+from PyQt6.QtCore import QRectF, Qt, pyqtSignal
+from PyQt6.QtGui import QPainter, QPen
+from PyQt6.QtWidgets import QSizePolicy, QWidget
 
-from app import theme
+from app.ui import theme
 
 
 def build_steps() -> list[int]:
@@ -29,14 +31,11 @@ def format_seconds(seconds: int) -> str:
     if seconds < 60:
         return f"{seconds}s"
     minutes, rest = divmod(seconds, 60)
-    if rest == 0:
-        return f"{minutes}m"
-    return f"{minutes}m {rest}s"
+    return f"{minutes}m" if rest == 0 else f"{minutes}m {rest}s"
 
 
 def nearest_index(seconds: int) -> int:
-    best = 0
-    smallest = abs(STEPS[0] - seconds)
+    best, smallest = 0, abs(STEPS[0] - seconds)
     for index, value in enumerate(STEPS):
         gap = abs(value - seconds)
         if gap < smallest:
@@ -44,188 +43,192 @@ def nearest_index(seconds: int) -> int:
     return best
 
 
-def _resolve(color) -> str:
-    """Pick the light or dark half of a theme token for canvas drawing."""
-    if isinstance(color, (tuple, list)):
-        return color[1] if ctk.get_appearance_mode() == "Dark" else color[0]
-    return color
-
-
-class RangeSlider(ctk.CTkFrame):
+class RangeSlider(QWidget):
     """Min/max delay selector. Reports values in seconds."""
 
-    HANDLE_RADIUS = 9
+    changed = pyqtSignal(int, int)       # live, while dragging
+    released = pyqtSignal(int, int)      # once, when the handle is let go
+
     TRACK_HEIGHT = 4
-    CANVAS_HEIGHT = 44
     SIDE_PAD = 14
 
-    def __init__(self, master, low: int = 75, high: int = 150, command=None, **kwargs):
-        kwargs.setdefault("fg_color", "transparent")
-        super().__init__(master, **kwargs)
-
-        self.command = command
-        self._low_index = nearest_index(low)
-        self._high_index = nearest_index(high)
-        if self._low_index > self._high_index:
-            self._low_index, self._high_index = self._high_index, self._low_index
-
+    def __init__(self, low: int = 75, high: int = 150, parent=None):
+        super().__init__(parent)
+        self.setProperty("role", "plain")
+        self._low = nearest_index(low)
+        self._high = nearest_index(high)
+        if self._low > self._high:
+            self._low, self._high = self._high, self._low
         self._dragging: str | None = None
-        self._focus_handle = "low"
+        self._hover: str | None = None
 
-        self.canvas = ctk.CTkCanvas(
-            self, height=self.CANVAS_HEIGHT, highlightthickness=0, bd=0,
-            bg=_resolve(theme.BG_PANEL),
-        )
-        self.canvas.pack(fill="x", expand=True)
+        self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setMinimumHeight(self._natural_height())
 
-        self.readout = theme.label(self, self._readout_text(), size=13)
-        self.readout.pack(anchor="w", pady=(2, 0))
+    # --- metrics ------------------------------------------------------------
+    def _scale(self) -> float:
+        return theme.text_scale()
 
-        self.canvas.bind("<Configure>", lambda e: self._render())
-        self.canvas.bind("<Button-1>", self._on_press)
-        self.canvas.bind("<B1-Motion>", self._on_drag)
-        self.canvas.bind("<ButtonRelease-1>", self._on_release)
-        self.canvas.bind("<Left>", lambda e: self._nudge(-1))
-        self.canvas.bind("<Right>", lambda e: self._nudge(1))
-        self.canvas.bind("<Tab>", self._switch_handle)
-        self.canvas.configure(takefocus=True)
+    def _radius(self) -> float:
+        return 9 * self._scale()
 
-        self.after(50, self._render)
+    def _natural_height(self) -> int:
+        return int(46 * self._scale())
 
-    # -- values --------------------------------------------------------------
+    def sizeHint(self):
+        from PyQt6.QtCore import QSize
+
+        return QSize(320, self._natural_height())
+
+    def _bounds(self) -> tuple[float, float]:
+        pad = self.SIDE_PAD * self._scale()
+        return pad, max(pad + 10, self.width() - pad)
+
+    def _index_to_x(self, index: int) -> float:
+        left, right = self._bounds()
+        if len(STEPS) <= 1:
+            return left
+        return left + (right - left) * (index / (len(STEPS) - 1))
+
+    def _x_to_index(self, x: float) -> int:
+        left, right = self._bounds()
+        if right <= left:
+            return 0
+        ratio = min(1.0, max(0.0, (x - left) / (right - left)))
+        return int(round(ratio * (len(STEPS) - 1)))
+
+    # --- values -------------------------------------------------------------
     @property
     def low(self) -> int:
-        return STEPS[self._low_index]
+        return STEPS[self._low]
 
     @property
     def high(self) -> int:
-        return STEPS[self._high_index]
+        return STEPS[self._high]
 
     def get(self) -> tuple[int, int]:
         return self.low, self.high
 
     def set(self, low: int, high: int) -> None:
-        self._low_index = nearest_index(low)
-        self._high_index = nearest_index(high)
-        if self._low_index > self._high_index:
-            self._low_index, self._high_index = self._high_index, self._low_index
-        self._render()
-        self._update_readout()
+        self._low = nearest_index(low)
+        self._high = nearest_index(high)
+        if self._low > self._high:
+            self._low, self._high = self._high, self._low
+        self.update()
 
-    def _readout_text(self) -> str:
+    def readout(self) -> str:
         if self.low == self.high:
             return f"Exactly {format_seconds(self.low)} between each email"
         per_hour = int(3600 / ((self.low + self.high) / 2))
         return (f"{format_seconds(self.low)} – {format_seconds(self.high)} between each email"
                 f"   ·   roughly {per_hour} per hour")
 
-    def _update_readout(self) -> None:
-        self.readout.configure(text=self._readout_text())
+    # --- painting -----------------------------------------------------------
+    def paintEvent(self, _event) -> None:  # noqa: N802 - Qt naming
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-    # -- geometry ------------------------------------------------------------
-    def _track_bounds(self) -> tuple[int, int]:
-        width = self.canvas.winfo_width()
-        return self.SIDE_PAD, max(self.SIDE_PAD + 10, width - self.SIDE_PAD)
+        scale = self._scale()
+        mid = self.height() / 2 - 5 * scale
+        half = self.TRACK_HEIGHT * scale / 2
+        left, right = self._bounds()
+        low_x, high_x = self._index_to_x(self._low), self._index_to_x(self._high)
 
-    def _index_to_x(self, index: int) -> float:
-        left, right = self._track_bounds()
-        if len(STEPS) <= 1:
-            return left
-        return left + (right - left) * (index / (len(STEPS) - 1))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(theme.qcolor("border_strong"))
+        painter.drawRoundedRect(QRectF(left, mid - half, right - left, half * 2), half, half)
 
-    def _x_to_index(self, x: float) -> int:
-        left, right = self._track_bounds()
-        if right <= left:
-            return 0
-        ratio = (x - left) / (right - left)
-        ratio = max(0.0, min(1.0, ratio))
-        return int(round(ratio * (len(STEPS) - 1)))
+        painter.setBrush(theme.qcolor("accent"))
+        painter.drawRoundedRect(QRectF(low_x, mid - half, max(1.0, high_x - low_x), half * 2),
+                                half, half)
 
-    # -- drawing -------------------------------------------------------------
-    def _render(self) -> None:
-        canvas = self.canvas
-        canvas.delete("all")
-        canvas.configure(bg=_resolve(theme.BG_PANEL))
-
-        left, right = self._track_bounds()
-        mid = self.CANVAS_HEIGHT // 2 - 4
-        half = self.TRACK_HEIGHT / 2
-
-        canvas.create_rectangle(left, mid - half, right, mid + half,
-                                fill=_resolve(theme.BORDER_STRONG), outline="")
-
-        low_x = self._index_to_x(self._low_index)
-        high_x = self._index_to_x(self._high_index)
-        canvas.create_rectangle(low_x, mid - half, high_x, mid + half,
-                                fill=_resolve(theme.ACCENT), outline="")
-
+        radius = self._radius()
+        pen = QPen(theme.qcolor("accent"))
+        pen.setWidthF(2 * scale)
+        painter.setPen(pen)
         for name, x in (("low", low_x), ("high", high_x)):
-            focused = self._focus_handle == name and self._dragging == name
-            radius = self.HANDLE_RADIUS + (1 if focused else 0)
-            canvas.create_oval(
-                x - radius, mid - radius, x + radius, mid + radius,
-                fill=_resolve(theme.ACCENT if focused else theme.BG_INPUT),
-                outline=_resolve(theme.ACCENT), width=2,
-            )
+            active = self._dragging == name or self._hover == name
+            painter.setBrush(theme.qcolor("accent" if active else "bg_input"))
+            grow = radius + (1 if active else 0)
+            painter.drawEllipse(QRectF(x - grow, mid - grow, grow * 2, grow * 2))
 
-        label_y = self.CANVAS_HEIGHT - 8
-        font = (theme.mono_family(), 9)
-        canvas.create_text(low_x, label_y, text=format_seconds(self.low),
-                           fill=_resolve(theme.FG_MUTED), font=font)
-        if abs(high_x - low_x) > 46:
-            canvas.create_text(high_x, label_y, text=format_seconds(self.high),
-                               fill=_resolve(theme.FG_MUTED), font=font)
+        painter.setPen(theme.qcolor("fg_muted"))
+        font = painter.font()
+        font.setFamily(theme.mono_family())
+        font.setPixelSize(max(8, int(9 * scale)))
+        painter.setFont(font)
+        label_y = self.height() - 2
+        painter.drawText(QRectF(low_x - 40, label_y - 14 * scale, 80, 14 * scale),
+                         int(Qt.AlignmentFlag.AlignCenter), format_seconds(self.low))
+        if abs(high_x - low_x) > 46 * scale:
+            painter.drawText(QRectF(high_x - 40, label_y - 14 * scale, 80, 14 * scale),
+                             int(Qt.AlignmentFlag.AlignCenter), format_seconds(self.high))
+        painter.end()
 
-    def refresh_theme(self) -> None:
-        self._render()
-
-    # -- interaction ---------------------------------------------------------
-    def _pick_handle(self, x: float) -> str:
-        low_x = self._index_to_x(self._low_index)
-        high_x = self._index_to_x(self._high_index)
+    # --- interaction --------------------------------------------------------
+    def _pick(self, x: float) -> str:
+        low_x, high_x = self._index_to_x(self._low), self._index_to_x(self._high)
         if abs(x - low_x) == abs(x - high_x):
-            # Exactly between (or handles stacked): move whichever direction is free
             return "high" if x > low_x else "low"
         return "low" if abs(x - low_x) < abs(x - high_x) else "high"
 
-    def _on_press(self, event) -> None:
-        self.canvas.focus_set()
-        self._dragging = self._pick_handle(event.x)
-        self._focus_handle = self._dragging
-        self._apply_drag(event.x)
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        x = event.position().x()
+        self._dragging = self._pick(x)
+        self._apply(x)
 
-    def _on_drag(self, event) -> None:
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        x = event.position().x()
         if self._dragging:
-            self._apply_drag(event.x)
+            self._apply(x)
+            return
+        near = self._pick(x)
+        hover = near if abs(x - self._index_to_x(
+            self._low if near == "low" else self._high)) <= self._radius() * 1.6 else None
+        if hover != self._hover:
+            self._hover = hover
+            self.update()
 
-    def _on_release(self, event) -> None:
-        self._dragging = None
-        self._render()
-        self._fire()
+    def mouseReleaseEvent(self, _event) -> None:  # noqa: N802
+        if self._dragging:
+            self._dragging = None
+            self.update()
+            self.released.emit(self.low, self.high)
 
-    def _apply_drag(self, x: float) -> None:
+    def leaveEvent(self, _event) -> None:  # noqa: N802
+        if self._hover is not None:
+            self._hover = None
+            self.update()
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        step = {Qt.Key.Key_Left: -1, Qt.Key.Key_Down: -1,
+                Qt.Key.Key_Right: 1, Qt.Key.Key_Up: 1}.get(event.key())
+        if step is None:
+            super().keyPressEvent(event)
+            return
+        handle = "high" if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else "low"
+        if handle == "low":
+            self._low = max(0, min(self._low + step, self._high))
+        else:
+            self._high = min(len(STEPS) - 1, max(self._high + step, self._low))
+        self.update()
+        self.changed.emit(self.low, self.high)
+        self.released.emit(self.low, self.high)
+
+    def _apply(self, x: float) -> None:
         index = self._x_to_index(x)
         if self._dragging == "low":
-            self._low_index = min(index, self._high_index)
+            self._low = min(index, self._high)
         else:
-            self._high_index = max(index, self._low_index)
-        self._render()
-        self._update_readout()
+            self._high = max(index, self._low)
+        self.update()
+        self.changed.emit(self.low, self.high)
 
-    def _nudge(self, direction: int) -> None:
-        if self._focus_handle == "low":
-            self._low_index = max(0, min(self._low_index + direction, self._high_index))
-        else:
-            self._high_index = min(len(STEPS) - 1, max(self._high_index + direction, self._low_index))
-        self._render()
-        self._update_readout()
-        self._fire()
-
-    def _switch_handle(self, event):
-        self._focus_handle = "high" if self._focus_handle == "low" else "low"
-        self._render()
-        return "break"
-
-    def _fire(self) -> None:
-        if self.command:
-            self.command(self.low, self.high)
+    def refresh_theme(self) -> None:
+        self.setMinimumHeight(self._natural_height())
+        self.update()

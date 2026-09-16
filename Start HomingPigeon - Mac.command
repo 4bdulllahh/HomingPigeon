@@ -8,9 +8,10 @@ cd "$(dirname "$0")" || exit 1
 PYTHON_INSTALLER="https://www.python.org/ftp/python/3.13.15/python-3.13.15-macos11.pkg"
 PYTHON_PAGE="https://www.python.org/downloads/macos/"
 
-# A usable Python is 3.10+ and can draw windows (tkinter).
+# A usable Python is simply 3.10 or newer: the app draws with Qt, which pip
+# installs complete with its own libraries, so nothing else has to be present.
 python_ok() {
-    "$1" -c 'import sys, tkinter; sys.exit(sys.hexversion < 0x030A0000)' >/dev/null 2>&1
+    "$1" -c 'import sys; sys.exit(sys.hexversion < 0x030A0000)' >/dev/null 2>&1
 }
 
 find_python() {

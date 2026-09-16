@@ -85,6 +85,75 @@ def export_campaign(campaign_id: int | None = None, path: str | Path | None = No
     return path
 
 
+def sent_dataframe() -> pd.DataFrame:
+    """One row per email the app actually attempted, newest first.
+
+    Written to match the user's own lead spreadsheet: their columns are carried
+    through unchanged, with the outcome added beside them, so the result can be
+    pasted back into the master file.
+    """
+    rows = db.query(
+        "SELECT c.email, c.company, c.person, c.extra_json, c.replied_at, c.bounced_at, "
+        "r.status, r.attempts, r.subject_used, r.sent_at, r.last_error "
+        "FROM campaign_recipients r JOIN contacts c ON c.id = r.contact_id "
+        "WHERE r.status IN ('sent', 'failed', 'bounced') "
+        "ORDER BY r.sent_at IS NULL, r.sent_at DESC, r.rowid DESC"
+    )
+
+    records = []
+    for row in rows:
+        if row["replied_at"]:
+            outcome = "Replied"
+        elif row["status"] == "bounced" or row["bounced_at"]:
+            outcome = "Bounced"
+        elif row["status"] == "failed":
+            outcome = "Failed"
+        else:
+            outcome = "Sent"
+        record = {
+            "Email": row["email"],
+            "Company": row["company"] or "",
+            "Contact Person": row["person"] or "",
+            "Outcome": outcome,
+            "Sent At": row["sent_at"] or "",
+            "Replied At": row["replied_at"] or "",
+            "Subject Used": row["subject_used"] or "",
+            "Attempts": row["attempts"] or 0,
+            "Details": row["last_error"] or "",
+        }
+        if row["extra_json"]:
+            try:
+                for key, value in json.loads(row["extra_json"]).items():
+                    record.setdefault(key, value)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        records.append(record)
+    return pd.DataFrame(records)
+
+
+def export_sent(path: str | Path | None = None) -> Path:
+    """Save the sent log as a spreadsheet."""
+    df = sent_dataframe()
+    if path is None:
+        config.ensure_dirs()
+        stamp = datetime.now().strftime("%Y-%m-%d_%H%M")
+        path = Path(config.EXPORTS_DIR) / f"sent_emails_{stamp}.xlsx"
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Sent")
+        sheet = writer.sheets["Sent"]
+        for index, column in enumerate(df.columns, start=1):
+            longest = max([len(str(column))] + [len(str(v)) for v in df[column].head(200)])
+            letter = sheet.cell(row=1, column=index).column_letter
+            sheet.column_dimensions[letter].width = min(max(12, longest + 2), 55)
+        sheet.freeze_panes = "A2"
+
+    db.log_event("info", "export", f"Exported {len(df)} sent emails to {path.name}")
+    return path
+
+
 def export_suppression(path: str | Path | None = None) -> Path:
     rows = db.suppression_list()
     df = pd.DataFrame([

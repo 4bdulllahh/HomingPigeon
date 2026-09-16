@@ -28,12 +28,12 @@ from __future__ import annotations
 
 import ctypes
 import hashlib
-import json
 import math
 import os
 import queue
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -58,8 +58,23 @@ PYTHON_BUILDS = {
 }
 PYTHON_URL = "https://www.python.org/ftp/python/{v}/python-{v}-{arch}.zip"
 
-REQUIRED_IMPORTS = "import tkinter, customtkinter, pandas, openpyxl, dns.resolver, cryptography, PIL, certifi"
+# Download tuning. One connection is usually round-trip-limited rather than
+# bandwidth-limited, so the Python zip is fetched as parallel byte ranges.
+DOWNLOAD_CONNECTIONS = 6
+DOWNLOAD_CHUNK = 1024 * 1024
+DOWNLOAD_HEADERS = {"User-Agent": f"{APP_NAME}-Setup", "Accept-Encoding": "identity"}
+
+# Roughly what requirements.txt weighs as wheels, used only to scale the progress
+# bar for the add-ons step. Being a little out just makes the bar move unevenly.
+EXPECTED_ADDON_MB = 135.0
+
+REQUIRED_IMPORTS = ("import PyQt6.QtWidgets, PyQt6.QtGui, PyQt6.QtCore, pandas, openpyxl, "
+                    "dns.resolver, cryptography, PIL, certifi")
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+# How long to watch a freshly opened app before calling the launch a success.
+# Long enough for Qt to create its window, short enough not to feel like a hang.
+LAUNCH_CONFIRM_SECONDS = 4.0
 
 # --- Look (matches the app's dark theme) -------------------------------------
 BG = "#1f2125"
@@ -127,10 +142,22 @@ def human_mb(n: float) -> str:
     return f"{n / 1_048_576:.1f} MB"
 
 
+def _as_mb(amount: str | None, unit: str | None) -> float:
+    """'12.6', 'MB' -> 12.6. Anything unparsable counts as nothing."""
+    try:
+        value = float(amount or 0)
+    except ValueError:
+        return 0.0
+    return value * {"kB": 1 / 1024, "MB": 1.0, "GB": 1024.0}.get(unit or "MB", 1.0)
+
+
 def running_app_pids(install_dir: Path) -> list[int]:
     """Process ids of HomingPigeon windows started from this install folder."""
+    # HomingPigeon.exe is the renamed copy the shortcuts use; the two Python
+    # names still matter for installs made before it existed, and for the
+    # machines where it could not be created.
     script = (
-        "Get-Process python,pythonw -ErrorAction SilentlyContinue | "
+        f"Get-Process {APP_NAME},python,pythonw -ErrorAction SilentlyContinue | "
         f"Where-Object {{ $_.Path -like '{str(install_dir).replace(chr(39), chr(39) * 2)}\\*' }} | "
         "ForEach-Object { $_.Id }"
     )
@@ -149,7 +176,7 @@ def make_shortcut(link: Path, install_dir: Path) -> None:
     script = (
         "$s = (New-Object -ComObject WScript.Shell).CreateShortcut("
         f"'{q(link)}'); "
-        f"$s.TargetPath = '{q(install_dir / 'python' / 'pythonw.exe')}'; "
+        f"$s.TargetPath = '{q(app_exe(install_dir))}'; "
         f"$s.Arguments = '-E -s \"{q(install_dir / 'run.py')}\"'; "
         f"$s.WorkingDirectory = '{q(install_dir)}'; "
         f"$s.IconLocation = '{q(install_dir / 'assets' / 'icon.ico')},0'; "
@@ -179,11 +206,190 @@ def special_folder(name: str) -> Path:
     return Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
 
 
-def start_app(install_dir: Path) -> None:
-    subprocess.Popen(
-        [str(install_dir / "python" / "pythonw.exe"), "-E", "-s", str(install_dir / "run.py")],
-        cwd=install_dir, env=clean_env(), close_fds=True,
-        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+# Takes the new process out of any job object it would otherwise inherit.
+CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+
+
+def smart_app_control_on() -> bool:
+    """True when Windows Smart App Control is enforcing or evaluating.
+
+    It refuses to run an executable whose Authenticode signature does not check
+    out, which includes a copy of pythonw.exe whose version resource has been
+    rewritten. Where it is on, the app keeps the plain (still signed) copy.
+    """
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                            r"SYSTEM\CurrentControlSet\Control\CI\Policy") as key:
+            return int(winreg.QueryValueEx(key, "VerifiedAndReputablePolicyState")[0]) != 0
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def _pad4(data: bytes) -> bytes:
+    return data + b"\0" * (-len(data) % 4)
+
+
+def _version_node(key: str, value: bytes = b"", text: bool = False,
+                  children: list | None = None) -> bytes:
+    """One node of a VS_VERSIONINFO tree, as documented for the resource format.
+
+    Every node is: lengths, a null-terminated UTF-16 key, padding to a 32-bit
+    boundary, the value, more padding, then the children.
+    """
+    children = children or []
+    joined = b"".join(_pad4(c) for c in children[:-1]) + (children[-1] if children else b"")
+    key_bytes = key.encode("utf-16-le") + b"\0\0"
+    head = 6 + len(key_bytes)
+    pad1 = b"\0" * (-head % 4)
+    pad2 = b"\0" * (-(head + len(pad1) + len(value)) % 4) if joined else b""
+    total = head + len(pad1) + len(value) + len(pad2) + len(joined)
+    value_len = (len(value) // 2) if text else len(value)
+    return (struct.pack("<HHH", total, value_len, 1 if text else 0)
+            + key_bytes + pad1 + value + pad2 + joined)
+
+
+def version_resource(strings: dict, numbers: tuple) -> bytes:
+    ms = (numbers[0] << 16) | numbers[1]
+    ls = (numbers[2] << 16) | numbers[3]
+    fixed = struct.pack("<13L", 0xFEEF04BD, 0x00010000, ms, ls, ms, ls,
+                        0x3F, 0, 0x00040004, 1, 0, 0, 0)
+    entries = [_version_node(name, text.encode("utf-16-le") + b"\0\0", True)
+               for name, text in strings.items()]
+    table = _version_node("040904B0", children=entries)
+    string_info = _version_node("StringFileInfo", children=[table])
+    translation = _version_node("Translation", struct.pack("<HH", 0x0409, 0x04B0))
+    var_info = _version_node("VarFileInfo", children=[translation])
+    return _version_node("VS_VERSION_INFO", fixed, False, [string_info, var_info])
+
+
+def stamp_version(path: Path, version: str) -> None:
+    """Give a copy of pythonw.exe HomingPigeon's name in its version resource."""
+    numbers = tuple(([int(n) for n in version.split(".") if n.isdigit()] + [0, 0, 0, 0])[:4])
+    data = version_resource({
+        "CompanyName": PUBLISHER,
+        "FileDescription": APP_NAME,
+        "FileVersion": version,
+        "InternalName": APP_NAME,
+        "LegalCopyright": "Python runtime (c) Python Software Foundation",
+        "OriginalFilename": f"{APP_NAME}.exe",
+        "ProductName": APP_NAME,
+        "ProductVersion": version,
+    }, numbers)
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.BeginUpdateResourceW.restype = ctypes.c_void_p
+    k32.BeginUpdateResourceW.argtypes = [ctypes.c_wchar_p, ctypes.c_bool]
+    k32.UpdateResourceW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_wchar_p,
+                                    ctypes.c_uint16, ctypes.c_void_p, ctypes.c_uint32]
+    k32.EndUpdateResourceW.argtypes = [ctypes.c_void_p, ctypes.c_bool]
+
+    handle = k32.BeginUpdateResourceW(str(path), False)
+    if not handle:
+        raise OSError("the executable could not be opened for naming")
+    buffer = ctypes.create_string_buffer(data, len(data))
+    written = k32.UpdateResourceW(handle, ctypes.c_wchar_p(16), ctypes.c_wchar_p(1), 0x0409,
+                                  ctypes.cast(buffer, ctypes.c_void_p), len(data))
+    if not k32.EndUpdateResourceW(handle, not written) or not written:
+        raise OSError("the name could not be written")
+
+
+def build_named_exe(install_dir: Path, version: str = "", log=None) -> Path:
+    """Make python/HomingPigeon.exe, the program the shortcuts point at.
+
+    Task Manager names a running program after its executable, so launching the
+    app through pythonw.exe listed it as "python" — which is alarming if you are
+    checking what is running on your computer. A copy under the app's own name
+    fixes the process name everywhere; rewriting the copy's version resource
+    also fixes the description, but breaks its signature, so that step is
+    skipped where Smart App Control would then refuse to run it.
+    """
+    source = install_dir / "python" / "pythonw.exe"
+    target = install_dir / "python" / f"{APP_NAME}.exe"
+    if not source.exists():
+        raise OSError(f"{source} is missing")
+
+    if target.exists():
+        target.unlink()
+    shutil.copy2(source, target)  # a plain copy keeps python.org's signature valid
+
+    if version and not smart_app_control_on():
+        try:
+            stamp_version(target, version)
+        except OSError as error:
+            if log:
+                log(f"  keeping the plain copy ({error})")
+    elif log:
+        log("  Smart App Control is on, so the copy is left signed and unmodified.")
+
+    # Never hand the user a program that will not start: prove it runs first.
+    try:
+        finished = subprocess.run([str(target), "-c", "pass"], capture_output=True, timeout=60,
+                                  env=clean_env(), creationflags=NO_WINDOW)
+        if finished.returncode != 0:
+            raise OSError((finished.stderr or b"").decode("utf-8", "replace").strip()[:200]
+                          or "it did not start")
+    except (OSError, subprocess.TimeoutExpired) as error:
+        if log:
+            log(f"  {APP_NAME}.exe will not run here ({error}); using pythonw.exe instead.")
+        target.unlink(missing_ok=True)
+        return source
+    return target
+
+
+def app_exe(install_dir: Path, windowed: bool = True) -> Path:
+    """The program that starts the app: the app's own name when it is available."""
+    if windowed:
+        named = install_dir / "python" / f"{APP_NAME}.exe"
+        if named.exists():
+            return named
+    return install_dir / "python" / ("pythonw.exe" if windowed else "python.exe")
+
+
+def app_command(install_dir: Path, windowed: bool = True) -> list[str]:
+    return [str(app_exe(install_dir, windowed)), "-E", "-s", str(install_dir / "run.py")]
+
+
+def start_app(install_dir: Path) -> subprocess.Popen:
+    """Open the app. Returns the process so the caller can check it stayed up.
+
+    Two things used to make "Open HomingPigeon now" quietly do nothing.
+
+    Setup is usually launched from a browser's download manager or from an
+    Explorer window, and those put the processes they start into a job object
+    marked kill-on-close. A child inherits that job, so the app was killed the
+    instant Setup's window closed. CREATE_BREAKAWAY_FROM_JOB leaves the job.
+
+    A DETACHED_PROCESS child also inherits Setup's standard handles, which stop
+    being valid once Setup exits; pythonw.exe can fail during start-up on that.
+    Giving it its own null handles removes the race.
+    """
+    command = app_command(install_dir)
+    base = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    last: OSError | None = None
+    for flags in (base | CREATE_BREAKAWAY_FROM_JOB, base):
+        try:
+            return subprocess.Popen(
+                command, cwd=install_dir, env=clean_env(), close_fds=True,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, creationflags=flags)
+        except OSError as error:
+            last = error  # breakaway is not allowed in this job; try without it
+    raise last or OSError("the app could not be started")
+
+
+def why_app_failed(install_dir: Path) -> str:
+    """Re-run the app on the console Python to turn a silent exit into a message."""
+    try:
+        finished = subprocess.run(
+            app_command(install_dir, windowed=False), cwd=install_dir, env=clean_env(),
+            capture_output=True, text=True, errors="replace", timeout=25,
+            creationflags=NO_WINDOW)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""  # it stayed up this time, so there is nothing to report
+    output = (finished.stderr or finished.stdout or "").strip()
+    return output.splitlines()[-1][:300] if output else ""
 
 
 # =============================================================================
@@ -371,26 +577,8 @@ class InstallJob(Job):
         self.log(f"Downloading {self.url}")
         self.log(f"Saving to {self.download_path}")
         partial = self.download_path.with_suffix(".part")
-        request = urllib.request.Request(self.url, headers={"User-Agent": f"{APP_NAME}-Setup"})
         try:
-            with urllib.request.urlopen(request, timeout=60) as response, open(partial, "wb") as out:
-                total = int(response.headers.get("Content-Length") or self.size)
-                received = 0
-                started = time.monotonic()
-                last_report = 0.0
-                while True:
-                    self.check_cancel()
-                    chunk = response.read(256 * 1024)
-                    if not chunk:
-                        break
-                    out.write(chunk)
-                    received += len(chunk)
-                    now = time.monotonic()
-                    if now - last_report > 0.15:
-                        speed = received / max(now - started, 0.001)
-                        self.progress(received / total,
-                                      f"{human_mb(received)} of {human_mb(total)}  ·  {human_mb(speed)}/s")
-                        last_report = now
+            received = self._fetch(self.url, partial)
             self.log(f"Downloaded {human_mb(received)}")
         except Cancelled:
             partial.unlink(missing_ok=True)
@@ -402,6 +590,127 @@ class InstallJob(Job):
                              "Check your internet connection, then click Try again.") from None
         partial.replace(self.download_path)
         return human_mb(self.size)
+
+    # -- downloading -----------------------------------------------------------
+    def _fetch(self, url: str, target: Path) -> int:
+        """Download to `target`, using several connections when the server allows it.
+
+        One HTTP connection rarely fills a fast line: a single TCP stream to a
+        distant CDN node is limited by round-trip time long before it is limited
+        by bandwidth. Asking for byte ranges in parallel fixes that, and on a
+        slow line it costs nothing because the link is the bottleneck either way.
+
+        Servers that do not advertise ranges, and any failure part-way through,
+        fall back to the plain single-stream download.
+        """
+        total, ranges_ok = self._probe(url)
+        if ranges_ok and total > 0 and DOWNLOAD_CONNECTIONS > 1:
+            try:
+                return self._fetch_ranged(url, target, total)
+            except Cancelled:
+                raise
+            except Exception as error:  # noqa: BLE001
+                self.log(f"  parallel download failed ({error}); using a single connection")
+        return self._fetch_serial(url, target, total)
+
+    def _probe(self, url: str) -> tuple[int, bool]:
+        """Size and range support, from one HEAD request."""
+        try:
+            request = urllib.request.Request(url, method="HEAD", headers=DOWNLOAD_HEADERS)
+            with urllib.request.urlopen(request, timeout=20) as response:
+                total = int(response.headers.get("Content-Length") or 0)
+                ranges_ok = "bytes" in (response.headers.get("Accept-Ranges") or "").lower()
+        except Exception:  # noqa: BLE001 - fall back to a plain download
+            return self.size, False
+        return total or self.size, ranges_ok
+
+    def _report_speed(self, received: int, total: int, started: float) -> None:
+        speed = received / max(time.monotonic() - started, 0.001)
+        self.progress(received / total if total else 0,
+                      f"{human_mb(received)} of {human_mb(total)}  ·  {human_mb(speed)}/s")
+
+    def _fetch_serial(self, url: str, target: Path, total: int) -> int:
+        request = urllib.request.Request(url, headers=DOWNLOAD_HEADERS)
+        received = 0
+        started = time.monotonic()
+        last_report = 0.0
+        with urllib.request.urlopen(request, timeout=60) as response, open(target, "wb") as out:
+            total = int(response.headers.get("Content-Length") or total or self.size)
+            while True:
+                self.check_cancel()
+                chunk = response.read(DOWNLOAD_CHUNK)
+                if not chunk:
+                    break
+                out.write(chunk)
+                received += len(chunk)
+                now = time.monotonic()
+                if now - last_report > 0.15:
+                    self._report_speed(received, total, started)
+                    last_report = now
+        return received
+
+    def _fetch_ranged(self, url: str, target: Path, total: int) -> int:
+        """Fetch byte ranges on several threads, straight into one pre-sized file."""
+        count = DOWNLOAD_CONNECTIONS
+        span = total // count
+        done = [0] * count
+        failure: list[BaseException] = []
+        lock = threading.Lock()
+        stop = threading.Event()
+
+        # Pre-size the file so every worker can seek to its own slice and write
+        # in place; there are no part files to stitch together afterwards.
+        with open(target, "wb") as out:
+            out.truncate(total)
+
+        def grab(index: int) -> None:
+            start = index * span
+            end = (start + span - 1) if index < count - 1 else total - 1
+            headers = dict(DOWNLOAD_HEADERS, Range=f"bytes={start}-{end}")
+            request = urllib.request.Request(url, headers=headers)
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    with open(target, "r+b") as out:
+                        out.seek(start)
+                        while not stop.is_set():
+                            chunk = response.read(DOWNLOAD_CHUNK)
+                            if not chunk:
+                                break
+                            out.write(chunk)
+                            with lock:
+                                done[index] += len(chunk)
+            except BaseException as error:  # noqa: BLE001 - re-raised on the main thread
+                with lock:
+                    failure.append(error)
+                stop.set()
+
+        started = time.monotonic()
+        workers = [threading.Thread(target=grab, args=(i,), daemon=True) for i in range(count)]
+        self.log(f"  using {count} connections")
+        for worker in workers:
+            worker.start()
+
+        while any(worker.is_alive() for worker in workers):
+            if self.cancel_event.is_set():
+                stop.set()
+                break
+            with lock:
+                received = sum(done)
+            self._report_speed(received, total, started)
+            time.sleep(0.15)
+
+        # Always wait for the workers before touching the file: on Windows it
+        # cannot be deleted or renamed while a thread still has it open.
+        for worker in workers:
+            worker.join(timeout=15)
+
+        self.check_cancel()
+        if failure:
+            raise failure[0]
+        received = sum(done)
+        if received != total:
+            raise OSError(f"got {received} bytes of {total}")
+        return received
 
     # -- 3 ---------------------------------------------------------------------
     def step_verify(self) -> str:
@@ -469,49 +778,52 @@ class InstallJob(Job):
 
     # -- 6 ---------------------------------------------------------------------
     def step_addons(self) -> str:
+        """Install everything in requirements.txt, in a single pip run.
+
+        This used to run pip twice: once with --dry-run --report to learn how
+        many packages were coming, and then again to actually install them. The
+        dry run repeats the whole dependency resolution, which means another
+        round of metadata requests to pypi.org before a single byte of any wheel
+        is fetched. Progress now comes from the sizes pip prints as it downloads,
+        so that first pass is gone and the step starts fetching immediately.
+        """
         requirements = self.install_dir / "requirements.txt"
         pip = [str(self.python), "-E", "-s", "-m", "pip"]
 
-        self.log("Working out which add-ons are needed...")
-        self.progress(0.02, "Working out what's needed...")
-        report_path = self.install_dir / "pip-plan.json"
-        code = self.run_logged(pip + ["install", "--dry-run", "--quiet", "--prefer-binary",
-                                      "--report", str(report_path), "-r", str(requirements)])
-        if code != 0:
-            raise StepFailed("Couldn't get the list of add-ons from pypi.org.",
-                             "Check your internet connection, then click Try again.")
-        try:
-            plan = json.loads(report_path.read_text(encoding="utf-8")).get("install", [])
-        finally:
-            report_path.unlink(missing_ok=True)
-        names = [item.get("metadata", {}).get("name", "?") for item in plan]
-        total = len(names)
-        if total == 0:
-            self.log("Every add-on is already installed and up to date.")
-            return "Up to date"
-        self.log(f"{total} add-ons to install: {', '.join(names)}")
-
-        fetched = 0
+        self.progress(0.02, "Contacting pypi.org...")
+        downloaded = 0.0          # MB, summed from pip's own "(12.3 MB)" notes
+        packages: list[str] = []
 
         def on_line(line: str) -> None:
-            nonlocal fetched
-            match = re.match(r"(?:Downloading|Using cached) (\S+)", line)
+            nonlocal downloaded
+            match = re.match(r"(?:Downloading|Using cached) (\S+)(?:\s+\(([\d.]+)\s*([kKMG]B)\))?",
+                             line)
             if match:
-                fetched += 1
                 name = match.group(1).rsplit("/", 1)[-1].split("-")[0]
-                self.progress(0.05 + 0.75 * fetched / total, f"Downloaded {fetched} of {total}  ·  {name}")
+                packages.append(name)
+                downloaded += _as_mb(match.group(2), match.group(3))
+                share = min(downloaded / EXPECTED_ADDON_MB, 1.0)
+                self.progress(0.03 + 0.80 * share,
+                              f"{downloaded:.0f} MB of about {EXPECTED_ADDON_MB:.0f} MB  "
+                              f"·  {name}")
             elif line.startswith("Installing collected packages"):
-                self.progress(0.85, "Installing...")
+                self.progress(0.88, "Installing...")
             elif line.startswith("Successfully installed"):
                 self.progress(1.0, "Installed")
 
-        code = self.run_logged(pip + ["install", "--prefer-binary", "--progress-bar", "off",
-                                      "--no-warn-script-location", "-r", str(requirements)], on_line)
+        code = self.run_logged(
+            pip + ["install", "--prefer-binary", "--progress-bar", "off",
+                   "--no-warn-script-location", "--disable-pip-version-check",
+                   "--retries", "2", "--timeout", "30", "-r", str(requirements)],
+            on_line)
         if code != 0:
             raise StepFailed("Installing the add-ons didn't finish.",
                              "Check your internet connection and that HomingPigeon is closed, "
                              "then click Try again.")
-        return f"{total} installed"
+        if not packages:
+            self.log("Every add-on was already installed and up to date.")
+            return "Up to date"
+        return f"{len(packages)} installed"
 
     # -- 7 ---------------------------------------------------------------------
     def step_check(self) -> str:
@@ -525,6 +837,17 @@ class InstallJob(Job):
 
     # -- 8 ---------------------------------------------------------------------
     def step_finish(self) -> str:
+        self.progress(0.1, "Naming the program...")
+        self.log(f"Creating {APP_NAME}.exe, so the app runs under its own name "
+                 f"rather than Python's.")
+        try:
+            started = build_named_exe(self.install_dir, read_version(self.install_dir) or "",
+                                      log=self.log)
+            self.log(f"  the app will start from {started.name}")
+        except OSError as error:
+            # Cosmetic only — the shortcuts fall back to pythonw.exe
+            self.log(f"  could not create it ({error}); using pythonw.exe.")
+
         self.progress(0.3)
         self.desktop = special_folder("Desktop")
         self.start_menu = special_folder("Programs")
@@ -971,6 +1294,13 @@ class SetupWindow:
         self.log_text.tag_configure("heading", foreground=FG_BRIGHT)
         self.log_text.tag_configure("problem", foreground=ERROR)
 
+        # The log follows the newest line until the user scrolls up to read
+        # something, and starts following again when they scroll back down.
+        self.log_follow = True
+        for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>", "<Prior>", "<Next>",
+                         "<Up>", "<Down>", "<Home>", "<End>", "<B1-Motion>"):
+            self.log_text.bind(sequence, self._log_scrolled, add="+")
+
         self._button("Cancel", self.on_close)
         threading.Thread(target=job.run, daemon=True).start()
 
@@ -984,14 +1314,31 @@ class SetupWindow:
             end = h // 2 + (width - h) * self.bar_fraction
             self.bar.create_line(h // 2, y, max(end, h // 2 + 1), y, fill=ACCENT, width=h, capstyle="round")
 
+    def _log_scrolled(self, _event=None) -> None:
+        """Note whether the user has scrolled away from the newest line.
+
+        Checked just after the scroll has been applied, so it reads the position
+        the user ended up at rather than the one they started from.
+        """
+        def check() -> None:
+            try:
+                self.log_follow = self.log_text.yview()[1] > 0.999
+            except tk.TclError:
+                pass
+
+        self.root.after_idle(check)
+
     def _append_log(self, line: str) -> None:
-        at_bottom = self.log_text.yview()[1] > 0.98
         self.log_text.configure(state="normal")
         tag = "heading" if line.startswith("== ") else "problem" if line.startswith("PROBLEM") else ""
         self.log_text.insert("end", line + "\n", tag)
         self.log_text.configure(state="disabled")
-        if at_bottom:
-            self.log_text.see("end")
+        if self.log_follow:
+            # yview_moveto goes to the very bottom every time; see("end") only
+            # scrolls far enough to reveal the last line, which on a wrapped
+            # line can stop a fraction short — and once it did, the old
+            # "are we at the bottom?" test said no and the log never moved again.
+            self.log_text.yview_moveto(1.0)
 
     def _poll(self) -> None:
         try:
@@ -1104,13 +1451,37 @@ class SetupWindow:
             except (OSError, subprocess.TimeoutExpired) as error:
                 problems.append(f"{folder}: {error}")
         if self.want_launch.get():
-            try:
-                start_app(self.install_dir)
-            except OSError as error:
-                problems.append(f"Couldn't open the app: {error}")
+            problems.extend(self._launch_app())
         if problems:
-            messagebox.showwarning(APP_NAME, "Almost done, but:\n\n" + "\n".join(problems), parent=self.root)
+            messagebox.showwarning(APP_NAME, "Almost done, but:\n\n" + "\n".join(problems),
+                                   parent=self.root)
         self.root.destroy()
+
+    def _launch_app(self) -> list[str]:
+        """Open the app, and wait long enough to know it really stayed open.
+
+        Setup used to close the moment it had called Popen, so an app that never
+        drew a window, or one killed along with Setup's job object, looked
+        exactly like success and the user was left staring at the desktop.
+        """
+        try:
+            process = start_app(self.install_dir)
+        except OSError as error:
+            return [f"Couldn't open the app: {error}"]
+
+        self.detail.configure(text=f"Opening {APP_NAME}...")
+        deadline = time.monotonic() + LAUNCH_CONFIRM_SECONDS
+        while time.monotonic() < deadline:
+            if process.poll() is None:
+                self.root.update()      # keep the window responsive while waiting
+                time.sleep(0.1)
+                continue
+            reason = why_app_failed(self.install_dir)
+            detail = f"\n\n{reason}" if reason else ""
+            return [f"{APP_NAME} closed again right after opening.{detail}\n\n"
+                    f"Try opening it from the Start menu. If it still won't start, send "
+                    f"{self.job.log_path} to support."]
+        return []
 
     # -- pages: uninstall --------------------------------------------------------
     def page_confirm_uninstall(self) -> None:

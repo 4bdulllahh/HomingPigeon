@@ -1,103 +1,108 @@
-"""Send page: pre-flight checks, live console, pause/resume/stop."""
+"""Send page: pre-flight checks, live activity log, start / pause / stop."""
 from __future__ import annotations
 
 import queue
 from datetime import datetime
 
-import customtkinter as ctk
+from PyQt6.QtGui import QTextCursor
+from PyQt6.QtWidgets import QHBoxLayout, QProgressBar, QVBoxLayout, QWidget
 
-from app import theme
 from app.core import composer, credentials, db, importer, prefs, scorer, sender, warmup
-from app.ui.widgets.common import ConfirmDialog, Section, StatTile, toast
+from app.ui import theme
+from app.ui.pages.base import Page
+from app.ui.widgets.common import (Card, Section, StatTile, clear_layout, confirm_button,
+                                   danger_button, hint, muted, secondary_button, set_tone,
+                                   small_button)
+from app.ui.widgets.dialogs import ConfirmDialog
+from app.ui.widgets.inputs import text_box
 from app.ui.widgets.range_slider import format_seconds
+from app.workers.jobs import SendPump
 
-LEVEL_COLORS = {
-    "info": theme.FG,
-    "success": theme.SUCCESS,
-    "warn": theme.WARNING,
-    "error": theme.ERROR,
+# The activity log is capped so a long campaign cannot grow it without limit
+MAX_LOG_BLOCKS = 4000
+
+LEVEL_TOKENS = {"info": "fg", "success": "success", "warn": "warning", "error": "error"}
+
+STATE_LABELS = {
+    "running": "Sending", "paused": "Paused", "waiting": "Waiting",
+    "error": "Stopped — problem detected", "stopped": "Stopped",
+    "finished": "Finished", "idle": "Idle",
+}
+STATE_TONES = {
+    "running": "success", "paused": "warning", "waiting": "warning",
+    "error": "error", "stopped": "muted", "finished": "success",
 }
 
 
-class SendPage(ctk.CTkFrame):
-    def __init__(self, master, app):
-        super().__init__(master, fg_color="transparent")
-        self.app = app
+class SendPage(Page):
+    def __init__(self, window):
+        super().__init__(window)
         self.worker: sender.SendWorker | None = None
+        self.pump: SendPump | None = None
         self.events: queue.Queue = queue.Queue()
         self.campaign_id: int | None = None
         self._build()
-        self._poll()
 
     def _build(self) -> None:
-        header = ctk.CTkFrame(self, fg_color="transparent")
-        header.pack(fill="x", padx=theme.PAD_LARGE, pady=(theme.PAD, 0))
-        theme.heading(header, "Send").pack(anchor="w")
-        theme.label(header, "Checks everything first, then sends at your chosen pace.",
-                    muted=True, wrap=True).pack(anchor="w", pady=(2, 12))
+        self.add_header("Send", "Checks everything first, then sends at your chosen pace.")
 
-        # --- preflight ------------------------------------------------------
-        self.preflight = Section(self, "Before you send")
-        self.preflight.pack(fill="x", padx=theme.PAD_LARGE, pady=(0, 12))
-        self.checks_frame = ctk.CTkFrame(self.preflight.body, fg_color="transparent")
-        self.checks_frame.pack(fill="x")
+        self.preflight = Section("Before you send")
+        self.checks_layout = QVBoxLayout()
+        self.checks_layout.setContentsMargins(0, 0, 0, 0)
+        self.checks_layout.setSpacing(3)
+        self.preflight.add_layout(self.checks_layout)
+        self.root.addWidget(self.preflight)
 
-        # --- stats ----------------------------------------------------------
-        stats = ctk.CTkFrame(self, fg_color="transparent")
-        stats.pack(fill="x", padx=theme.PAD_LARGE, pady=(0, 12))
-        for index in range(4):
-            stats.grid_columnconfigure(index, weight=1)
+        tiles_holder = QWidget()
+        tiles_holder.setProperty("role", "plain")
+        tiles = QHBoxLayout(tiles_holder)
+        tiles.setContentsMargins(0, 0, 0, 0)
+        tiles.setSpacing(8)
+        self.tile_queue = StatTile("In this batch", "—")
+        self.tile_sent = StatTile("Sent", "0", tone="success")
+        self.tile_failed = StatTile("Failed", "0", tone="error")
+        self.tile_next = StatTile("Next email in", "—")
+        for tile in (self.tile_queue, self.tile_sent, self.tile_failed, self.tile_next):
+            tiles.addWidget(tile, 1)
+        self.root.addWidget(tiles_holder)
 
-        self.tile_queue = StatTile(stats, "In this batch", "—")
-        self.tile_queue.grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        self.tile_sent = StatTile(stats, "Sent", "0", accent=theme.SUCCESS)
-        self.tile_sent.grid(row=0, column=1, sticky="ew", padx=(0, 8))
-        self.tile_failed = StatTile(stats, "Failed", "0", accent=theme.ERROR)
-        self.tile_failed.grid(row=0, column=2, sticky="ew", padx=(0, 8))
-        self.tile_next = StatTile(stats, "Next email in", "—")
-        self.tile_next.grid(row=0, column=3, sticky="ew")
+        controls_holder = QWidget()
+        controls_holder.setProperty("role", "plain")
+        controls = QHBoxLayout(controls_holder)
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(8)
+        self.start_button = confirm_button("Start Emailing", self._start, 220)
+        self.pause_button = secondary_button("Pause", self._toggle_pause, 120)
+        self.stop_button = danger_button("Stop", self._stop, 120)
+        self.pause_button.setEnabled(False)
+        self.stop_button.setEnabled(False)
+        controls.addWidget(self.start_button)
+        controls.addWidget(self.pause_button)
+        controls.addWidget(self.stop_button)
+        self.state_label = muted("Idle", wrap=False)
+        controls.addWidget(self.state_label)
+        controls.addStretch(1)
+        self.root.addWidget(controls_holder)
 
-        # --- controls -------------------------------------------------------
-        controls = ctk.CTkFrame(self, fg_color="transparent")
-        controls.pack(fill="x", padx=theme.PAD_LARGE, pady=(0, 10))
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        self.progress.setTextVisible(False)
+        self.root.addWidget(self.progress)
 
-        self.start_button = theme.confirm_button(controls, "Start Emailing", self._start, width=210)
-        self.start_button.pack(side="left")
-        self.pause_button = theme.secondary_button(controls, "Pause", self._toggle_pause, width=110)
-        self.pause_button.pack(side="left", padx=8)
-        self.pause_button.configure(state="disabled")
-        self.stop_button = theme.danger_button(controls, "Stop", self._stop, width=110)
-        self.stop_button.pack(side="left")
-        self.stop_button.configure(state="disabled")
+        console = Card(kind="console", padding=10)
+        header = QHBoxLayout()
+        header.addWidget(hint("Activity"))
+        header.addStretch(1)
+        header.addWidget(small_button("Clear", self._clear_console))
+        console.add_layout(header)
 
-        self.state_label = theme.label(controls, "Idle", muted=True)
-        self.state_label.pack(side="left", padx=16)
-
-        self.progress = ctk.CTkProgressBar(self, progress_color=theme.ACCENT,
-                                           fg_color=theme.BORDER, height=6)
-        self.progress.set(0)
-        self.progress.pack(fill="x", padx=theme.PAD_LARGE, pady=(0, 10))
-
-        # --- console --------------------------------------------------------
-        console_wrap = ctk.CTkFrame(self, fg_color=theme.BG_CONSOLE, corner_radius=theme.RADIUS,
-                                    border_width=1, border_color=theme.BORDER)
-        console_wrap.pack(fill="both", expand=True, padx=theme.PAD_LARGE, pady=(0, theme.PAD))
-
-        bar = ctk.CTkFrame(console_wrap, fg_color="transparent")
-        bar.pack(fill="x", padx=12, pady=(8, 0))
-        ctk.CTkLabel(bar, text="Activity", font=theme.font(12, "bold"),
-                     text_color=theme.FG_MUTED).pack(side="left")
-        theme.secondary_button(bar, "Clear", self._clear_console, width=70, height=24).pack(
-            side="right")
-
-        self.console = ctk.CTkTextbox(console_wrap, font=theme.mono(11), fg_color="transparent",
-                                      text_color=theme.FG, wrap="word", border_width=0)
-        self.console.pack(fill="both", expand=True, padx=8, pady=8)
-        self.console.configure(state="disabled")
-
-        for level, color in LEVEL_COLORS.items():
-            resolved = color[1] if ctk.get_appearance_mode() == "Dark" else color[0]
-            self.console._textbox.tag_configure(level, foreground=resolved)
+        self.console = text_box("", monospace=True)
+        self.console.setProperty("role", "console")
+        self.console.setReadOnly(True)
+        self.console.setMaximumBlockCount(MAX_LOG_BLOCKS)
+        console.add(self.console, 1)
+        self.root.addWidget(console, 1)
 
     # --- preflight ----------------------------------------------------------
     def _gather_checks(self) -> list[tuple[str, bool, str]]:
@@ -126,13 +131,14 @@ class SendPage(ctk.CTkFrame):
                  if failures else ""))
         else:
             checks.append(("Domain authentication checked", False,
-                           "Run the checks on the 'Domain check' page — without SPF and DMARC "
-                           "your mail is very likely to be filtered"))
+                           "Run the checks on the 'Domain check' page — without SPF and "
+                           "DMARC your mail is very likely to be filtered"))
 
         report = scorer.latest_report()
         if report:
             checks.append((f"Spam score {report.score}/100 ({report.grade})", report.score >= 70,
-                           "Improve the content on the 'My message' page" if report.score < 70 else ""))
+                           "Improve the content on the 'My message' page"
+                           if report.score < 70 else ""))
         else:
             checks.append(("Spam score checked", False,
                            "Open 'My message' → 'Preview & score' to run the check"))
@@ -143,32 +149,40 @@ class SendPage(ctk.CTkFrame):
         return checks
 
     def _render_checks(self) -> None:
-        for widget in self.checks_frame.winfo_children():
-            widget.destroy()
-
+        clear_layout(self.checks_layout)
         for label, ok, fix in self._gather_checks():
-            row = ctk.CTkFrame(self.checks_frame, fg_color="transparent")
-            row.pack(fill="x", pady=2)
-            ctk.CTkLabel(row, text="✓" if ok else "✕", font=theme.font(14, "bold"),
-                         text_color=theme.SUCCESS if ok else theme.ERROR, width=22).pack(side="left")
-            ctk.CTkLabel(row, text=label, font=theme.font(12),
-                         text_color=theme.FG if ok else theme.FG_BRIGHT, anchor="w").pack(side="left")
+            holder = QWidget()
+            holder.setProperty("role", "plain")
+            line = QHBoxLayout(holder)
+            line.setContentsMargins(0, 0, 0, 0)
+            line.setSpacing(8)
+
+            glyph = muted("✓" if ok else "✕", wrap=False)
+            glyph.setStyleSheet(
+                f"color: {theme.color('success') if ok else theme.color('error')}; "
+                f"font-weight: 700;")
+            glyph.setFixedWidth(round(18 * theme.text_scale()))
+            line.addWidget(glyph)
+
+            text = muted(label, wrap=False)
+            set_tone(text, "muted" if ok else "bright")
+            line.addWidget(text)
             if not ok and fix:
-                ctk.CTkLabel(row, text=f"— {fix}", font=theme.font(11), text_color=theme.FG_MUTED,
-                             anchor="w").pack(side="left", padx=(8, 0))
+                line.addWidget(hint(f"— {fix}", wrap=False))
+            line.addStretch(1)
+            self.checks_layout.addWidget(holder)
 
     # --- console ------------------------------------------------------------
     def _log(self, message: str, level: str = "info") -> None:
         stamp = prefs.format_time(datetime.now(), seconds=True)
-        self.console.configure(state="normal")
-        self.console._textbox.insert("end", f"{stamp}  {message}\n", level)
-        self.console.configure(state="disabled")
-        self.console.see("end")
+        colour = theme.color(LEVEL_TOKENS.get(level, "fg"))
+        self.console.appendHtml(
+            f'<span style="color:{theme.color("fg_muted")}">{stamp}</span>&nbsp;&nbsp;'
+            f'<span style="color:{colour}">{_escape(message)}</span>')
+        self.console.moveCursor(QTextCursor.MoveOperation.End)
 
     def _clear_console(self) -> None:
-        self.console.configure(state="normal")
-        self.console.delete("1.0", "end")
-        self.console.configure(state="disabled")
+        self.console.clear()
 
     # --- campaign assembly --------------------------------------------------
     def _build_plan(self) -> sender.SendPlan | None:
@@ -177,8 +191,8 @@ class SendPage(ctk.CTkFrame):
         password = credentials.load_secret(credentials.SMTP_PASSWORD)
 
         if not (email and host and password):
-            toast(self, "Finish setting up your email account first", "warn")
-            self.app.show("account")
+            self.notify("Finish setting up your email account first", "warn")
+            self.go("account")
             return None
 
         subjects = [r["text"] for r in
@@ -186,8 +200,8 @@ class SendPage(ctk.CTkFrame):
         bodies = [r["html"] for r in
                   db.query("SELECT html FROM bodies WHERE enabled = 1 ORDER BY position")]
         if not subjects or not bodies:
-            toast(self, "Write at least one subject and one body first", "warn")
-            self.app.show("templates")
+            self.notify("Write at least one subject and one body first", "warn")
+            self.go("templates")
             return None
 
         signature_row = db.query_one("SELECT signature_html FROM template_sets ORDER BY id LIMIT 1")
@@ -233,17 +247,16 @@ class SendPage(ctk.CTkFrame):
 
     def _ensure_campaign(self) -> int:
         """Reuse an unfinished campaign so a stopped run resumes where it left off."""
-        row = db.query_one(
+        record = db.query_one(
             "SELECT id FROM campaigns WHERE status IN ('draft', 'running', 'paused') "
             "ORDER BY id DESC LIMIT 1")
-        if row:
-            campaign_id = row["id"]
+        if record:
+            campaign_id = record["id"]
         else:
             campaign_id = db.execute(
                 "INSERT INTO campaigns(name, status, created_at) VALUES (?, 'draft', ?)",
                 (f"Campaign {prefs.format_date(datetime.now())}", db.now()))
 
-        # Add any contacts that are not in the campaign yet
         db.execute(
             "INSERT OR IGNORE INTO campaign_recipients(campaign_id, contact_id, status) "
             "SELECT ?, id, 'pending' FROM contacts WHERE valid = 1 "
@@ -254,7 +267,7 @@ class SendPage(ctk.CTkFrame):
 
     # --- actions ------------------------------------------------------------
     def _start(self) -> None:
-        if self.worker and self.worker.is_alive():
+        if self.is_running():
             return
 
         plan = self._build_plan()
@@ -264,7 +277,7 @@ class SendPage(ctk.CTkFrame):
         stats = db.campaign_stats(plan.campaign_id)
         pending = stats.get("pending", 0) + stats.get("retry", 0)
         if not pending:
-            toast(self, "Every contact in this campaign has already been processed", "info")
+            self.notify("Every contact in this campaign has already been processed", "info")
             return
 
         report = scorer.latest_report()
@@ -273,10 +286,10 @@ class SendPage(ctk.CTkFrame):
                 self, "Your content scored poorly",
                 f"The last spam check scored {report.score}/100 (grade {report.grade}).\n\n"
                 f"{report.verdict}\n\nSending anyway risks your domain's reputation. You can fix "
-                f"the issues on the 'My message' page, or continue if you have already reviewed them.",
-                confirm_text="Send anyway", danger=True,
+                f"the issues on the 'My message' page, or continue if you have already reviewed "
+                f"them.", confirm_text="Send anyway", danger=True,
             ):
-                self.app.show("templates")
+                self.go("templates")
                 return
 
         dns_status = db.get_setting("dns_last_status", {}) or {}
@@ -290,7 +303,7 @@ class SendPage(ctk.CTkFrame):
                 f"reputation for months.\n\nFix them on the 'Domain check' page first.",
                 confirm_text="Send anyway", danger=True,
             ):
-                self.app.show("deliverability")
+                self.go("deliverability")
                 return
 
         limit = warmup.remaining_today()
@@ -311,25 +324,37 @@ class SendPage(ctk.CTkFrame):
         self.worker = sender.SendWorker(plan, self.events)
         self.worker.start()
 
-        self.start_button.configure(state="disabled", text="Sending…")
-        self.pause_button.configure(state="normal", text="Pause")
-        self.stop_button.configure(state="normal")
+        # A dedicated thread drains the worker's queue and re-emits each event as
+        # a signal, so the UI is woken only when something actually happened.
+        self.pump = SendPump(self.worker, self.events, self)
+        self.pump.event.connect(self._handle_event)
+        # Qt aborts the process if a running QThread is destroyed, and the page
+        # can be torn down (a text-size change, closing) moments after the last
+        # event arrives. Dropping the reference once it has finished avoids that.
+        self.pump.finished.connect(self._pump_finished)
+        self.pump.start()
+
+        self.start_button.setEnabled(False)
+        self.start_button.setText("Sending…")
+        self.pause_button.setEnabled(True)
+        self.pause_button.setText("Pause")
+        self.stop_button.setEnabled(True)
         self.tile_sent.update_value("0")
         self.tile_failed.update_value("0")
-        self.progress.set(0)
+        self.progress.setValue(0)
 
     def _toggle_pause(self) -> None:
-        if not self.worker or not self.worker.is_alive():
+        if not self.is_running():
             return
         if self.worker.is_paused:
             self.worker.request_resume()
-            self.pause_button.configure(text="Pause")
+            self.pause_button.setText("Pause")
         else:
             self.worker.request_pause()
-            self.pause_button.configure(text="Resume")
+            self.pause_button.setText("Resume")
 
     def _stop(self) -> None:
-        if not self.worker or not self.worker.is_alive():
+        if not self.is_running():
             return
         if not ConfirmDialog.ask(
             self, "Stop sending?",
@@ -339,28 +364,27 @@ class SendPage(ctk.CTkFrame):
         ):
             return
         self.worker.request_stop()
-        self.stop_button.configure(state="disabled")
+        self.stop_button.setEnabled(False)
+
+    def _pump_finished(self) -> None:
+        pump, self.pump = self.pump, None
+        if pump is not None:
+            pump.deleteLater()
 
     def stop_worker(self) -> None:
         if self.worker and self.worker.is_alive():
             self.worker.request_stop()
             self.worker.join(timeout=5)
+        pump, self.pump = self.pump, None
+        if pump is not None:
+            pump.stop()
+            pump.wait(2000)
+            pump.deleteLater()
 
     def is_running(self) -> bool:
         return bool(self.worker and self.worker.is_alive())
 
-    # --- event pump ---------------------------------------------------------
-    def _poll(self) -> None:
-        drained = 0
-        while drained < 60:
-            try:
-                event = self.events.get_nowait()
-            except queue.Empty:
-                break
-            drained += 1
-            self._handle_event(event)
-        self.after(100, self._poll)
-
+    # --- events -------------------------------------------------------------
     def _handle_event(self, event: sender.Event) -> None:
         if event.type == sender.EventType.LOG:
             self._log(event.message, event.level)
@@ -372,7 +396,8 @@ class SendPage(ctk.CTkFrame):
         elif event.type == sender.EventType.PROGRESS:
             data = event.data or {}
             done, total = data.get("done", 0), data.get("total", 1)
-            self.progress.set(done / total if total else 0)
+            self.progress.setRange(0, max(1, total))
+            self.progress.setValue(done)
             self.tile_queue.update_value(f"{done}/{total}")
             self.tile_sent.update_value(str(data.get("sent", 0)))
             self.tile_failed.update_value(str(data.get("failed", 0)))
@@ -383,42 +408,46 @@ class SendPage(ctk.CTkFrame):
 
         elif event.type == sender.EventType.STATE:
             state = (event.data or {}).get("state", "")
-            colors = {
-                "running": theme.SUCCESS, "paused": theme.WARNING, "waiting": theme.WARNING,
-                "error": theme.ERROR, "stopped": theme.FG_MUTED, "finished": theme.SUCCESS,
-            }
-            labels = {
-                "running": "Sending", "paused": "Paused", "waiting": "Waiting",
-                "error": "Stopped — problem detected", "stopped": "Stopped",
-                "finished": "Finished", "idle": "Idle",
-            }
-            self.state_label.configure(text=labels.get(state, state),
-                                       text_color=colors.get(state, theme.FG_MUTED))
+            self.state_label.setText(STATE_LABELS.get(state, state))
+            set_tone(self.state_label, STATE_TONES.get(state, "muted"))
 
         elif event.type == sender.EventType.DONE:
             data = event.data or {}
-            self.start_button.configure(state="normal", text="Start Emailing")
-            self.pause_button.configure(state="disabled", text="Pause")
-            self.stop_button.configure(state="disabled")
+            self.start_button.setEnabled(True)
+            self.start_button.setText("Start Emailing")
+            self.pause_button.setEnabled(False)
+            self.pause_button.setText("Pause")
+            self.stop_button.setEnabled(False)
             self.tile_next.update_value("—")
             self._render_checks()
-            self.app._refresh_status()
+            self.window_.refresh_status()
+
+            # The record of what went out is the first thing people look at
+            # afterwards; refresh it now rather than on the next visit.
+            history = self.window_.page("sent")
+            if history is not None:
+                history.on_show()
 
             sent = data.get("sent", 0)
             if sent:
-                toast(self, f"Finished — {sent} sent, {data.get('failed', 0)} failed",
-                      "success" if not data.get("failed") else "warn")
+                self.notify(
+                    f"Finished — {sent} sent, {data.get('failed', 0)} failed",
+                    "success" if not data.get("failed") else "warn")
 
     # --- lifecycle ----------------------------------------------------------
     def on_show(self) -> None:
         self._render_checks()
-        if not self.is_running():
-            self._ensure_campaign()
-            stats = db.campaign_stats(self.campaign_id) if self.campaign_id else {}
-            pending = stats.get("pending", 0) + stats.get("retry", 0)
-            limit = warmup.remaining_today()
-            self.tile_queue.update_value(f"{min(pending, limit)}",
-                                         f"{pending:,} pending overall")
-            self.tile_sent.update_value(str(stats.get("sent", 0)))
-            self.tile_failed.update_value(
-                str(stats.get("failed", 0) + stats.get("bounced", 0)))
+        if self.is_running():
+            return
+        self._ensure_campaign()
+        stats = db.campaign_stats(self.campaign_id) if self.campaign_id else {}
+        pending = stats.get("pending", 0) + stats.get("retry", 0)
+        limit = warmup.remaining_today()
+        self.tile_queue.update_value(f"{min(pending, limit)}", f"{pending:,} pending overall")
+        self.tile_sent.update_value(str(stats.get("sent", 0)))
+        self.tile_failed.update_value(
+            str(stats.get("failed", 0) + stats.get("bounced", 0)))
+
+
+def _escape(text: str) -> str:
+    return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))

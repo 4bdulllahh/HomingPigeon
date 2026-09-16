@@ -27,7 +27,11 @@ REQUIREMENTS = ROOT / "requirements.txt"
 RUN_SCRIPT = ROOT / "run.py"
 
 # Top-level modules the app imports; if any is missing, setup runs again.
-REQUIRED_MODULES = ["customtkinter", "pandas", "openpyxl", "dns", "cryptography", "PIL", "certifi"]
+REQUIRED_MODULES = ["PyQt6", "pandas", "openpyxl", "dns", "cryptography", "PIL", "certifi"]
+
+# Every console program started from here would otherwise flash its own black
+# window open for a moment, which looks like something going wrong.
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def say(text: str = "") -> None:
@@ -51,29 +55,9 @@ def python_problem() -> list[str] | None:
             "Install the latest Python from https://www.python.org/downloads/",
             "then double-click the Start file again.",
         ]
-    try:
-        import tkinter  # noqa: F401
-    except ImportError:
-        if sys.platform == "darwin":
-            return [
-                "This Python cannot draw windows (it is missing 'tkinter').",
-                "Install Python from https://www.python.org/downloads/macos/",
-                "then double-click the Start file again.",
-                "(If you use Homebrew, 'brew install python-tk' also fixes it.)",
-            ]
-        if sys.platform.startswith("linux"):
-            return [
-                "This Python cannot draw windows (it is missing 'tkinter').",
-                "Install it, then run the Start file again:",
-                "  Ubuntu / Debian / Mint:  sudo apt install python3-tk python3-venv",
-                "  Fedora:                  sudo dnf install python3-tkinter",
-                "  Arch:                    sudo pacman -S tk",
-            ]
-        return [
-            "This Python cannot draw windows (it is missing 'tkinter').",
-            "Reinstall Python from https://www.python.org/downloads/ and leave",
-            "'tcl/tk and IDLE' ticked, then double-click the Start file again.",
-        ]
+    # The app draws with Qt, which pip installs complete with its own libraries,
+    # so there is nothing else to check here. Linux still needs a couple of
+    # system X libraries; that is reported by run.py if the import fails.
     return None
 
 
@@ -97,6 +81,7 @@ def env_python(env: Path, windowless: bool = False) -> Path:
     return env / "bin" / "python"
 
 
+
 def requirements_fingerprint() -> str:
     return hashlib.sha256(REQUIREMENTS.read_bytes()).hexdigest()
 
@@ -114,7 +99,8 @@ def env_is_ready(env: Path) -> bool:
         f"sys.exit(any(importlib.util.find_spec(m) is None for m in {REQUIRED_MODULES!r}))"
     )
     try:
-        result = subprocess.run([str(python), "-c", probe], capture_output=True, timeout=60)
+        result = subprocess.run([str(python), "-c", probe], capture_output=True, timeout=60,
+                                creationflags=NO_WINDOW)
     except (OSError, subprocess.TimeoutExpired):
         return False
     return result.returncode == 0
@@ -124,8 +110,8 @@ def env_works(env: Path) -> bool:
     """The private folder exists and its Python still runs (Python may have been
     reinstalled or moved since it was made)."""
     try:
-        return subprocess.run([str(env_python(env)), "-c", "pass"],
-                              capture_output=True, timeout=60).returncode == 0
+        return subprocess.run([str(env_python(env)), "-c", "pass"], capture_output=True,
+                              timeout=60, creationflags=NO_WINDOW).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
 
@@ -139,7 +125,7 @@ def create_env(env: Path) -> bool:
         shutil.rmtree(env, ignore_errors=True)
     env.parent.mkdir(parents=True, exist_ok=True)
     result = subprocess.run([sys.executable, "-m", "venv", str(env)],
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, creationflags=NO_WINDOW)
     if result.returncode != 0 or not env_python(env).exists():
         details = (result.stderr or result.stdout or "").strip()
         if details:

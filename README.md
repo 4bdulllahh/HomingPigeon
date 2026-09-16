@@ -13,7 +13,7 @@ HomingPigeon does the things that normally go wrong: it checks that your domain 
 correctly, cleans your contact list before you send, makes every message slightly different,
 sends at a human pace, and quietly removes addresses that bounce.
 
-> **Free while in beta (v0.3.0).** Please report anything confusing or broken.
+> **Free while in beta (v0.4.1).** Please report anything confusing or broken.
 
 ---
 
@@ -21,11 +21,12 @@ sends at a human pace, and quietly removes addresses that bounce.
 
 You don't need to know anything about coding.
 
-1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.3.0.zip`**.
+1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.4.1.zip`**.
 2. Right-click the downloaded file → **Extract All…** → **Extract**.
 3. In the folder that opens, double-click **`HomingPigeon Setup.exe`**.
 4. Click **Install**. Setup shows you every step while it works: it downloads what the app needs
-   (about 80 MB), checks the download is genuine and sets everything up. About 2–5 minutes.
+   (about 170 MB), checks the download is genuine and sets everything up. Usually about a minute
+   on a normal connection.
 5. At the end, choose whether to add HomingPigeon to the **Start menu** and the **Desktop**, and
    whether to **open it now**. Click **Finish**.
 
@@ -116,6 +117,7 @@ so it never interferes with other programs (on Windows:
 | **Bounce and unsubscribe handling** | Reads your inbox and permanently removes anyone who bounced or asked to be removed. |
 | **Spam score before you send** | Warns you about wording, links and attachments that trigger filters. |
 | **One-click unsubscribe** | Adds the standard header that puts an Unsubscribe button in Gmail and Outlook — providers reward this. |
+| **A record of everything sent** | The **Sent emails** page lists every message that went out with the time, the subject used and whether it was answered, bounced or failed — and exports it back to Excel so your master list stays current. |
 
 ---
 
@@ -153,13 +155,40 @@ public DNS (to check your domain settings).
 
 ## For developers
 
+The interface is PyQt6. It is split so that the parts that can block never share a
+thread with the parts that draw.
+
 ```
-run.py                     app entry point
+run.py                     app entry point: QApplication, theme, main window
 app/config.py              app name, version, paths, limits
-app/theme.py               colours, fonts, widget factories
-app/core/                  engine: db, importer, merge, composer, sender, scorer, warmup,
+
+app/core/                  the engine, and the only place business rules live.
+                           Pure Python with no UI imports at all, so it can be
+                           tested and called from a worker thread unchanged:
+                           db, importer, merge, composer, sender, scorer, warmup,
                            imap_sync, dns_tools, exporter, credentials, shortcut, tls
-app/ui/                    shell + one module per page
+
+app/workers/               everything slow, moved off the UI thread
+  base.py                  Task / Worker on a QThreadPool, results delivered by signal
+  jobs.py                  one wrapper per slow job (SMTP, IMAP, DNS, Excel, scoring)
+                           plus SendPump, which turns the send worker's event queue
+                           into Qt signals
+
+app/models/                QAbstractTableModel implementations
+  contacts_model.py        paged straight from SQLite, so a huge list opens instantly
+  sent_model.py            the same paging over what has actually been sent
+  table_model.py           small in-memory tables (activity, suppression, replies)
+
+app/services/              app management that is neither UI nor business logic
+  maintenance.py           backup, restore, restart, uninstall, version comparison
+
+app/ui/
+  theme.py                 tokens and the whole application stylesheet
+  main_window.py           sidebar, page stack, status bar
+  pages/                   one module per page, built on first use
+  widgets/                 shared building blocks: cards, buttons, tables, dialogs,
+                           inputs (including the typing debouncer) and the range slider
+
 assets/                    logo.svg and the icons rendered from it
 installer/setup_app.py     the Windows installer (becomes "HomingPigeon Setup.exe")
 installer/install-if-blocked.bat   backup installer for Smart App Control PCs
@@ -168,6 +197,21 @@ tools/make_icons.py        re-renders assets/ after changing logo.svg
 tools/launch.py            used by the Mac and Linux "Start HomingPigeon" files
 tests/                     pytest suite
 ```
+
+Three rules keep the window responsive:
+
+- **Nothing slow runs on the UI thread.** SMTP, IMAP, DNS lookups, reading a
+  spreadsheet and spam scoring all go through `app/workers/`, which reports back
+  with `pyqtSignal`. Qt delivers those on the main thread, so the callbacks can
+  touch widgets safely.
+- **Appearance changes restyle, they never rebuild.** Theme, contrast and bold
+  text re-render one QSS string and hand it to Qt. No widget is destroyed, which
+  is what made the old build stutter on every settings change.
+- **Work is done once the user stops typing.** Anything expensive driven by a
+  text field goes through `Debouncer` in `app/ui/widgets/inputs.py`.
+
+Pages are constructed the first time they are opened, not at startup, so the
+window appears with a single page in it.
 
 `requirements.txt` is what the app needs to run. `requirements-dev.txt` adds the build and test
 tools:
@@ -189,14 +233,14 @@ Then in the app set the server to `localhost`, port `1025`, security **None (tes
 
 ### Making a release
 
-1. Change `APP_VERSION` in `app/config.py` (for example to `"v0.4.0 beta"`), commit and push.
+1. Change `APP_VERSION` in `app/config.py` (for example to `"v0.5.0 beta"`), commit and push.
 2. On GitHub: **Releases → Draft a new release**. Under **Choose a tag**, type the version
-   (`v0.4.0`) and pick **Create new tag on publish**. Give it a title and notes, then **Publish**.
-3. GitHub Actions builds `HomingPigeon-v0.4.0.zip` and attaches it to the release by itself
+   (`v0.5.0`) and pick **Create new tag on publish**. Give it a title and notes, then **Publish**.
+3. GitHub Actions builds `HomingPigeon-v0.5.0.zip` and attaches it to the release by itself
    (about 5 minutes — watch progress in the **Actions** tab).
 
 To build it on your own PC instead: `python tools/build_installer.py`, then drag
-`dist\HomingPigeon-v0.4.0.zip` into the release's **Attach binaries** box.
+`dist\HomingPigeon-v0.5.0.zip` into the release's **Attach binaries** box.
 
 ## A note on DKIM
 

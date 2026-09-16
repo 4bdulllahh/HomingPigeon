@@ -1,480 +1,693 @@
-"""Small shared widgets: toasts, status rows, stat tiles, tables, dialogs."""
+"""The building blocks every page is made of.
+
+Styling lives in the application stylesheet, so these are deliberately thin:
+they set a ``role`` or ``tone`` property and let QSS do the rest. That is what
+lets a theme change repaint the whole app without rebuilding a single widget.
+"""
 from __future__ import annotations
 
-import tkinter as tk
 import webbrowser
 from typing import Callable
 
-import customtkinter as ctk
+from PyQt6.QtCore import (QEasingCurve, QEvent, QPropertyAnimation, Qt, QTimer,
+                          pyqtSignal)
+from PyQt6.QtGui import QGuiApplication
+from PyQt6.QtWidgets import (QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLayout,
+                             QProgressBar, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout,
+                             QWidget)
 
-from app import theme
-
-
-# --- Toast ------------------------------------------------------------------
-class Toast(ctk.CTkFrame):
-    """Transient message in the bottom-right corner."""
-
-    def __init__(self, master, message: str, level: str = "info", duration: int = 4000):
-        colors = {"success": theme.SUCCESS, "error": theme.ERROR,
-                  "warn": theme.WARNING, "info": theme.ACCENT}
-        accent = colors.get(level, theme.ACCENT)
-        super().__init__(master, fg_color=theme.BG_PANEL, border_color=accent,
-                         border_width=1, corner_radius=theme.RADIUS)
-
-        bar = ctk.CTkFrame(self, fg_color=accent, width=3, height=1, corner_radius=0)
-        bar.pack(side="left", fill="y")
-        label = ctk.CTkLabel(self, text=message, font=theme.font(12), text_color=theme.FG,
-                             wraplength=340, justify="left", anchor="w")
-        label.pack(side="left", padx=10, pady=8)
-
-        self.place(relx=0.98, rely=0.96, anchor="se")
-        self.after(duration, self.destroy)
+from app.ui import theme
+from app.ui.widgets.flow import FlowLayout
 
 
-def toast(widget, message: str, level: str = "info", duration: int = 4000) -> None:
-    root = widget.winfo_toplevel()
-    Toast(root, message, level, duration)
+# --- property helpers -------------------------------------------------------
+def restyle(widget: QWidget) -> None:
+    """Re-apply the stylesheet after changing a dynamic property.
 
-
-# --- Status row -------------------------------------------------------------
-def status_icon(master, status: str) -> ctk.CTkLabel:
-    """A pass/warn/fail symbol sized to sit on the same line as a row's bold heading.
-
-    Pack it with anchor="n" next to the heading's column: both are one text line tall,
-    so the symbol lines up with the heading instead of floating between two lines.
+    Qt does not re-evaluate property selectors on its own, so every place that
+    flips ``choice``/``tone``/``nav`` has to ask for it.
     """
-    return ctk.CTkLabel(master, text=theme.STATUS_ICONS.get(status, "○"), font=theme.font(14, "bold"),
-                        text_color=theme.status_color(status), width=22, height=24, anchor="center")
+    style = widget.style()
+    style.unpolish(widget)
+    style.polish(widget)
 
 
-class StatusRow(ctk.CTkFrame):
-    """One pass/warn/fail line with an optional expandable detail area."""
+def set_role(widget: QWidget, role: str) -> QWidget:
+    widget.setProperty("role", role)
+    return widget
 
-    def __init__(self, master, title: str, status: str = "pending", summary: str = "",
-                 detail: str = "", record: str = "", fix: str = "", extras: list[str] | None = None,
-                 on_copy: Callable[[str], None] | None = None):
-        super().__init__(master, fg_color="transparent")
-        self._expanded = False
-        self._on_copy = on_copy
+
+def set_tone(widget: QWidget, tone: str | None) -> QWidget:
+    widget.setProperty("tone", tone or "")
+    restyle(widget)
+    return widget
+
+
+# --- text -------------------------------------------------------------------
+def _label(text: str, role: str, wrap: bool, parent=None) -> QLabel:
+    label = QLabel(text, parent)
+    label.setProperty("role", role)
+    label.setWordWrap(wrap)
+    if wrap:
+        # Without heightForWidth a wrapped label is measured as one line, and
+        # nested layouts then overlap the rows underneath it.
+        policy = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        policy.setHeightForWidth(True)
+        label.setSizePolicy(policy)
+        label.setMinimumHeight(0)
+    return label
+
+
+def heading(text: str, parent=None) -> QLabel:
+    return _label(text, "heading", False, parent)
+
+
+def subheading(text: str, parent=None) -> QLabel:
+    return _label(text, "subheading", False, parent)
+
+
+def body(text: str, parent=None, wrap: bool = True) -> QLabel:
+    return _label(text, "body", wrap, parent)
+
+
+def muted(text: str, parent=None, wrap: bool = True) -> QLabel:
+    return _label(text, "muted", wrap, parent)
+
+
+def hint(text: str, parent=None, wrap: bool = True) -> QLabel:
+    return _label(text, "hint", wrap, parent)
+
+
+def field_label(text: str, parent=None) -> QLabel:
+    return _label(text, "field", False, parent)
+
+
+def selectable(label: QLabel) -> QLabel:
+    label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+    return label
+
+
+# --- structure --------------------------------------------------------------
+def separator(parent=None, vertical: bool = False) -> QFrame:
+    line = QFrame(parent)
+    line.setProperty("role", "separator")
+    if vertical:
+        line.setFixedWidth(1)
+    else:
+        line.setFixedHeight(1)
+    return line
+
+
+def spacer(height: int = 0) -> QWidget:
+    widget = QWidget()
+    widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+    if height:
+        widget.setFixedHeight(height)
+    else:
+        widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+    return widget
+
+
+def row(*widgets: QWidget, spacing: int = 8, stretch: int | None = None) -> QWidget:
+    """A horizontal strip.
+
+    Pass ``None`` in place of a widget to insert a stretch there, or ``stretch``
+    as the index of the widget that should take up the spare width.
+    """
+    container = QWidget()
+    container.setProperty("role", "plain")
+    layout = QHBoxLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(spacing)
+    for index, widget in enumerate(widgets):
+        if widget is None:
+            layout.addStretch(1)
+        else:
+            layout.addWidget(widget, 1 if index == stretch else 0)
+    return container
+
+
+def column(*widgets: QWidget, spacing: int = 8, margins: tuple = (0, 0, 0, 0)) -> QWidget:
+    container = QWidget()
+    container.setProperty("role", "plain")
+    layout = QVBoxLayout(container)
+    layout.setContentsMargins(*margins)
+    layout.setSpacing(spacing)
+    for widget in widgets:
+        if widget is None:
+            layout.addStretch(1)
+        else:
+            layout.addWidget(widget)
+    return container
+
+
+def flow_row(spacing: int = 8) -> tuple[QWidget, FlowLayout]:
+    """A container whose buttons wrap onto a second line when space runs out."""
+    container = QWidget()
+    container.setProperty("role", "plain")
+    layout = FlowLayout(container, margin=0, spacing=spacing)
+    return container, layout
+
+
+class Card(QFrame):
+    """A padded panel. ``kind`` picks the border: plain, danger or tinted."""
+
+    def __init__(self, parent=None, kind: str = "card", padding: int = 16):
+        super().__init__(parent)
+        self.setProperty("role", kind)
+        pad = round(padding * theme.text_scale())
+        self.layout_ = QVBoxLayout(self)
+        self.layout_.setContentsMargins(pad, pad, pad, pad)
+        self.layout_.setSpacing(round(8 * theme.text_scale()))
+
+    def add(self, widget: QWidget, stretch: int = 0) -> QWidget:
+        self.layout_.addWidget(widget, stretch)
+        return widget
+
+    def add_layout(self, layout: QLayout) -> QLayout:
+        self.layout_.addLayout(layout)
+        return layout
+
+    def add_stretch(self) -> None:
+        self.layout_.addStretch(1)
+
+
+class Section(Card):
+    """A titled card. Page content goes into ``.body``."""
+
+    def __init__(self, title: str, description: str = "", parent=None, kind: str = "section"):
+        super().__init__(parent, kind=kind, padding=18)
+        title_label = QLabel(title)
+        title_label.setProperty("role", "section-title")
+        self.layout_.addWidget(title_label)
+        if description:
+            note = muted(description)
+            self.layout_.addWidget(note)
+        self.body = QWidget()
+        self.body.setProperty("role", "plain")
+        self.body_layout = QVBoxLayout(self.body)
+        self.body_layout.setContentsMargins(0, round(6 * theme.text_scale()), 0, 0)
+        self.body_layout.setSpacing(round(8 * theme.text_scale()))
+        self.layout_.addWidget(self.body)
+
+    def add(self, widget: QWidget, stretch: int = 0) -> QWidget:
+        self.body_layout.addWidget(widget, stretch)
+        return widget
+
+    def add_layout(self, layout: QLayout) -> QLayout:
+        self.body_layout.addLayout(layout)
+        return layout
+
+
+class FormRow(QWidget):
+    """A label above an input, with an optional hint underneath."""
+
+    def __init__(self, label: str, note: str = "", parent=None):
+        super().__init__(parent)
+        self.setProperty("role", "plain")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(3)
+        layout.addWidget(field_label(label))
+        self.input_area = QWidget()
+        self.input_area.setProperty("role", "plain")
+        self.input_layout = QVBoxLayout(self.input_area)
+        self.input_layout.setContentsMargins(0, 0, 0, 0)
+        self.input_layout.setSpacing(6)
+        layout.addWidget(self.input_area)
+        if note:
+            layout.addWidget(hint(note))
+
+    def add(self, widget: QWidget) -> QWidget:
+        self.input_layout.addWidget(widget)
+        return widget
+
+
+class StatTile(Card):
+    """A big number with a caption and a one-line hint."""
+
+    def __init__(self, caption: str, value: str = "—", note: str = "", tone: str | None = None,
+                 parent=None):
+        super().__init__(parent, kind="card", padding=14)
+        self.layout_.setSpacing(1)
+        self.value_label = QLabel(value)
+        self.value_label.setProperty("role", "value")
+        if tone:
+            self.value_label.setProperty("tone", tone)
+        self.caption_label = muted(caption, wrap=False)
+        self.note_label = hint(note, wrap=False)
+        self.layout_.addWidget(self.value_label)
+        self.layout_.addWidget(self.caption_label)
+        self.layout_.addWidget(self.note_label)
+
+    def update_value(self, value: str, note: str = "", tone: str | None = None) -> None:
+        self.value_label.setText(str(value))
+        if tone is not None:
+            set_tone(self.value_label, tone)
+        self.note_label.setText(note)
+
+
+class ProgressRow(QWidget):
+    """A slim progress bar with the percentage printed beside it.
+
+    QProgressBar draws its own "42%" centred *inside* the track, and the app's
+    track is six pixels tall — so the text was clipped to a smear across the
+    middle of the bar. Keeping the bar thin and putting the number next to it
+    is legible at every text size and in all four themes.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setProperty("role", "plain")
+        scale = theme.text_scale()
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(round(10 * scale))
+
+        self.bar = QProgressBar()
+        self.bar.setTextVisible(False)
+        self.bar.setRange(0, 100)
+        self.bar.setValue(0)
+        layout.addWidget(self.bar, 1)
+
+        self.percent = QLabel("")
+        self.percent.setProperty("role", "field")
+        self.percent.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.percent.setFixedWidth(round(44 * scale))
+        layout.addWidget(self.percent)
+
+    def set_busy(self) -> None:
+        """Sweeping bar, no number: used until the first real count arrives."""
+        self.bar.setRange(0, 0)
+        self.percent.setText("")
+
+    def set_progress(self, done: int, total: int) -> None:
+        if total <= 0:
+            self.set_busy()
+            return
+        if self.bar.maximum() != total:
+            self.bar.setRange(0, total)
+        self.bar.setValue(min(done, total))
+        self.percent.setText(f"{round(done / total * 100)}%")
+
+    def reset(self) -> None:
+        self.bar.setRange(0, 100)
+        self.bar.setValue(0)
+        self.percent.setText("")
+
+
+def status_glyph(status: str, parent=None) -> QLabel:
+    """A pass/warn/fail symbol sized to sit on a heading's line."""
+    label = QLabel(theme.STATUS_ICONS.get(str(status).lower(), "○"), parent)
+    label.setStyleSheet(f"color: {theme.status_color(status)}; font-weight: 700;")
+    label.setFixedWidth(round(22 * theme.text_scale()))
+    label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+    return label
+
+
+class StatusRow(QWidget):
+    """One pass/warn/fail line with an expandable detail area."""
+
+    def __init__(self, title: str, status: str = "pending", summary: str = "", detail: str = "",
+                 record: str = "", fix: str = "", extras: list[str] | None = None, parent=None):
+        super().__init__(parent)
+        self.setProperty("role", "plain")
         self.record = record
 
-        header = ctk.CTkFrame(self, fg_color="transparent")
-        header.pack(fill="x")
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(6)
 
-        self.icon_label = status_icon(header, status)
-        self.icon_label.pack(side="left", anchor="n", padx=(0, 8))
+        header = QHBoxLayout()
+        header.setSpacing(8)
+        header.addWidget(status_glyph(status), 0, Qt.AlignmentFlag.AlignTop)
 
-        text_wrap = ctk.CTkFrame(header, fg_color="transparent")
-        text_wrap.pack(side="left", fill="x", expand=True)
-        ctk.CTkLabel(text_wrap, text=title, font=theme.font(13, "bold"),
-                     text_color=theme.FG_BRIGHT, anchor="w", height=24).pack(anchor="w")
-        ctk.CTkLabel(text_wrap, text=summary, font=theme.font(12), text_color=theme.FG_MUTED,
-                     anchor="w", justify="left", wraplength=620).pack(anchor="w")
+        text = QVBoxLayout()
+        text.setSpacing(1)
+        title_label = QLabel(title)
+        title_label.setProperty("role", "subheading")
+        text.addWidget(title_label)
+        if summary:
+            text.addWidget(muted(summary))
+        header.addLayout(text, 1)
 
         has_detail = bool(detail or record or fix or extras)
         if has_detail:
-            self.toggle = theme.secondary_button(header, "Details", self._toggle, width=78, height=28)
-            self.toggle.pack(side="right", anchor="n", padx=(8, 0))
+            self.toggle = small_button("Details", self._toggle)
+            header.addWidget(self.toggle, 0, Qt.AlignmentFlag.AlignTop)
+        outer.addLayout(header)
 
-        self.body = ctk.CTkFrame(self, fg_color=theme.BG_PANEL, corner_radius=theme.RADIUS)
-        self._build_body(detail, record, fix, extras or [])
+        if has_detail:
+            self.detail_panel = self._build_detail(detail, record, fix, extras or [])
+            self.detail_panel.setVisible(False)
+            outer.addWidget(self.detail_panel)
+        outer.addWidget(separator())
 
-        theme.separator(self).pack(fill="x", pady=(10, 10))
+    def _build_detail(self, detail: str, record: str, fix: str, extras: list[str]) -> QWidget:
+        from app.ui.widgets.inputs import read_only_box
 
-    def _build_body(self, detail: str, record: str, fix: str, extras: list[str]) -> None:
-        pad = {"padx": 12, "pady": (8, 0)}
+        card = Card(kind="card", padding=12)
         if detail:
-            ctk.CTkLabel(self.body, text=detail, font=theme.font(12), text_color=theme.FG,
-                         wraplength=640, justify="left", anchor="w").pack(anchor="w", **pad)
+            card.add(body(detail))
         for extra in extras:
-            ctk.CTkLabel(self.body, text=f"• {extra}", font=theme.font(12),
-                         text_color=theme.FG_MUTED, anchor="w").pack(anchor="w", padx=12, pady=1)
+            card.add(muted(f"•  {extra}"))
         if record:
-            box = ctk.CTkTextbox(self.body, height=min(120, 22 + 16 * record.count("\n")),
-                                 font=theme.mono(11), fg_color=theme.BG_INPUT,
-                                 text_color=theme.CODE_STRING, wrap="word",
-                                 border_width=1, border_color=theme.BORDER)
-            box.pack(fill="x", padx=12, pady=(8, 0))
-            box.insert("1.0", record)
-            box.configure(state="disabled")
-            theme.secondary_button(self.body, "Copy record", lambda: self._copy(record),
-                                   width=110, height=26).pack(anchor="w", padx=12, pady=(6, 0))
+            box = read_only_box(record, role="code", lines=min(6, 1 + record.count("\n")))
+            card.add(box)
+            copy = small_button("Copy record", lambda: self._copy(record))
+            card.add(row(copy, None))
         if fix:
-            frame = ctk.CTkFrame(self.body, fg_color="transparent")
-            frame.pack(fill="x", padx=12, pady=(8, 0))
-            ctk.CTkLabel(frame, text="How to fix:", font=theme.font(12, "bold"),
-                         text_color=theme.WARNING, anchor="w").pack(anchor="w")
-            ctk.CTkLabel(frame, text=fix, font=theme.font(12), text_color=theme.FG,
-                         wraplength=620, justify="left", anchor="w").pack(anchor="w")
-        ctk.CTkFrame(self.body, fg_color="transparent", height=8).pack()
+            label = field_label("How to fix:")
+            set_tone(label, "warning")
+            card.add(label)
+            card.add(body(fix))
+        return card
 
     def _copy(self, text: str) -> None:
-        copy_to_clipboard(self, text)
+        copy_to_clipboard(text)
         toast(self, "Copied to clipboard", "success", 2000)
 
     def _toggle(self) -> None:
-        if self._expanded:
-            self.body.pack_forget()
-            self.toggle.configure(text="Details")
-        else:
-            self.body.pack(fill="x", pady=(8, 0))
-            self.toggle.configure(text="Hide")
-        self._expanded = not self._expanded
+        showing = not self.detail_panel.isVisible()
+        self.detail_panel.setVisible(showing)
+        self.toggle.setText("Hide" if showing else "Details")
 
 
-# --- Stat tile --------------------------------------------------------------
-class StatTile(ctk.CTkFrame):
-    def __init__(self, master, label: str, value: str = "—", hint: str = "", accent=None):
-        super().__init__(master, fg_color=theme.BG_PANEL, corner_radius=theme.RADIUS_CARD,
-                         border_width=1, border_color=theme.BORDER)
-        self.value_label = ctk.CTkLabel(self, text=value, font=theme.font(26, "bold"),
-                                        text_color=accent or theme.FG_BRIGHT, anchor="w")
-        self.value_label.pack(anchor="w", padx=16, pady=(14, 0))
-        ctk.CTkLabel(self, text=label, font=theme.font(12), text_color=theme.FG_MUTED,
-                     anchor="w").pack(anchor="w", padx=16, pady=(0, 2))
-        self.hint_label = ctk.CTkLabel(self, text=hint, font=theme.font(11),
-                                       text_color=theme.FG_MUTED, anchor="w")
-        self.hint_label.pack(anchor="w", padx=16, pady=(0, 12))
-
-    def update_value(self, value: str, hint: str = "", accent=None) -> None:
-        self.value_label.configure(text=value)
-        if accent:
-            self.value_label.configure(text_color=accent)
-        self.hint_label.configure(text=hint)
+# --- buttons ----------------------------------------------------------------
+def button_text(text: str) -> str:
+    """Qt reads '&' in a button label as a keyboard-shortcut marker, so it is doubled."""
+    return text.replace("&", "&&")
 
 
-# --- Simple table -----------------------------------------------------------
-class DataTable(ctk.CTkFrame):
-    """Lightweight scrollable table. tkinter's Treeview cannot be themed to match."""
-
-    def __init__(self, master, columns: list[tuple[str, int]], height: int = 320):
-        super().__init__(master, fg_color=theme.BG_PANEL, corner_radius=theme.RADIUS,
-                         border_width=1, border_color=theme.BORDER)
-        self.columns = columns
-
-        header = ctk.CTkFrame(self, fg_color=theme.BG_SIDEBAR, corner_radius=0, height=32)
-        header.pack(fill="x")
-        header.pack_propagate(False)
-        for title, width in columns:
-            ctk.CTkLabel(header, text=title, font=theme.font(12, "bold"),
-                         text_color=theme.FG_MUTED, width=width, anchor="w").pack(
-                side="left", padx=(10, 0), pady=6)
-
-        self.rows_frame = theme.scroll_frame(self, height=height)
-        self.rows_frame.pack(fill="both", expand=True, padx=1, pady=1)
-        self._row_widgets: list[ctk.CTkFrame] = []
-
-    def clear(self) -> None:
-        for widget in self._row_widgets:
-            widget.destroy()
-        self._row_widgets.clear()
-
-    def add_row(self, values: list[str], colors: list | None = None,
-                on_click: Callable | None = None) -> None:
-        index = len(self._row_widgets)
-        background = theme.BG_PANEL if index % 2 == 0 else theme.BG_HOVER
-        row = ctk.CTkFrame(self.rows_frame, fg_color=background, corner_radius=0, height=28)
-        row.pack(fill="x")
-        row.pack_propagate(False)
-
-        for position, (title, width) in enumerate(self.columns):
-            text = values[position] if position < len(values) else ""
-            color = colors[position] if colors and position < len(colors) and colors[position] \
-                else theme.FG
-            ctk.CTkLabel(row, text=str(text)[:200], font=theme.font(12), text_color=color,
-                         width=width, anchor="w").pack(side="left", padx=(10, 0))
-
-        if on_click:
-            for widget in [row] + list(row.winfo_children()):
-                widget.bind("<Button-1>", lambda e, cb=on_click: cb())
-                widget.configure(cursor="hand2")
-        self._row_widgets.append(row)
-
-    def set_empty_message(self, message: str) -> None:
-        self.clear()
-        frame = ctk.CTkFrame(self.rows_frame, fg_color="transparent")
-        frame.pack(fill="both", expand=True, pady=30)
-        ctk.CTkLabel(frame, text=message, font=theme.font(13), text_color=theme.FG_MUTED).pack()
-        self._row_widgets.append(frame)
+def _button(text: str, on_click: Callable | None, kind: str, width: int | None) -> QPushButton:
+    button = QPushButton(button_text(text))
+    button.setProperty("kind", kind)
+    button.setCursor(Qt.CursorShape.PointingHandCursor)
+    if on_click:
+        button.clicked.connect(lambda _checked=False: on_click())
+    if width:
+        button.setMinimumWidth(round(width * theme.text_scale()))
+    return button
 
 
-# --- Section ----------------------------------------------------------------
-class Section(ctk.CTkFrame):
-    """A titled card that page content goes into via .body."""
-
-    def __init__(self, master, title: str, description: str = ""):
-        super().__init__(master, fg_color=theme.BG_PANEL, corner_radius=theme.RADIUS_CARD,
-                         border_width=1, border_color=theme.BORDER)
-        ctk.CTkLabel(self, text=title, font=theme.font(15, "bold"), text_color=theme.FG_BRIGHT,
-                     anchor="w").pack(anchor="w", padx=18, pady=(16, 0))
-        if description:
-            desc = ctk.CTkLabel(self, text=description, font=theme.font(12),
-                                text_color=theme.FG_MUTED, anchor="w", justify="left",
-                                wraplength=760)
-            desc.pack(anchor="w", padx=18, pady=(2, 0))
-            theme.auto_wrap(desc, self, padding=48)
-        self.body = ctk.CTkFrame(self, fg_color="transparent")
-        self.body.pack(fill="both", expand=True, padx=18, pady=(12, 16))
+def primary_button(text: str, on_click=None, width: int | None = None) -> QPushButton:
+    return _button(text, on_click, "primary", width)
 
 
-class FormRow(ctk.CTkFrame):
-    """Label above an input, with an optional hint underneath."""
-
-    def __init__(self, master, label: str, hint: str = ""):
-        super().__init__(master, fg_color="transparent")
-        ctk.CTkLabel(self, text=label, font=theme.font(12, "bold"), text_color=theme.FG,
-                     anchor="w").pack(anchor="w")
-        self.input_area = ctk.CTkFrame(self, fg_color="transparent")
-        self.input_area.pack(fill="x", pady=(4, 0))
-        if hint:
-            ctk.CTkLabel(self, text=hint, font=theme.font(11), text_color=theme.FG_MUTED,
-                         anchor="w", justify="left", wraplength=560).pack(anchor="w", pady=(3, 0))
+def secondary_button(text: str, on_click=None, width: int | None = None) -> QPushButton:
+    return _button(text, on_click, "secondary", width)
 
 
-# --- Tabs and choice buttons ------------------------------------------------
-def _style_choice(button: ctk.CTkButton, selected: bool) -> None:
-    if selected:
-        button.configure(fg_color=theme.ACCENT, hover_color=theme.ACCENT_HOVER,
-                         text_color=theme.FG_ON_ACCENT, border_color=theme.ACCENT)
-    else:
-        button.configure(fg_color=theme.BG_PANEL, hover_color=theme.BG_HOVER,
-                         text_color=theme.FG, border_color=theme.BORDER_STRONG)
+def danger_button(text: str, on_click=None, width: int | None = None) -> QPushButton:
+    return _button(text, on_click, "danger", width)
 
 
-class FlowRow(ctk.CTkFrame):
-    """Lays buttons out left to right and wraps them onto new lines when they don't fit,
-    so rows of buttons still work at the largest text sizes."""
-
-    GAP = 8
-
-    def __init__(self, master, **kwargs):
-        kwargs.setdefault("fg_color", "transparent")
-        super().__init__(master, **kwargs)
-        self._items: list[tuple[ctk.CTkBaseClass, int]] = []
-        self._columns = 0
-        self.bind("<Configure>", lambda _e: self._reflow())
-
-    def add_button(self, text: str, command, height: int = 36, font_size: int = 13) -> ctk.CTkButton:
-        button_font = theme.font(font_size, "bold")
-        width = max(96, button_font.measure(text) + 44)  # unscaled, like every CTk size
-        button = ctk.CTkButton(self, text=text, width=width, height=height, corner_radius=theme.RADIUS,
-                               border_width=1, font=button_font, command=command)
-        self._items.append((button, width))
-        self._reflow(force=True)
-        return button
-
-    def _reflow(self, force: bool = False) -> None:
-        scaling = ctk.ScalingTracker.get_widget_scaling(self)
-        available = self.winfo_width() / scaling if self.winfo_width() > 1 else 10_000
-        row = column = used = 0
-        positions = []
-        for _widget, width in self._items:
-            if column and used + width > available:
-                row, column, used = row + 1, 0, 0
-            positions.append((row, column))
-            used += width + self.GAP
-            column += 1
-        signature = tuple(positions)
-        if not force and signature == getattr(self, "_signature", None):
-            return
-        self._signature = signature
-        for (widget, _width), (r, c) in zip(self._items, positions):
-            widget.grid(row=r, column=c, padx=(0, self.GAP), pady=(0, self.GAP), sticky="w")
+def confirm_button(text: str, on_click=None, width: int | None = None) -> QPushButton:
+    return _button(text, on_click, "confirm", width)
 
 
-class ChoiceButtons(FlowRow):
-    """A row of buttons where exactly one is selected, like radio buttons that look like buttons."""
+def small_button(text: str, on_click=None) -> QPushButton:
+    return _button(text, on_click, "small", None)
 
-    def __init__(self, master, options: list[tuple[str, str]], value: str | None = None,
-                 command: Callable[[str], None] | None = None, height: int = 36,
-                 font_size: int = 13):
-        super().__init__(master)
-        self.command = command
-        self.buttons: dict[str, ctk.CTkButton] = {}
+
+def ghost_button(text: str, on_click=None) -> QPushButton:
+    return _button(text, on_click, "ghost", None)
+
+
+class ChoiceButtons(QWidget):
+    """A row of buttons where exactly one is selected: radio buttons that look like buttons."""
+
+    changed = pyqtSignal(str)
+
+    def __init__(self, options: list[tuple[str, str]], value: str | None = None,
+                 on_change: Callable[[str], None] | None = None, parent=None):
+        super().__init__(parent)
+        self.setProperty("role", "plain")
+        self._layout = FlowLayout(self, margin=0, spacing=8)
+        self.buttons: dict[str, QPushButton] = {}
         self.value = value if value is not None else (options[0][0] if options else "")
-        for key, text in options:
-            button = self.add_button(text, lambda k=key: self.set(k, notify=True), height, font_size)
+        if on_change:
+            self.changed.connect(on_change)
+        for key, label in options:
+            button = QPushButton(button_text(label))
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(lambda _checked=False, k=key: self.set(k, notify=True))
+            self._layout.addWidget(button)
             self.buttons[key] = button
-            _style_choice(button, key == self.value)
+        self._paint()
+
+    def _paint(self) -> None:
+        for key, button in self.buttons.items():
+            button.setProperty("choice", "on" if key == self.value else "off")
+            restyle(button)
 
     def set(self, key: str, notify: bool = False) -> None:
         if key not in self.buttons:
             return
         self.value = key
-        for name, button in self.buttons.items():
-            _style_choice(button, name == key)
-        if notify and self.command:
-            self.command(key)
+        self._paint()
+        if notify:
+            self.changed.emit(key)
 
     def get(self) -> str:
         return self.value
 
 
-class TabView(ctk.CTkFrame):
-    """Tabs as a row of real buttons along the top-left, with the content in a card below.
+class TabBar(QWidget):
+    """Tabs as a row of real buttons, with the pages in a card underneath.
 
-    Drop-in for the parts of CTkTabview the pages use: add(), tab(), set() and get().
+    Pages are built the first time their tab is opened, not up front, so opening
+    a section with four tabs costs one tab's worth of widgets.
     """
 
-    def __init__(self, master, command: Callable[[str], None] | None = None):
-        super().__init__(master, fg_color="transparent")
-        self.command = command
-        self._frames: dict[str, ctk.CTkFrame] = {}
+    changed = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setProperty("role", "plain")
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(8)
+
+        self.bar = QWidget()
+        self.bar.setProperty("role", "plain")
+        self.bar_layout = FlowLayout(self.bar, margin=0, spacing=8)
+        outer.addWidget(self.bar)
+
+        self.card = QFrame()
+        self.card.setProperty("role", "card")
+        pad = round(16 * theme.text_scale())
+        self.card_layout = QVBoxLayout(self.card)
+        self.card_layout.setContentsMargins(pad, pad, pad, pad)
+        outer.addWidget(self.card, 1)
+
+        self.buttons: dict[str, QPushButton] = {}
+        self._builders: dict[str, Callable[[], QWidget]] = {}
+        self._pages: dict[str, QWidget] = {}
         self._current: str | None = None
 
-        self.bar = FlowRow(self)
-        self.bar.pack(fill="x", pady=(0, 4))
-        self.buttons: dict[str, ctk.CTkButton] = {}
-
-        self.card = ctk.CTkFrame(self, fg_color=theme.BG_PANEL, corner_radius=theme.RADIUS_CARD,
-                                 border_width=1, border_color=theme.BORDER)
-        self.card.pack(fill="both", expand=True)
-
-    def add(self, name: str) -> ctk.CTkFrame:
-        frame = ctk.CTkFrame(self.card, fg_color="transparent")
-        self._frames[name] = frame
-        button = self.bar.add_button(name, lambda n=name: self.set(n), height=38)
+    def add(self, name: str, builder: Callable[[], QWidget]) -> None:
+        button = QPushButton(button_text(name))
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.setProperty("choice", "off")
+        button.clicked.connect(lambda _checked=False, n=name: self.set(n))
+        self.bar_layout.addWidget(button)
         self.buttons[name] = button
-        if self._current is None:
-            self.set(name)
-        else:
-            _style_choice(button, False)
-        return frame
+        self._builders[name] = builder
 
-    def tab(self, name: str) -> ctk.CTkFrame:
-        return self._frames[name]
+    def page(self, name: str) -> QWidget | None:
+        return self._pages.get(name)
 
-    def get(self) -> str:
+    def build_all(self) -> None:
+        """Construct every tab now.
+
+        Only for a section whose tabs share state, where a lazily-built tab
+        would not exist when another one needs to write into it.
+        """
+        showing = self._current
+        for name in self._builders:
+            if name not in self._pages:
+                page = self._builders[name]()
+                page.setVisible(False)
+                self._pages[name] = page
+                self.card_layout.addWidget(page, 1)
+        if showing is not None:
+            self._pages[showing].setVisible(True)
+
+    def current(self) -> str:
         return self._current or ""
 
     def set(self, name: str) -> None:
-        if name not in self._frames or name == self._current:
+        if name not in self._builders or name == self._current:
             return
         if self._current is not None:
-            self._frames[self._current].pack_forget()
+            self._pages[self._current].setVisible(False)
+        if name not in self._pages:
+            page = self._builders[name]()
+            self._pages[name] = page
+            self.card_layout.addWidget(page, 1)
         self._current = name
-        self._frames[name].pack(fill="both", expand=True, padx=18, pady=(6, 14))
+        self._pages[name].setVisible(True)
         for key, button in self.buttons.items():
-            _style_choice(button, key == name)
-        if self.command:
-            self.command(name)
+            button.setProperty("choice", "on" if key == name else "off")
+            restyle(button)
+        self.changed.emit(name)
 
 
-# --- Confirm dialog ---------------------------------------------------------
-class ConfirmDialog(ctk.CTkToplevel):
-    def __init__(self, master, title: str, message: str, confirm_text: str = "Continue",
-                 cancel_text: str = "Cancel", danger: bool = False):
-        super().__init__(master)
-        self.result = False
-        self.title(title)
-        self.configure(fg_color=theme.BG[1] if ctk.get_appearance_mode() == "Dark" else theme.BG[0])
-        self.resizable(False, False)
-        self.transient(master)
+# --- scrolling --------------------------------------------------------------
+class ScrollPage(QScrollArea):
+    """A vertically scrolling page body with sensible defaults.
 
-        wrapper = ctk.CTkFrame(self, fg_color="transparent")
-        wrapper.pack(fill="both", expand=True, padx=24, pady=20)
-        ctk.CTkLabel(wrapper, text=title, font=theme.font(16, "bold"),
-                     text_color=theme.FG_BRIGHT, anchor="w").pack(anchor="w")
-        ctk.CTkLabel(wrapper, text=message, font=theme.font(13), text_color=theme.FG,
-                     wraplength=460, justify="left", anchor="w").pack(anchor="w", pady=(10, 18))
+    Per-pixel scrolling keeps the wheel smooth on a low-end machine, where the
+    default row-at-a-time step reads as stutter.
 
-        buttons = ctk.CTkFrame(wrapper, fg_color="transparent")
-        buttons.pack(fill="x")
-        theme.secondary_button(buttons, cancel_text, self._cancel, width=110).pack(side="right")
-        maker = theme.danger_button if danger else theme.primary_button
-        maker(buttons, confirm_text, self._confirm, width=140).pack(side="right", padx=(0, 8))
+    QScrollArea sizes its widget from ``sizeHint()`` and ignores
+    ``heightForWidth``, so a word-wrapped label inside one is measured as a
+    single line and the rows below it end up drawn on top of each other. This
+    re-measures the content at the real viewport width whenever the area is
+    resized or the layout changes.
+    """
 
-        self.update_idletasks()
-        self._centre(master)
-        self.grab_set()
-        self.protocol("WM_DELETE_WINDOW", self._cancel)
+    def __init__(self, parent=None, margins: tuple = (0, 0, 0, 0), spacing: int = 12):
+        super().__init__(parent)
+        self.setWidgetResizable(True)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.verticalScrollBar().setSingleStep(24)
 
-    def _centre(self, master) -> None:
-        width, height = self.winfo_width(), self.winfo_height()
-        x = master.winfo_rootx() + (master.winfo_width() - width) // 2
-        y = master.winfo_rooty() + (master.winfo_height() - height) // 3
-        self.geometry(f"+{max(0, x)}+{max(0, y)}")
+        self.content = QWidget()
+        self.content.setProperty("role", "plain")
+        self.body_layout = QVBoxLayout(self.content)
+        self.body_layout.setContentsMargins(*margins)
+        self.body_layout.setSpacing(spacing)
+        self.setWidget(self.content)
+        self.content.installEventFilter(self)
 
-    def _confirm(self) -> None:
-        self.result = True
-        self.grab_release()
-        self.destroy()
+    # -- wrapped-text height -------------------------------------------------
+    def resizeEvent(self, event):  # noqa: N802 - Qt naming
+        super().resizeEvent(event)
+        self._remeasure()
 
-    def _cancel(self) -> None:
-        self.result = False
-        self.grab_release()
-        self.destroy()
+    def eventFilter(self, obj, event):  # noqa: N802 - Qt naming
+        if obj is self.content and event.type() == QEvent.Type.LayoutRequest:
+            self._remeasure()
+        return False
 
-    @classmethod
-    def ask(cls, master, title: str, message: str, confirm_text: str = "Continue",
-            danger: bool = False) -> bool:
-        dialog = cls(master, title, message, confirm_text, danger=danger)
-        master.wait_window(dialog)
-        return dialog.result
+    def _remeasure(self) -> None:
+        layout = self.content.layout()
+        if layout is None or not layout.hasHeightForWidth():
+            return
+        needed = layout.heightForWidth(self.viewport().width())
+        if needed > 0 and needed != self.content.minimumHeight():
+            self.content.setMinimumHeight(needed)
 
+    def add(self, widget: QWidget, stretch: int = 0) -> QWidget:
+        self.body_layout.addWidget(widget, stretch)
+        return widget
 
-class ChoiceDialog(ctk.CTkToplevel):
-    """Like ConfirmDialog, but with several answers. Returns the chosen value, or None."""
+    def add_layout(self, layout: QLayout) -> QLayout:
+        self.body_layout.addLayout(layout)
+        return layout
 
-    def __init__(self, master, title: str, message: str, choices: list[tuple[str, str, str]]):
-        super().__init__(master)
-        self.result: str | None = None
-        self.title(title)
-        self.configure(fg_color=theme.BG[1] if ctk.get_appearance_mode() == "Dark" else theme.BG[0])
-        self.resizable(False, False)
-        self.transient(master)
+    def add_stretch(self) -> None:
+        self.body_layout.addStretch(1)
 
-        wrapper = ctk.CTkFrame(self, fg_color="transparent")
-        wrapper.pack(fill="both", expand=True, padx=24, pady=20)
-        ctk.CTkLabel(wrapper, text=title, font=theme.font(16, "bold"),
-                     text_color=theme.FG_BRIGHT, anchor="w").pack(anchor="w")
-        ctk.CTkLabel(wrapper, text=message, font=theme.font(13), text_color=theme.FG,
-                     wraplength=500, justify="left", anchor="w").pack(anchor="w", pady=(10, 18))
-
-        buttons = ctk.CTkFrame(wrapper, fg_color="transparent")
-        buttons.pack(fill="x")
-        makers = {"primary": theme.primary_button, "danger": theme.danger_button,
-                  "secondary": theme.secondary_button}
-        for value, text, kind in choices:
-            makers.get(kind, theme.secondary_button)(
-                buttons, text, lambda v=value: self._choose(v)).pack(fill="x", pady=(0, 8))
-
-        self.update_idletasks()
-        ConfirmDialog._centre(self, master)
-        self.grab_set()
-        self.protocol("WM_DELETE_WINDOW", lambda: self._choose(None))
-
-    def _choose(self, value: str | None) -> None:
-        self.result = value
-        self.grab_release()
-        self.destroy()
-
-    @classmethod
-    def ask(cls, master, title: str, message: str, choices: list[tuple[str, str, str]]) -> str | None:
-        dialog = cls(master, title, message, choices)
-        master.wait_window(dialog)
-        return dialog.result
+    def clear(self) -> None:
+        clear_layout(self.body_layout)
 
 
-# --- Helpers ----------------------------------------------------------------
-def copy_to_clipboard(widget, text: str) -> None:
-    root = widget.winfo_toplevel()
-    root.clipboard_clear()
-    root.clipboard_append(text)
-    root.update()
+def clear_layout(layout: QLayout) -> None:
+    """Remove and delete everything in a layout. Used where a list is rebuilt."""
+    while layout.count():
+        item = layout.takeAt(0)
+        widget = item.widget()
+        if widget is not None:
+            widget.setParent(None)
+            widget.deleteLater()
+        else:
+            child = item.layout()
+            if child is not None:
+                clear_layout(child)
+
+
+# --- toast ------------------------------------------------------------------
+class Toast(QFrame):
+    """A transient message in the bottom-right corner of the window."""
+
+    def __init__(self, parent: QWidget, message: str, level: str = "info", duration: int = 4000):
+        super().__init__(parent)
+        self.setProperty("role", "toast")
+        self.setProperty("level", level)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 10, 14, 10)
+        label = QLabel(message)
+        label.setWordWrap(True)
+        label.setMaximumWidth(round(360 * theme.text_scale()))
+        layout.addWidget(label)
+
+        self._effect = QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(self._effect)
+        self._effect.setOpacity(0.0)
+        self.adjustSize()
+        self._place()
+        self.show()
+        self.raise_()
+
+        self._fade = QPropertyAnimation(self._effect, b"opacity", self)
+        self._fade.setDuration(140)
+        self._fade.setStartValue(0.0)
+        self._fade.setEndValue(1.0)
+        self._fade.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._fade.start()
+
+        QTimer.singleShot(duration, self._dismiss)
+
+    def _place(self) -> None:
+        parent = self.parentWidget()
+        if parent is None:
+            return
+        margin = 20
+        self.move(max(margin, parent.width() - self.width() - margin),
+                  max(margin, parent.height() - self.height() - margin - 26))
+
+    def _dismiss(self) -> None:
+        if not self.isVisible():
+            return
+        self._fade = QPropertyAnimation(self._effect, b"opacity", self)
+        self._fade.setDuration(180)
+        self._fade.setStartValue(1.0)
+        self._fade.setEndValue(0.0)
+        self._fade.finished.connect(self.deleteLater)
+        self._fade.start()
+
+
+_toasts: list[Toast] = []
+
+
+def toast(widget: QWidget | None, message: str, level: str = "info", duration: int = 4000) -> None:
+    """Show a message over the main window. Safe to call from any page."""
+    window = widget.window() if widget is not None else None
+    if window is None:
+        return
+    # Stack new toasts above any still on screen rather than covering them
+    live = [t for t in _toasts if t.isVisible() and t.parentWidget() is window]
+    item = Toast(window, message, level, duration)
+    offset = sum(t.height() + 8 for t in live)
+    if offset:
+        item.move(item.x(), max(20, item.y() - offset))
+    _toasts.append(item)
+    del _toasts[:-6]
+
+
+# --- misc helpers -----------------------------------------------------------
+def copy_to_clipboard(text: str) -> None:
+    clipboard = QGuiApplication.clipboard()
+    if clipboard is not None:
+        clipboard.setText(text)
 
 
 def open_url(url: str) -> None:
     webbrowser.open(url)
-
-
-def set_text(textbox: ctk.CTkTextbox, text: str, readonly: bool = False) -> None:
-    textbox.configure(state="normal")
-    textbox.delete("1.0", "end")
-    textbox.insert("1.0", text)
-    if readonly:
-        textbox.configure(state="disabled")
-
-
-def get_text(textbox: ctk.CTkTextbox) -> str:
-    return textbox.get("1.0", "end").rstrip("\n")

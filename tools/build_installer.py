@@ -115,7 +115,7 @@ def main() -> int:
         "--workpath", str(BUILD / "work"),
         "--specpath", str(BUILD),
         # Setup uses only the standard library; keep anything else out of the .exe
-        "--exclude-module", "customtkinter", "--exclude-module", "pandas",
+        "--exclude-module", "PyQt6", "--exclude-module", "pandas",
         "--exclude-module", "numpy", "--exclude-module", "PIL",
         str(ROOT / "installer" / "setup_app.py"),
     ]
