@@ -549,3 +549,229 @@ def test_only_the_readable_parts_of_a_message_are_kept():
     body = imap_sync.readable_body(message)
     assert body == "The plain version."
     assert "JVBERi" not in body
+
+# --- import: short write transactions ---------------------------------------
+def test_import_commits_in_batches_rather_than_holding_one_transaction():
+    """A long transaction on a worker thread freezes the window.
+
+    SQLite allows one writer. The import used to open a transaction, do every
+    DNS lookup inside it, and commit at the end, so the UI thread's own next
+    write queued behind it until the connection timed out. That is thirty
+    seconds of a window that does not repaint.
+    """
+    import pandas as pd
+
+    from app.core import importer
+
+    assert importer.COMMIT_EVERY <= 500, "a batch this big holds the lock too long"
+
+    rows = importer.COMMIT_EVERY * 2 + 10
+    frame = pd.DataFrame({
+        "Email": [f"batch{n}@batchtest.test" for n in range(rows)],
+        "Company": [f"Co {n}" for n in range(rows)],
+    })
+    commits = []
+    real_connect = db.connect
+
+    class Counting:
+        """Wraps the connection so commits can be counted."""
+
+        def __init__(self, inner):
+            self._inner = inner
+
+        def commit(self):
+            commits.append(1)
+            return self._inner.commit()
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    db.connect = lambda: Counting(real_connect())
+    try:
+        result = importer.import_dataframe(
+            frame, importer.ColumnMapping(email="Email", company="Company"),
+            source_file="batch.xlsx", check_mx=False)
+    finally:
+        db.connect = real_connect
+
+    assert result.imported == rows
+    assert len(commits) >= 3, f"only committed {len(commits)} times for {rows} rows"
+    db.execute("DELETE FROM contacts WHERE email LIKE '%@batchtest.test'")
+
+
+def test_domains_are_resolved_once_each_and_before_any_writing():
+    """One lookup per domain, not one per row, and none inside a transaction."""
+    import pandas as pd
+
+    from app.core import dns_tools, importer
+
+    frame = pd.DataFrame({"Email": [f"p{n}@dom{n % 4}.test" for n in range(40)]})
+    assert importer.domains_in(frame, "Email") == [f"dom{n}.test" for n in range(4)]
+
+    asked = []
+    real = dns_tools.has_mx
+    dns_tools.has_mx = lambda domain: (asked.append(domain), True)[1]
+    try:
+        answers = importer.resolve_domains(importer.domains_in(frame, "Email"))
+    finally:
+        dns_tools.has_mx = real
+    assert len(asked) == 4 == len(answers)
+    assert all(answers.values())
+
+
+def test_a_busy_write_is_skipped_rather_than_raised():
+    """execute_soft is for writes nobody would miss. It must not raise."""
+    assert db.set_setting_soft("test_soft_key", "value") is True
+    assert db.get_setting("test_soft_key") == "value"
+    # A statement that cannot work still must not raise out of execute_soft
+    assert db.execute_soft("UPDATE no_such_table SET x = 1") is False
+
+
+# --- contact list sorting ---------------------------------------------------
+def test_every_sort_order_works_and_puts_blanks_last():
+    from app.models.contacts_model import SORTS, ContactsModel
+
+    db.execute("DELETE FROM contacts")
+    people = [
+        ("zara@z.test", "Zenith", "Zara", "2026-01-05"),
+        ("adam@a.test", "apex", "adam", "2026-03-11"),
+        ("mia@m.test", "", "Mia", "2026-02-02"),
+        ("ben@b.test", None, None, "2026-04-14"),
+    ]
+    for email, company, person, when in people:
+        db.execute("INSERT INTO contacts(email, company, person, valid, imported_at) "
+                   "VALUES (?,?,?,1,?)", (email, company, person, f"{when}T09:00:00"))
+    db.execute("UPDATE contacts SET bounced_at = ? WHERE email = ?",
+               ("2026-05-01T09:00:00", "ben@b.test"))
+
+    model = ContactsModel()
+    for key, _label in SORTS:
+        model.set_sort(key)
+        model.reload()
+        assert model.rowCount() == len(people), f"{key} lost rows"
+
+    model.set_sort("email_az")
+    model.reload()
+    assert [r["email"] for r in model._rows] == [
+        "adam@a.test", "ben@b.test", "mia@m.test", "zara@z.test"]
+
+    model.set_sort("email_za")
+    model.reload()
+    assert [r["email"] for r in model._rows][0] == "zara@z.test"
+
+    # Case-insensitive, and the rows with no company come last in both directions
+    model.set_sort("company_az")
+    model.reload()
+    assert [r["company"] for r in model._rows] == ["apex", "Zenith", "", ""]
+    model.set_sort("company_za")
+    model.reload()
+    assert [r["company"] for r in model._rows] == ["Zenith", "apex", "", ""]
+
+    model.set_sort("status")
+    model.reload()
+    assert model._rows[0]["_status"] == "Bounced"
+
+    model.set_sort("newest")
+    model.reload()
+    assert model._rows[0]["email"] == "ben@b.test"
+
+    # An unknown key changes nothing rather than breaking the query
+    model.set_sort("nonsense")
+    model.reload()
+    assert model.sort_key() == "newest" and model.rowCount() == len(people)
+
+
+def test_paging_is_stable_when_the_sort_column_is_full_of_ties():
+    """Without a tiebreak, LIMIT/OFFSET can repeat rows and skip others."""
+    from app.models.contacts_model import PAGE_SIZE, ContactsModel
+
+    db.execute("DELETE FROM contacts")
+    total = PAGE_SIZE * 2 + 25
+    db.execute_many(
+        "INSERT INTO contacts(email, company, person, valid, imported_at) VALUES (?,?,?,1,?)",
+        [(f"t{n:05d}@tie.test", "Same Company", "Same Person", "2026-01-01T09:00:00")
+         for n in range(total)])
+
+    model = ContactsModel()
+    model.set_sort("company_az")
+    model.reload()
+    while model.canFetchMore():
+        model.fetchMore()
+    emails = [r["email"] for r in model._rows]
+    assert len(emails) == total
+    assert len(set(emails)) == total, "paging showed a row twice"
+    db.execute("DELETE FROM contacts")
+
+
+# --- the preview picks variants independently -------------------------------
+def test_preview_can_pair_any_subject_with_any_body():
+    """One shared index meant subject 2 could only ever appear with body 2."""
+    from app.core import composer, merge
+    from app.workers import jobs
+
+    content = composer.Content(
+        subject_variants=["First subject", "Second subject", "Third subject"],
+        body_variants=["<p>Body one</p>", "<p>Body two</p>"],
+    )
+    context = merge.build_context({"email": "a@b.test", "company": "Acme", "person": "Ann"})
+    identity = composer.SenderIdentity(name="Me", email="me@mine.test")
+
+    seen = set()
+    for subject_index in range(3):
+        for body_index in range(2):
+            subject, _html, text = jobs.build_preview(
+                identity, context, content, subject_index, body_index, 1)
+            seen.add((subject, "one" if "Body one" in text else "two"))
+    assert len(seen) == 6, "not every combination is reachable"
+
+
+def test_next_contact_never_shows_the_same_variant_twice_in_a_row():
+    from app.ui.pages.templates import TemplatesPage
+
+    for count in (2, 3, 4, 7):
+        current = 0
+        for _ in range(40):
+            nxt = TemplatesPage._another(current, count)
+            assert 0 <= nxt < count
+            assert nxt != current, f"repeated {nxt} with {count} to choose from"
+            current = nxt
+    # A single variant has nowhere to go, and must not spin or raise
+    assert TemplatesPage._another(0, 1) == 0
+    assert TemplatesPage._another(0, 0) == 0
+
+
+# --- the built-in examples --------------------------------------------------
+def test_the_built_in_examples_score_well():
+    """The examples are what a new user starts from, so they must pass the scorer.
+
+    Read scorer.py before editing them: subject length, trigger wording,
+    capitals, exclamation marks, link count, body length and the variety checks
+    are all measured.
+    """
+    from app.core import composer, merge, scorer
+    from app.ui.pages import templates
+
+    content = composer.Content(
+        subject_variants=list(templates.EXAMPLE_SUBJECTS),
+        body_variants=list(templates.EXAMPLE_BODIES),
+        signature_html=templates.EXAMPLE_SIGNATURE,
+        attach_mode="link",
+        link_url="https://www.example.com/brochure.pdf",
+        unsubscribe_note=True,
+    )
+    report = scorer.score(content, sender_email="hello@mycompany.com",
+                          known_tags=merge.BUILTIN_TAGS)
+    assert report.score >= 90, (
+        f"examples score {report.score}: "
+        + "; ".join(f.message for f in report.by_severity()))
+
+    assert len(templates.EXAMPLE_SUBJECTS) >= 3
+    assert len(templates.EXAMPLE_BODIES) >= 2
+    for subject in templates.EXAMPLE_SUBJECTS:
+        assert 15 <= len(subject) <= 70, subject
+        assert not merge.unresolved_tags(subject, merge.BUILTIN_TAGS), subject
+    for body in templates.EXAMPLE_BODIES:
+        words = len(composer.html_to_text(body).split())
+        assert 80 <= words <= 250, f"{words} words"
+        assert not merge.unresolved_tags(body, merge.BUILTIN_TAGS)
+        assert merge.validate_spintax(body) is None

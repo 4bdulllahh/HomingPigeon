@@ -189,14 +189,62 @@ def risk_flags(email: str) -> list[str]:
 
 
 # --- Import -----------------------------------------------------------------
+# Rows per write transaction. SQLite allows one writer at a time, so a batch
+# that takes milliseconds keeps the lock for milliseconds, and the UI thread
+# never waits on it for long.
+COMMIT_EVERY = 250
+
+
+def domains_in(df: pd.DataFrame, column: str) -> list[str]:
+    """Every distinct mail domain in the sheet, in the order they first appear."""
+    domains: list[str] = []
+    seen: set[str] = set()
+    for value in df[column] if column in df.columns else []:
+        text = str(value).strip().lower() if value is not None else ""
+        if "@" not in text:
+            continue
+        domain = text.split("@", 1)[1]
+        if domain and domain not in seen:
+            seen.add(domain)
+            domains.append(domain)
+    return domains
+
+
+def resolve_domains(domains: list[str], progress=None, cancelled=None) -> dict[str, bool]:
+    """Look up every domain's mail server up front, before any database work.
+
+    This is the slow part of an import: one DNS round trip per domain, and a
+    dead domain waits for a timeout. Doing it here, outside any transaction,
+    is what keeps the write lock short.
+    """
+    from app.core import dns_tools
+
+    answers: dict[str, bool] = {}
+    for index, domain in enumerate(domains):
+        if cancelled is not None and cancelled():
+            break
+        if progress:
+            progress(index, len(domains))
+        answers[domain] = dns_tools.has_mx(domain)
+    if progress:
+        progress(len(domains), len(domains))
+    return answers
+
+
 def import_dataframe(
     df: pd.DataFrame,
     mapping: ColumnMapping,
     source_file: str = "",
     check_mx: bool = True,
     progress=None,
+    mx_answers: dict[str, bool] | None = None,
 ) -> ImportResult:
-    """Insert/update contacts. Existing addresses keep their send history."""
+    """Insert/update contacts. Existing addresses keep their send history.
+
+    ``mx_answers`` lets the caller do the DNS lookups first, which is what the
+    import worker does. Without it the lookups happen here, still outside the
+    write transactions.
+    """
     result = ImportResult(total_rows=len(df))
     if not mapping.email:
         result.problems.append(("", "No email column selected"))
@@ -207,11 +255,18 @@ def import_dataframe(
     seen: set[str] = set()
     conn = db.connect()
     stamp = datetime.now().isoformat(timespec="seconds")
-    mx_cache: dict[str, bool] = {}
+    mx_cache: dict[str, bool] = dict(mx_answers or {})
+    pending = 0
 
     for position, (_, row) in enumerate(df.iterrows()):
         if progress and position % 25 == 0:
             progress(position, len(df))
+
+        # Commit as we go. Holding one transaction for the whole import is what
+        # used to block the UI thread's own writes until it timed out.
+        if pending >= COMMIT_EVERY:
+            conn.commit()
+            pending = 0
 
         raw_email = row.get(mapping.email)
         email = str(raw_email).strip().lower() if raw_email is not None else ""
@@ -266,6 +321,7 @@ def import_dataframe(
                  ",".join(flags) if flags else None, existing["id"]),
             )
             result.updated += 1
+            pending += 1
         else:
             conn.execute(
                 "INSERT INTO contacts(email, company, person, extra_json, source_file, imported_at, "
@@ -275,6 +331,7 @@ def import_dataframe(
                  ",".join(flags) if flags else None),
             )
             result.imported += 1
+            pending += 1
 
     conn.commit()
     if progress:

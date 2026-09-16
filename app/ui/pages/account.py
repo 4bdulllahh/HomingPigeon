@@ -279,8 +279,8 @@ class AccountPage(Page):
         set_tone(self.smtp_result, "muted")
 
         Task(jobs.test_smtp, settings).start(
-            on_result=lambda outcome: self._show_smtp_result(*outcome),
-            on_error=lambda message: self._show_smtp_result(False, message))
+            on_result=self.guard(lambda outcome: self._show_smtp_result(*outcome)),
+            on_error=self.guard(lambda message: self._show_smtp_result(False, message)))
 
     def _show_smtp_result(self, ok: bool, message: str) -> None:
         self.test_button.setEnabled(True)
@@ -304,8 +304,8 @@ class AccountPage(Page):
         set_tone(self.imap_result, "muted")
 
         Task(jobs.test_imap, settings).start(
-            on_result=lambda outcome: self._show_imap_result(*outcome),
-            on_error=lambda message: self._show_imap_result(False, message))
+            on_result=self.guard(lambda outcome: self._show_imap_result(*outcome)),
+            on_error=self.guard(lambda message: self._show_imap_result(False, message)))
 
     def _show_imap_result(self, ok: bool, message: str) -> None:
         self.imap_test_button.setEnabled(True)

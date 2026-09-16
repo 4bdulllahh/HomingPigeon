@@ -224,8 +224,8 @@ class InboxPage(Page):
         set_tone(self.sync_status, "muted")
 
         Task(jobs.sync_inbox, settings).start(
-            on_result=lambda result: self._sync_done(result, quiet),
-            on_error=lambda message: self._sync_failed(message))
+            on_result=self.guard(lambda result: self._sync_done(result, quiet)),
+            on_error=self.guard(self._sync_failed))
 
     def _sync_failed(self, message: str) -> None:
         self._syncing = False
@@ -263,6 +263,9 @@ class InboxPage(Page):
             self._auto_timer.start()
         else:
             self._auto_timer.stop()
+
+    def busy_reason(self) -> str | None:
+        return "the inbox check is still running" if self._syncing else None
 
     # --- reading ------------------------------------------------------------
     def _show_selected(self) -> None:

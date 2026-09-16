@@ -35,6 +35,84 @@ BASE_COLUMNS = [
 MAX_EXTRA_COLUMNS = 14
 
 
+def _alphabetical(column: str, descending: bool) -> str:
+    """Order by a text column, case-insensitively, with blanks always last.
+
+    Without the first term a Z to A sort fills the top of the list with the
+    rows that have nothing in that column, which is never what anyone wants.
+    """
+    direction = "DESC" if descending else "ASC"
+    return (f"({column} IS NULL OR {column} = '') ASC, "
+            f"{column} COLLATE NOCASE {direction}")
+
+
+# Status worth acting on first: a bounce is dead, an excluded address will not
+# be sent to, a reply is a lead, everything else is untouched.
+_BY_STATUS = ("CASE WHEN bounced_at IS NOT NULL THEN 0 WHEN valid = 0 THEN 1 "
+              "WHEN replied_at IS NOT NULL THEN 2 ELSE 3 END ASC")
+
+# (key, menu label, ORDER BY). Every one ends up with "id" appended as a
+# tiebreak, so paging through the list can never show a row twice or skip one.
+SORTS: list[tuple[str, str]] = [
+    ("import", "Import order"),
+    ("email_az", "Email: A to Z"),
+    ("email_za", "Email: Z to A"),
+    ("company_az", "Company: A to Z"),
+    ("company_za", "Company: Z to A"),
+    ("person_az", "Contact person: A to Z"),
+    ("person_za", "Contact person: Z to A"),
+    ("newest", "Newest imported first"),
+    ("oldest", "Oldest imported first"),
+    ("status", "Needs attention first"),
+]
+DEFAULT_SORT = "import"
+
+_ORDER_BY = {
+    "import": "id ASC",
+    "email_az": _alphabetical("email", False),
+    "email_za": _alphabetical("email", True),
+    "company_az": _alphabetical("company", False),
+    "company_za": _alphabetical("company", True),
+    "person_az": _alphabetical("person", False),
+    "person_za": _alphabetical("person", True),
+    "newest": "imported_at DESC",
+    "oldest": "imported_at ASC",
+    "status": _BY_STATUS,
+}
+
+# Short forms for the button itself, which shares a row with the search box
+SORT_SHORT = {
+    "import": "Import order",
+    "email_az": "Email A-Z",
+    "email_za": "Email Z-A",
+    "company_az": "Company A-Z",
+    "company_za": "Company Z-A",
+    "person_az": "Person A-Z",
+    "person_za": "Person Z-A",
+    "newest": "Newest first",
+    "oldest": "Oldest first",
+    "status": "Needs attention",
+}
+
+# The menu, with dividers between the groups
+SORT_MENU: list = [
+    ("import", "Import order"),
+    None,
+    ("email_az", "Email: A to Z"),
+    ("email_za", "Email: Z to A"),
+    None,
+    ("company_az", "Company: A to Z"),
+    ("company_za", "Company: Z to A"),
+    None,
+    ("person_az", "Contact person: A to Z"),
+    ("person_za", "Contact person: Z to A"),
+    None,
+    ("newest", "Newest imported first"),
+    ("oldest", "Oldest imported first"),
+    ("status", "Needs attention first"),
+]
+
+
 class ContactsModel(QAbstractTableModel):
     """Rows come from the contacts table; extra spreadsheet columns are included."""
 
@@ -46,6 +124,7 @@ class ContactsModel(QAbstractTableModel):
         self._extras: list[str] = []
         self._columns = list(BASE_COLUMNS)
         self._search = ""
+        self._sort = DEFAULT_SORT
         self._matching = 0
         self._exhausted = False
         self._fetching = False
@@ -128,6 +207,22 @@ class ContactsModel(QAbstractTableModel):
     def search_text(self) -> str:
         return self._search
 
+    def set_sort(self, key: str) -> None:
+        """Change the order. Re-runs the query; SQLite does the sorting."""
+        if key not in _ORDER_BY or key == self._sort:
+            return
+        self._sort = key
+        self.reload()
+
+    def sort_key(self) -> str:
+        return self._sort
+
+    def sort_label(self) -> str:
+        for key, label in SORTS:
+            if key == self._sort:
+                return label
+        return ""
+
     def set_rows_empty(self) -> None:
         """Drop every row without touching the database.
 
@@ -182,8 +277,12 @@ class ContactsModel(QAbstractTableModel):
         from app.core import prefs
 
         clause, params = self._where()
+        # "id" is appended as a tiebreak so LIMIT/OFFSET paging is stable: with
+        # an order that has ties, SQLite is free to return them in a different
+        # arrangement per page, which shows some rows twice and hides others.
+        order = _ORDER_BY.get(self._sort, _ORDER_BY[DEFAULT_SORT])
         rows = db.query(
-            f"SELECT * FROM contacts {clause} ORDER BY id LIMIT ? OFFSET ?",
+            f"SELECT * FROM contacts {clause} ORDER BY {order}, id ASC LIMIT ? OFFSET ?",
             [*params, limit, offset])
 
         out: list[dict] = []

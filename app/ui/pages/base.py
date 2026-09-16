@@ -1,6 +1,7 @@
 """Shared page scaffolding: a title, an intro line and a body."""
 from __future__ import annotations
 
+from PyQt6 import sip
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
 from app.ui import theme
@@ -44,3 +45,33 @@ class Page(QWidget):
 
     def on_show(self) -> None:
         """Called every time the page becomes visible. Keep it cheap."""
+
+    def guard(self, callback):
+        """Wrap a worker callback so it is dropped if this page no longer exists.
+
+        Refresh and a text-size change both destroy pages and build them again.
+        A job started beforehand still delivers its result afterwards, and a
+        callback that then writes into a destroyed widget raises "wrapped C/C++
+        object has been deleted", which reads to the user as the app crashing.
+
+        PyQt disconnects a bound method of a QObject when that object goes, so
+        those are safe already. A lambda closing over the page is not, and every
+        one of those goes through here.
+        """
+
+        def run(*args, **kwargs):
+            if sip.isdeleted(self):
+                return None
+            return callback(*args, **kwargs)
+
+        return run
+
+    def busy_reason(self) -> str | None:
+        """Why this page must not be thrown away and rebuilt right now, if so.
+
+        Refresh rebuilds the page it is looking at. A page with a worker still
+        running would have its callbacks fire into destroyed widgets, so a busy
+        page is re-read in place instead. Pages that start long jobs override
+        this; the default is that nothing is in flight.
+        """
+        return None

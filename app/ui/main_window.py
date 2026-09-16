@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Callable
 
 from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QIcon, QPixmap
+from PyQt6.QtGui import QIcon, QKeySequence, QPixmap, QShortcut
 from PyQt6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QMainWindow, QPushButton,
                              QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 
@@ -149,6 +149,9 @@ class MainWindow(QMainWindow):
             start = db.get_setting("last_page", "dashboard")
         self.show_page(start if start in self._builders else "dashboard")
 
+        for sequence in (QKeySequence(Qt.Key.Key_F5), QKeySequence("Ctrl+R")):
+            QShortcut(sequence, self).activated.connect(self.refresh_app)
+
         # The status bar reads the database; keep it off the startup path
         QTimer.singleShot(200, self.refresh_status)
 
@@ -233,6 +236,23 @@ class MainWindow(QMainWindow):
         version.setProperty("role", "hint")
         names.addWidget(version)
         header.addLayout(names, 1)
+
+        # Refresh. Not decoration: if a page has got itself into a bad state,
+        # this rebuilds it from scratch, which is the fix a user can reach for
+        # without restarting the app.
+        self.refresh_button = QPushButton(theme.icon("refresh"))
+        self.refresh_button.setProperty("kind", "ghost")
+        self.refresh_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.refresh_button.setFixedSize(QSize(round(30 * scale), round(30 * scale)))
+        self.refresh_button.setToolTip("Refresh this page (F5)")
+        family = theme.icon_family()
+        self.refresh_button.setStyleSheet(
+            (f'font-family: "{family}"; ' if family else "")
+            + f"font-size: {theme.px(16)}px; border: none; padding: 0;")
+        self.refresh_button.clicked.connect(self.refresh_app)
+        header.addWidget(self.refresh_button, 0, Qt.AlignmentFlag.AlignTop)
+        self._paint_refresh_button()
+
         layout.addLayout(header)
         layout.addSpacing(round(8 * scale))
         layout.addWidget(separator())
@@ -274,6 +294,16 @@ class MainWindow(QMainWindow):
         layout.addWidget(settings)
         self._nav[key] = settings
         return sidebar
+
+    def _paint_refresh_button(self) -> None:
+        button = getattr(self, "refresh_button", None)
+        if button is None:
+            return
+        family = theme.icon_family()
+        button.setStyleSheet(
+            (f'font-family: "{family}"; ' if family else "")
+            + f"font-size: {theme.px(16)}px; border: none; padding: 0; "
+            + f"color: {theme.color('fg_muted')};")
 
     def _build_status_bar(self) -> QWidget:
         bar = QFrame()
@@ -354,7 +384,9 @@ class MainWindow(QMainWindow):
         if scroller is not None and self._nav[key].parentWidget() is scroller.widget():
             scroller.ensureWidgetVisible(self._nav[key])
         self.stack.setCurrentWidget(page)
-        db.set_setting("last_page", key)
+        # Soft: remembering the last page is a convenience, and a background
+        # import holding the write lock must never stall navigation for it.
+        db.set_setting_soft("last_page", key)
 
         on_show = getattr(page, "on_show", None)
         if callable(on_show):
@@ -362,6 +394,62 @@ class MainWindow(QMainWindow):
                 on_show()
             except Exception as error:  # noqa: BLE001 - a broken page must not break navigation
                 toast(self, f"Could not refresh this page: {error}", "error")
+        self.refresh_status()
+
+    def refresh_app(self) -> None:
+        """Reload the page on screen, like F5 in a browser.
+
+        A page is thrown away and built again, so anything wedged in its widgets
+        is gone and every number on it is re-read from the database. A page with
+        a worker still running is re-read in place instead: destroying it would
+        leave that worker holding callbacks into deleted widgets, which is a
+        crash rather than a fix.
+        """
+        current = self.current
+        if current is None:
+            return
+
+        page = self._pages.get(current)
+        reason = None
+        if page is not None:
+            try:
+                reason = page.busy_reason() if hasattr(page, "busy_reason") else None
+            except Exception:  # noqa: BLE001 - a broken page is exactly what this is for
+                reason = None
+
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(theme.stylesheet())
+
+        if reason:
+            self._soft_refresh(page)
+            toast(self, f"Reloaded what is on screen. Left the page alone because {reason}.",
+                  "info", 5000)
+            return
+
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        self.setUpdatesEnabled(False)
+        try:
+            if page is not None:
+                self._pages.pop(current, None)
+                self.stack.removeWidget(page)
+                page.deleteLater()
+            self.current = None
+            self.show_page(current)
+        finally:
+            self.setUpdatesEnabled(True)
+            QApplication.restoreOverrideCursor()
+        toast(self, "Refreshed", "success", 2000)
+
+    def _soft_refresh(self, page: QWidget | None) -> None:
+        """Re-read a page's data without rebuilding it."""
+        if page is not None:
+            on_show = getattr(page, "on_show", None)
+            if callable(on_show):
+                try:
+                    on_show()
+                except Exception:  # noqa: BLE001
+                    pass
         self.refresh_status()
 
     def notify(self, message: str, level: str = "info", duration: int = 4000) -> None:
@@ -418,6 +506,7 @@ class MainWindow(QMainWindow):
             for key, button in self._nav.items():
                 button.set_active(key == self.current)
                 button.set_badge(bool(button.badge.text()))
+            self._paint_refresh_button()
             for widget in self.findChildren(QWidget):
                 refresh = getattr(widget, "refresh_theme", None)
                 if callable(refresh):
@@ -455,9 +544,13 @@ class MainWindow(QMainWindow):
         db.set_setting("text_size", key)
         theme.set_text_scale(prefs.text_scale())
 
-        if self.is_sending():
+        # Every built page is destroyed below, so a page with a worker running
+        # would lose the result it is waiting for. Repaint only, and finish the
+        # resize once the work is done.
+        reason = self.busy_page_reason()
+        if reason:
             self.apply_theme()
-            toast(self, "Text size applies fully once sending has finished.", "warn", 6000)
+            toast(self, f"Text size applies fully once {reason} has finished.", "warn", 6000)
             return
 
         current = self.current or "dashboard"
@@ -481,6 +574,20 @@ class MainWindow(QMainWindow):
             self.setUpdatesEnabled(True)
 
     # --- lifecycle ----------------------------------------------------------
+    def busy_page_reason(self) -> str | None:
+        """The first reason any built page gives for not being torn down."""
+        for page in self._pages.values():
+            ask = getattr(page, "busy_reason", None)
+            if not callable(ask):
+                continue
+            try:
+                reason = ask()
+            except Exception:  # noqa: BLE001
+                continue
+            if reason:
+                return reason
+        return None
+
     def is_sending(self) -> bool:
         page = self._pages.get("send")
         return bool(page is not None and getattr(page, "is_running", lambda: False)())

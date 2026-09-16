@@ -32,6 +32,13 @@ def init(db_path: Path | None = None) -> None:
     conn.commit()
 
 
+# How long a write waits for another thread's write before giving up. Only one
+# connection can write at a time. A long wait on the UI thread is a frozen
+# window, which is worse than a setting that fails to save, so the wait here is
+# short and callers that can shrug it off use execute_soft().
+BUSY_TIMEOUT_SECONDS = 5.0
+
+
 def connect() -> sqlite3.Connection:
     """One connection per thread; the send worker and UI each get their own."""
     conn = getattr(_local, "conn", None)
@@ -39,7 +46,7 @@ def connect() -> sqlite3.Connection:
         return conn
     if _db_path is None:
         raise RuntimeError("db.init() must be called before db.connect()")
-    conn = sqlite3.connect(str(_db_path), timeout=30, check_same_thread=False)
+    conn = sqlite3.connect(str(_db_path), timeout=BUSY_TIMEOUT_SECONDS, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -228,6 +235,20 @@ def execute(sql: str, params: Sequence[Any] = ()) -> int:
     return cur.lastrowid if cur.lastrowid is not None else cur.rowcount
 
 
+def execute_soft(sql: str, params: Sequence[Any] = ()) -> bool:
+    """Like execute(), but a busy database is not an error.
+
+    For writes nobody would miss if they were skipped, such as remembering
+    which page was open last. Raising here would abort whatever the user was
+    doing, and the only cause is another thread mid-write.
+    """
+    try:
+        execute(sql, params)
+        return True
+    except sqlite3.OperationalError:
+        return False
+
+
 def execute_many(sql: str, rows: Iterable[Sequence[Any]]) -> None:
     conn = connect()
     conn.executemany(sql, rows)
@@ -249,12 +270,17 @@ def get_setting(key: str, default: Any = None) -> Any:
         return row["value"]
 
 
+_SET_SETTING_SQL = ("INSERT INTO settings(key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+
+
 def set_setting(key: str, value: Any) -> None:
-    execute(
-        "INSERT INTO settings(key, value) VALUES (?, ?) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        (key, json.dumps(value)),
-    )
+    execute(_SET_SETTING_SQL, (key, json.dumps(value)))
+
+
+def set_setting_soft(key: str, value: Any) -> bool:
+    """Save a setting, or skip it if another thread is mid-write. See execute_soft()."""
+    return execute_soft(_SET_SETTING_SQL, (key, json.dumps(value)))
 
 
 # --- Events / logging -------------------------------------------------------

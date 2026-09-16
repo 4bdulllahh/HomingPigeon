@@ -315,6 +315,7 @@ ICONS = {
     "history": ("", "↺"),
     "inbox": ("", "↩"),
     "settings": ("", "⚙"),
+    "refresh": ("", "↻"),
 }
 
 
@@ -698,6 +699,24 @@ QMenu::item {{
 }}
 QMenu::item:selected {{ background-color: {t['bg_selected']}; color: {t['fg_bright']}; }}
 QMenu::item:disabled {{ color: {t['fg_muted']}; }}
+/* A checkable menu reserves a column for the tick. Qt draws nothing there by
+   default under a stylesheet, so the chosen entry gets a dot of its own. */
+QMenu::item:checked {{ color: {t['accent']}; font-weight: {heavy}; }}
+QMenu::indicator {{
+    width: {px(14)}px;
+    height: {px(14)}px;
+    margin-left: {px(4)}px;
+    border-radius: {px(7)}px;
+}}
+QMenu::indicator:checked {{ background-color: {t['accent']}; }}
+/* Qt puts the drop-down arrow inside the button's padding box, so a menu
+   button needs a little more room on the right than a plain one. */
+QPushButton::menu-indicator {{
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    right: {px(6)}px;
+    width: {px(10)}px;
+}}
 QMenu::separator {{
     height: 1px;
     background-color: {t['border']};

@@ -8,13 +8,14 @@ from PyQt6.QtGui import QAction, QKeySequence, QShortcut
 from PyQt6.QtWidgets import QFileDialog, QGridLayout, QHBoxLayout, QMenu, QVBoxLayout, QWidget
 
 from app.core import db, importer, prefs
-from app.models.contacts_model import ContactsModel, all_contact_emails
+from app.models.contacts_model import (SORT_MENU, SORT_SHORT, ContactsModel,
+                                       all_contact_emails)
 from app.models.table_model import SimpleTableModel
 from app.ui import theme
 from app.ui.pages.base import Page
-from app.ui.widgets.common import (FormRow, ProgressRow, ScrollPage, Section, TabBar,
-                                   clear_layout, danger_button, hint, muted, primary_button, row,
-                                   secondary_button, set_tone)
+from app.ui.widgets.common import (FormRow, MenuButton, ProgressRow, ScrollPage, Section,
+                                   TabBar, clear_layout, danger_button, hint, muted,
+                                   primary_button, row, secondary_button, set_tone)
 from app.ui.widgets.dialogs import ConfirmDialog
 from app.ui.widgets.inputs import (Debouncer, checkbox, combo, line_edit, read_only_box,
                                    set_combo_values, update_completer)
@@ -43,6 +44,10 @@ class ContactsPage(Page):
         self.tabs.add("Import", self._build_import)
         self.tabs.add("My contacts", self._build_list)
         self.tabs.add("Do not contact", self._build_suppression)
+        # A tab that was already built keeps whatever it last loaded, so an
+        # import finishing while another tab was on screen would not show up
+        # until the app was restarted. Re-read on every tab change instead.
+        self.tabs.changed.connect(self._tab_changed)
         self.root.addWidget(self.tabs, 1)
         self.tabs.set("Import")
 
@@ -117,8 +122,9 @@ class ContactsPage(Page):
         self.import_status.setText("Opening the file...")
 
         Task(jobs.read_sheet_names, self._path).start(
-            on_result=self._sheets_ready,
-            on_error=lambda message: self._fail(f"Could not open the file: {message}"))
+            on_result=self.guard(self._sheets_ready),
+            on_error=self.guard(
+                lambda message: self._fail(f"Could not open the file: {message}")))
 
     def _sheets_ready(self, sheets: list[str]) -> None:
         set_combo_values(self.sheet_picker, sheets, sheets[0] if sheets else None)
@@ -133,8 +139,9 @@ class ContactsPage(Page):
         set_tone(self.import_status, "muted")
 
         Task(jobs.read_preview, self._path, None if sheet in ("CSV", "-") else sheet).start(
-            on_result=self._preview_ready,
-            on_error=lambda message: self._fail(f"Could not read the sheet: {message}"))
+            on_result=self.guard(self._preview_ready),
+            on_error=self.guard(
+                lambda message: self._fail(f"Could not read the sheet: {message}")))
 
     def _preview_ready(self, result) -> None:
         self._dataframe, mapping = result
@@ -305,6 +312,8 @@ class ContactsPage(Page):
         self.search_box.textChanged.connect(lambda _t: self._search_debounce.poke())
         self.search_box.returnPressed.connect(self._search_debounce.flush)
 
+        self.sort_button = MenuButton(SORT_MENU, "import", prefix="Sort: ",
+                                      on_change=self._change_sort, short=SORT_SHORT)
         self.delete_button = danger_button("Delete selected", self._delete_selected, 150)
         self.delete_button.setEnabled(False)
         self.clear_button = danger_button("Clear whole list...", self._clear_list, 160)
@@ -313,7 +322,7 @@ class ContactsPage(Page):
         controls = QHBoxLayout()
         controls.setSpacing(8)
         controls.addWidget(self.search_box, 1)
-        for button in (self.delete_button, self.clear_button, export_button):
+        for button in (self.sort_button, self.delete_button, self.clear_button, export_button):
             controls.addWidget(button)
         layout.addLayout(controls)
 
@@ -342,12 +351,24 @@ class ContactsPage(Page):
         # can be un-picked the way people expect.
         self.contacts_table.deselect_on_click_outside(holder, self.contacts_summary)
 
+        saved = db.get_setting("contacts_sort", "import")
+        if saved != "import":
+            self.sort_button.set(saved)
+            self.contacts_model.set_sort(saved)
         self.contacts_model.reload()
         return holder
 
     def _apply_search(self) -> None:
         self.contacts_model.set_search(self.search_box.text())
         self.contacts_table.fit_columns()
+
+    def _change_sort(self, key: str) -> None:
+        """Sorting scrolls the view back to the top, or the position is meaningless."""
+        self.contacts_model.set_sort(key)
+        self.contacts_table.clear_selection()
+        self.contacts_table.view.scrollToTop()
+        self.contacts_table.fit_columns()
+        db.set_setting_soft("contacts_sort", key)
 
     def _selection_changed(self) -> None:
         count = len(self.contacts_table.selected_rows())
@@ -545,7 +566,7 @@ class ContactsPage(Page):
         if box is None:
             return
         Task(all_contact_emails).start(
-            on_result=lambda emails: update_completer(self.suppress_box, emails))
+            on_result=self.guard(lambda emails: update_completer(self.suppress_box, emails)))
 
     def _reload_suppression(self) -> None:
         model = getattr(self, "suppression_model", None)
@@ -608,6 +629,17 @@ class ContactsPage(Page):
         Task(jobs.export_suppression).start(
             on_result=lambda saved: self.notify(f"Exported to {Path(saved).name}", "success"),
             on_error=lambda message: self.notify(f"Export failed: {message}", "error"))
+
+    def busy_reason(self) -> str | None:
+        if self._import_worker is not None:
+            return "an import is still running"
+        return None
+
+    def _tab_changed(self, name: str) -> None:
+        if name == "My contacts":
+            self._reload_list()
+        elif name == "Do not contact":
+            self._reload_suppression()
 
     # =======================================================================
     def on_show(self) -> None:

@@ -381,6 +381,9 @@ class SendPage(Page):
             pump.wait(2000)
             pump.deleteLater()
 
+    def busy_reason(self) -> str | None:
+        return "a campaign is running" if self.is_running() else None
+
     def is_running(self) -> bool:
         return bool(self.worker and self.worker.is_alive())
 

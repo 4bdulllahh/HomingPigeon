@@ -11,10 +11,10 @@ from typing import Callable
 
 from PyQt6.QtCore import (QEasingCurve, QEvent, QPropertyAnimation, Qt, QTimer,
                           pyqtSignal)
-from PyQt6.QtGui import QGuiApplication
+from PyQt6.QtGui import QAction, QActionGroup, QGuiApplication
 from PyQt6.QtWidgets import (QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLayout,
-                             QProgressBar, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout,
-                             QWidget)
+                             QMenu, QProgressBar, QPushButton, QScrollArea, QSizePolicy,
+                             QVBoxLayout, QWidget)
 
 from app.ui import theme
 from app.ui.widgets.flow import FlowLayout
@@ -415,6 +415,77 @@ def ghost_button(text: str, on_click=None) -> QPushButton:
     return _button(text, on_click, "ghost", None)
 
 
+class MenuButton(QPushButton):
+    """A drop-down for a choice with too many options to sit in a row of buttons.
+
+    Built from a real QMenu so it picks up the application stylesheet, rather
+    than a QComboBox, whose popup Qt draws with the native style and which
+    therefore never looks like the rest of the app. The button always shows the
+    current choice, so the setting is readable without opening it.
+
+    ``options`` is a list of (key, label) pairs; a bare None inserts a divider.
+    """
+
+    changed = pyqtSignal(str)
+
+    def __init__(self, options: list, value: str | None = None, prefix: str = "",
+                 on_change: Callable[[str], None] | None = None, width: int | None = None,
+                 short: dict[str, str] | None = None, parent=None):
+        super().__init__(parent)
+        self.setProperty("kind", "secondary")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._prefix = prefix
+        # The menu has room to spell a choice out; the button sits in a row of
+        # other controls and must not crowd them, so it can show a short form.
+        self._short = short or {}
+        self._labels = {key: label for entry in options if entry for key, label in [entry]}
+        self.value = value if value in self._labels else next(iter(self._labels), "")
+        if on_change:
+            self.changed.connect(on_change)
+        if width:
+            self.setMinimumWidth(round(width * theme.text_scale()))
+
+        self._menu = QMenu(self)
+        group = QActionGroup(self._menu)
+        group.setExclusive(True)
+        self._actions: dict[str, QAction] = {}
+        for entry in options:
+            if entry is None:
+                self._menu.addSeparator()
+                continue
+            key, label = entry
+            action = QAction(label, self._menu)
+            action.setCheckable(True)
+            action.setChecked(key == self.value)
+            action.triggered.connect(lambda _checked=False, k=key: self.set(k, notify=True))
+            group.addAction(action)
+            self._menu.addAction(action)
+            self._actions[key] = action
+
+        self.setMenu(self._menu)
+        self._paint()
+
+    def _paint(self) -> None:
+        label = self._short.get(self.value) or self._labels.get(self.value, "")
+        self.setText(button_text(f"{self._prefix}{label}" if self._prefix else label))
+        for key, action in self._actions.items():
+            action.setChecked(key == self.value)
+
+    def set(self, key: str, notify: bool = False) -> None:
+        if key not in self._labels or key == self.value:
+            # Re-check the current entry: clicking the one already chosen must
+            # not leave the menu showing nothing as selected.
+            self._paint()
+            return
+        self.value = key
+        self._paint()
+        if notify:
+            self.changed.emit(key)
+
+    def get(self) -> str:
+        return self.value
+
+
 class ChoiceButtons(QWidget):
     """A row of buttons where exactly one is selected: radio buttons that look like buttons."""
 
@@ -667,13 +738,29 @@ class Toast(QFrame):
 _toasts: list[Toast] = []
 
 
+def _on_screen(item: Toast) -> bool:
+    """Is this toast still a real widget?
+
+    A dismissed toast is deleteLater'd, which destroys the C++ object while the
+    entry in ``_toasts`` still points at the Python wrapper. Asking a dead
+    wrapper anything raises RuntimeError, and this list is read by every call to
+    toast(), including the one the crash handler makes, so a stale entry turned
+    any later message into a second error.
+    """
+    try:
+        return item.isVisible()
+    except RuntimeError:
+        return False
+
+
 def toast(widget: QWidget | None, message: str, level: str = "info", duration: int = 4000) -> None:
     """Show a message over the main window. Safe to call from any page."""
     window = widget.window() if widget is not None else None
     if window is None:
         return
+    _toasts[:] = [t for t in _toasts if _on_screen(t)]
     # Stack new toasts above any still on screen rather than covering them
-    live = [t for t in _toasts if t.isVisible() and t.parentWidget() is window]
+    live = [t for t in _toasts if t.parentWidget() is window]
     item = Toast(window, message, level, duration)
     offset = sum(t.height() + 8 for t in live)
     if offset:

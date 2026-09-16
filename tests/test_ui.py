@@ -451,3 +451,207 @@ def test_no_em_dashes_or_typographic_ellipses_anywhere():
                 if banned & set(line):
                     offenders.append(f"{path.relative_to(root).as_posix()}:{number}")
     assert not offenders, "use '.', ',', ':' or '...' instead: " + ", ".join(offenders[:10])
+
+# --- widget lifetimes -------------------------------------------------------
+def test_a_combo_box_still_works_after_its_wheel_guard_owner_is_gone(qt_app, store):
+    """The user saw "wrapped C/C++ object of type _WheelGuard has been deleted".
+
+    The guard was a class-level singleton parented to whichever widget asked for
+    it first. That widget goes away on any text-size change, leaving the cached
+    Python reference pointing at a destroyed object, and the next combo box
+    built anywhere in the app raised.
+    """
+    from PyQt6.QtWidgets import QWidget
+
+    from app.ui.widgets import inputs
+
+    owner = QWidget()
+    owner.show()
+    inputs.combo(["a", "b"], parent=owner)
+    guard = inputs._WheelGuard._instance
+    assert guard is not None
+    assert guard.parent() is qt_app, "the guard must outlive every page"
+
+    # Force the exact state the old code got into
+    victim = QWidget()
+    victim.show()
+    inputs._WheelGuard._instance = inputs._WheelGuard(victim)
+    victim.deleteLater()
+    del victim
+    qt_app.processEvents()
+    inputs.combo(["a", "b"])          # must not raise
+    owner.deleteLater()
+
+
+def test_a_dismissed_toast_does_not_break_the_next_one(qt_app, store):
+    """Every toast reads the list of live ones, including the crash handler's.
+
+    A dismissed toast is deleteLater'd, so the entry left in the list pointed at
+    a destroyed widget, and asking it anything raised. That turned any later
+    message into a second error, which is how one fault became a cascade.
+    """
+    from PyQt6.QtWidgets import QWidget
+
+    from app.ui.widgets import common
+
+    window = QWidget()
+    window.resize(800, 600)
+    window.show()
+
+    common.toast(window, "First", "info", 10)
+    stale = common._toasts[-1]
+    stale.deleteLater()
+    del stale
+    qt_app.processEvents()
+    assert common._toasts, "the list should still hold the stale entry"
+
+    common.toast(window, "Second", "error", 10)      # used to raise here
+    assert all(common._on_screen(t) or True for t in common._toasts)
+    window.deleteLater()
+
+
+def test_a_worker_callback_is_dropped_once_its_page_is_gone(qt_app, store):
+    """Refresh destroys a page; a job it started still delivers afterwards."""
+    from app.ui.pages.base import Page
+
+    page = Page(None)
+    calls = []
+    guarded = page.guard(lambda value: calls.append(value))
+    guarded("while alive")
+    assert calls == ["while alive"]
+
+    from PyQt6 import sip
+
+    sip.delete(page)
+    guarded("after deletion")
+    assert calls == ["while alive"], "a dead page's callback still ran"
+
+
+# --- refresh ----------------------------------------------------------------
+def test_refresh_rebuilds_the_page_on_screen(qt_app, store):
+    from app.ui.main_window import MainWindow
+
+    qt_app.setStyleSheet(theme.stylesheet())
+    window = MainWindow()
+    window.show()
+    try:
+        for key in ("dashboard", "contacts", "templates", "settings"):
+            window.show_page(key)
+            qt_app.processEvents()
+            before = window.page(key)
+            window.refresh_app()
+            qt_app.processEvents()
+            after = window.page(key)
+            assert after is not before, f"{key} was not rebuilt"
+            assert window.current == key, "refresh navigated away"
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_refresh_leaves_a_busy_page_alone(qt_app, store):
+    """Rebuilding a page with a worker running would crash rather than help."""
+    from app.ui.main_window import MainWindow
+
+    qt_app.setStyleSheet(theme.stylesheet())
+    window = MainWindow()
+    window.show()
+    try:
+        window.show_page("inbox")
+        qt_app.processEvents()
+        page = window.page("inbox")
+        assert page.busy_reason() is None
+
+        page._syncing = True             # as if a check were running
+        assert page.busy_reason()
+        window.refresh_app()
+        qt_app.processEvents()
+        assert window.page("inbox") is page, "a busy page was thrown away"
+
+        page._syncing = False
+        window.refresh_app()
+        qt_app.processEvents()
+        assert window.page("inbox") is not page
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_refresh_is_reachable_by_button_and_by_key(qt_app, store):
+    from PyQt6.QtGui import QKeySequence, QShortcut
+
+    from app.ui.main_window import MainWindow
+
+    qt_app.setStyleSheet(theme.stylesheet())
+    window = MainWindow()
+    window.show()
+    try:
+        assert window.refresh_button.isVisible()
+        assert window.refresh_button.text(), "the button has no icon glyph"
+        assert "F5" in window.refresh_button.toolTip()
+        keys = {s.key().toString() for s in window.findChildren(QShortcut)}
+        assert QKeySequence(Qt.Key.Key_F5).toString() in keys
+        assert "Ctrl+R" in keys
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+# --- the sort control -------------------------------------------------------
+def test_the_sort_menu_is_a_themed_menu_with_every_column_both_ways(qt_app, store):
+    from app.models.contacts_model import SORT_MENU, SORT_SHORT
+    from app.ui.widgets.common import MenuButton
+
+    qt_app.setStyleSheet(theme.stylesheet())
+    keys = [entry[0] for entry in SORT_MENU if entry]
+    for column in ("email", "company", "person"):
+        assert f"{column}_az" in keys and f"{column}_za" in keys
+    assert None in SORT_MENU, "the menu has no dividers"
+    assert set(keys) <= set(SORT_SHORT), "every entry needs a short button label"
+
+    picked = []
+    button = MenuButton(SORT_MENU, "import", prefix="Sort: ", short=SORT_SHORT,
+                        on_change=picked.append)
+    assert button.text() == "Sort: Import order"
+    button.set("company_za", notify=True)
+    assert picked == ["company_za"]
+    assert button.text() == "Sort: Company Z-A"
+    # The menu is a real QMenu, so the application stylesheet reaches it
+    assert button.menu() is not None
+    assert len([a for a in button.menu().actions() if not a.isSeparator()]) == len(keys)
+    checked = [a for a in button.menu().actions() if a.isChecked()]
+    assert len(checked) == 1 and checked[0].text() == "Company: Z to A"
+    button.deleteLater()
+
+
+def test_a_finished_import_shows_up_without_reopening_the_app(qt_app, store):
+    """Switching to My contacts must re-read, not show what it loaded earlier."""
+    from app.ui.main_window import MainWindow
+
+    qt_app.setStyleSheet(theme.stylesheet())
+    window = MainWindow()
+    window.show()
+    try:
+        window.show_page("contacts")
+        qt_app.processEvents()
+        page = window.page("contacts")
+        page.tabs.set("My contacts")
+        qt_app.processEvents()
+        assert page.contacts_model.rowCount() == 0
+
+        page.tabs.set("Import")
+        qt_app.processEvents()
+        # Rows arrive from somewhere else, as a worker thread's import does
+        db.execute_many(
+            "INSERT INTO contacts(email, company, person, valid, imported_at) "
+            "VALUES (?,?,?,1,?)",
+            [(f"late{n}@arrival.test", "Arrived Late", f"Person {n}", "2026-09-16T09:00:00")
+             for n in range(12)])
+
+        page.tabs.set("My contacts")
+        qt_app.processEvents()
+        assert page.contacts_model.rowCount() == 12, "the tab showed stale rows"
+    finally:
+        window.close()
+        window.deleteLater()
+

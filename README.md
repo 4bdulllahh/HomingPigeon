@@ -13,7 +13,7 @@ HomingPigeon does the things that normally go wrong: it checks that your domain 
 correctly, cleans your contact list before you send, makes every message slightly different,
 sends at a human pace, and quietly removes addresses that bounce.
 
-> **Free while in beta (v0.4.2).** Please report anything confusing or broken.
+> **Free while in beta (v0.5.0).** Please report anything confusing or broken.
 
 ---
 
@@ -21,7 +21,7 @@ sends at a human pace, and quietly removes addresses that bounce.
 
 You don't need to know anything about coding.
 
-1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.4.2.zip`**.
+1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.5.0.zip`**.
 2. Right-click the downloaded file → **Extract All...** → **Extract**.
 3. In the folder that opens, double-click **`HomingPigeon Setup.exe`**.
 4. Click **Install**. Setup shows you every step while it works: it downloads what the app needs
@@ -116,6 +116,8 @@ so it never interferes with other programs (on Windows:
 | **Automatic stop** | Sending halts by itself if too many emails start failing, before real damage is done. |
 | **Bounce and unsubscribe handling** | Reads your inbox and permanently removes anyone who bounced or asked to be removed. |
 | **An inbox you can read** | The **My inbox** page keeps every message the check read, so replies, bounces and opt-outs can be opened and read inside the app instead of only being counted. |
+| **Sort your list any way you like** | Sort the contact list by email, company or contact person, either direction, by when it was imported, or with the addresses that need attention at the top. |
+| **Work while it works** | Importing a large spreadsheet checks every domain's mail server in the background. You can set up your email account or write your message while it runs. |
 | **Spam score before you send** | Warns you about wording, links and attachments that trigger filters. |
 | **One-click unsubscribe** | Adds the standard header that puts an Unsubscribe button in Gmail and Outlook, and providers reward this. |
 | **A record of everything sent** | The **Sent emails** page lists every message that went out with the time, the subject used and whether it was answered, bounced or failed, and exports it back to Excel so your master list stays current. |

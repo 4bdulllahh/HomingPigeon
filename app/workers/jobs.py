@@ -52,7 +52,14 @@ def read_preview(path: Path, sheet: str | None):
 
 
 class ImportWorker(Worker):
-    """Import a prepared DataFrame, optionally checking every domain's MX record."""
+    """Import a prepared DataFrame, optionally checking every domain's MX record.
+
+    Two phases, and the split matters. Phase one asks DNS about every distinct
+    domain in the sheet; that is the slow part, and it touches no database.
+    Phase two writes the rows in short committed batches. Together they mean the
+    import never holds SQLite's single write lock while waiting on the network,
+    so the rest of the app stays usable and responsive throughout.
+    """
 
     def __init__(self, dataframe, mapping: importer.ColumnMapping, source_file: str,
                  check_mx: bool):
@@ -63,12 +70,25 @@ class ImportWorker(Worker):
         self.check_mx = check_mx
 
     def work(self) -> importer.ImportResult:
+        answers: dict[str, bool] = {}
+        if self.check_mx and self.mapping.email:
+            domains = importer.domains_in(self.dataframe, self.mapping.email)
+
+            def dns_progress(done: int, total: int) -> None:
+                self.report(done, max(total, 1),
+                            f"Checking mail servers: {done:,} of {total:,} domains")
+
+            answers = importer.resolve_domains(
+                domains, progress=dns_progress, cancelled=lambda: self.cancelled)
+            if self.cancelled:
+                return importer.ImportResult(total_rows=len(self.dataframe))
+
         def progress(done: int, total: int) -> None:
-            self.report(done, total, f"Checked {done:,} of {total:,} rows")
+            self.report(done, total, f"Saving contacts: {done:,} of {total:,} rows")
 
         return importer.import_dataframe(
             self.dataframe, self.mapping, source_file=self.source_file,
-            check_mx=self.check_mx, progress=progress)
+            check_mx=self.check_mx, progress=progress, mx_answers=answers)
 
 
 def export_contacts(path: str | Path) -> Path:
@@ -91,9 +111,15 @@ def score_content(content: composer.Content, sender_email: str, reply_to: str,
 
 
 def build_preview(identity: composer.SenderIdentity, context: dict, content: composer.Content,
-                  index: int) -> tuple[str, str, str]:
-    return composer.preview_message(identity, context, content, subject_index=index,
-                                    body_index=index, seed=index)
+                  subject_index: int, body_index: int, seed: int) -> tuple[str, str, str]:
+    """Render one combination. The subject and the body are chosen separately.
+
+    They used to share a single index, so subject 2 could only ever appear with
+    body 2. Pairing them like that also meant a single body variant pinned the
+    body forever, which read as the preview being stuck.
+    """
+    return composer.preview_message(identity, context, content, subject_index=subject_index,
+                                    body_index=body_index, seed=seed)
 
 
 # --- Updates ----------------------------------------------------------------

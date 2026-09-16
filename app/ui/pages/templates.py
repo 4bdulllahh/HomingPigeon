@@ -1,6 +1,8 @@
 """Templates: several subjects and bodies, a signature, a live preview and the spam score."""
 from __future__ import annotations
 
+import random
+
 import tempfile
 import webbrowser
 from pathlib import Path
@@ -23,35 +25,96 @@ from app.workers.base import Task
 # Examples are never filled in automatically. The app starts blank and these are
 # only inserted when the user presses "Show me an example".
 EXAMPLE_SUBJECTS = [
-    "{A quick question|Quick question} about {{Company}}",
-    "{Introducing|A short introduction to} our services for {{Company}}",
-    "Would this be useful for {{Company}}?",
+    "{Quick question|A question} about {{Company}}'s suppliers",
+    "{An introduction|Introducing us} to the team at {{Company}}",
+    "{Worth a look|Might be useful} for the team at {{Company}}?",
+    "{{FirstName}}, {could this help|is this useful to} {{Company}}?",
 ]
 
-EXAMPLE_BODY = """<p>{Hi|Hello} {{FirstName}},</p>
+# Three bodies, each 100 to 160 words, all in sentence case with one link and no
+# promotional wording. Read scorer.py before editing: length, trigger phrases,
+# capitals, exclamation marks and link count are all measured.
+EXAMPLE_BODIES = [
+    """<p>{Hi|Hello} {{FirstName}},</p>
 
-<p>{I hope your week is going well.|Hope you are having a productive week.|I hope this finds you well.}</p>
+<p>{I hope your week is going well.|Hope you are having a productive week.|I hope this finds
+you well.} I am [Your Name] from <strong>[Your Company]</strong>, {based in|working out of}
+[your city].</p>
 
-<p>I am reaching out from <strong>[Your Company]</strong>. We help businesses like {{Company}} with
-[describe what you do in one sentence].</p>
+<p>We work with {businesses|companies|firms} like {{Company}} on
+[describe what you do in one sentence]. {Most of the teams we speak to|Most companies we work
+with} come to us because [the problem you solve], and we take that off their hands entirely.</p>
 
-<p>We handle the whole process:</p>
+<p>Here is what that usually covers:</p>
 
 <ul>
-  <li>[First thing you offer]</li>
-  <li>[Second thing you offer]</li>
-  <li>[Third thing you offer]</li>
+  <li>[First thing you handle, and what it saves them]</li>
+  <li>[Second thing you handle]</li>
+  <li>[Third thing you handle]</li>
 </ul>
 
-<p>Would you be open to a short call this week?</p>"""
+<p>{If any of that sounds relevant|If that lines up with what you need}, I am happy to send
+over {a short summary|the details} or {arrange|set up} a {fifteen minute|short} call at a time
+that suits you. {Either way, thank you for reading.|Either way, I appreciate your time.}</p>""",
+
+    """<p>{Good morning|Hello} {{FirstName}},</p>
+
+<p>{I came across|I was reading about} {{Company}} {this week|recently} and thought it was
+worth {getting in touch|reaching out}.</p>
+
+<p>{My name is|I am} [Your Name] and I look after [your role] at <strong>[Your
+Company]</strong>. We help {businesses|organisations} in [your industry] with
+[describe what you do in one sentence], and we have been doing it for [number] years.</p>
+
+<p>{The reason I am writing|What made me write} is that {companies|teams} at your stage
+usually run into [the problem you solve]. {We handle that end to end|We take care of that from
+start to finish}, which means:</p>
+
+<ul>
+  <li>[The main result they get]</li>
+  <li>[The second result they get]</li>
+  <li>[Something that makes you different]</li>
+</ul>
+
+<p>You can read more about how we work at <a href="https://www.example.com">our website</a>.
+{If it would help to talk it through|If you would like to hear more}, {just reply to this
+message|reply whenever suits you} and I will {send over the details|follow up with more}.</p>""",
+
+    """<p>{Hi|Hello} {{FirstName}},</p>
+
+<p>{A short note|A quick note} from [your city]. I am [Your Name] at <strong>[Your
+Company]</strong>, and we {work with|support} {businesses|companies} like {{Company}} on
+[describe what you do in one sentence].</p>
+
+<p>{I will keep this brief|I will keep it short}. {Most of the people I speak to in|Most teams
+in} [their industry] tell me the same thing: [the problem you solve]. {That is the part we
+take on|That is exactly what we handle}, and it usually means:</p>
+
+<ul>
+  <li>[What changes for them first]</li>
+  <li>[What it saves them, in time or money]</li>
+  <li>[What they no longer have to think about]</li>
+</ul>
+
+<p>{We have done this for|We already do this for} [number] {businesses|companies} in [your
+region], and I would be glad to {walk you through|talk you through} what it looked like for
+them.</p>
+
+<p>{Would a short call next week be useful|Is a short call next week worth arranging}?
+{If the timing is wrong, no problem at all.|If now is not the moment, that is completely
+fine.}</p>""",
+]
+
+# Kept for anything that still expects a single example body
+EXAMPLE_BODY = EXAMPLE_BODIES[0]
 
 EXAMPLE_SIGNATURE = """<p style="margin-top:20px;">
   <strong>[Your Name]</strong><br>
-  <span style="color:#555555;">[Your Company] &mdash; [what you do]</span><br>
-  <strong>Phone:</strong> [your phone number]<br>
+  <span style="color:#555555;">[Your job title], [Your Company]</span><br>
+  <strong>Phone:</strong> +000 0 000 0000<br>
   <strong>Email:</strong> [your email address]<br>
-  <strong>Web:</strong> <a href="https://www.example.com">[your website]</a><br>
-  <em>[Your city and country]</em>
+  <strong>Web:</strong> <a href="https://www.example.com">www.example.com</a><br>
+  <em>[Street address, city, country]</em>
 </p>"""
 
 EMPTY_HINT = ("Nothing here yet.\n\n"
@@ -197,6 +260,8 @@ class TemplatesPage(Page):
         self.body_editors: list[VariantEditor] = []
         self._set_id: int | None = None
         self._preview_index = 0
+        self._subject_pick = 0
+        self._body_pick = 0
         self._preview_html = ""
 
         self.add_header(
@@ -384,14 +449,20 @@ class TemplatesPage(Page):
         for text in EXAMPLE_SUBJECTS:
             self._add_subject(text)
         self._content_changed()
-        self.notify("Example subject lines added. Edit them to suit your business",
-                    "info", 6000)
+        self.notify(f"{len(EXAMPLE_SUBJECTS)} example subject lines added. Edit them to suit "
+                    f"your business", "info", 6000)
 
     def _example_body(self) -> None:
-        self._add_body(EXAMPLE_BODY)
+        """Add all three examples, not one.
+
+        One body is a finding in its own right: identical bodies sent in volume
+        are the easiest thing in the world to fingerprint, and the score says so.
+        """
+        for html in EXAMPLE_BODIES:
+            self._add_body(html)
         self._content_changed()
-        self.notify("Example message added. Replace the [square brackets] with your own words",
-                    "info", 6000)
+        self.notify(f"{len(EXAMPLE_BODIES)} example messages added. Replace the "
+                    f"[square brackets] with your own words", "info", 6000)
 
     # --- preview ------------------------------------------------------------
     def _build_preview(self) -> QWidget:
@@ -401,13 +472,18 @@ class TemplatesPage(Page):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
+        next_button = secondary_button("Next contact", self._next_contact, 140)
+        next_button.setToolTip("Another recipient, with a different subject and message "
+                               "drawn from your lists")
         layout.addWidget(row(
             primary_button("Refresh preview", self.refresh_preview, 160),
-            secondary_button("Next contact", self._next_contact, 140),
+            next_button,
             secondary_button("Open in browser", self._open_in_browser, 160), None))
 
         self.preview_contact = muted("", wrap=False)
         layout.addWidget(self.preview_contact)
+        self.preview_variant = hint("", wrap=False)
+        layout.addWidget(self.preview_variant)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
@@ -452,8 +528,26 @@ class TemplatesPage(Page):
                     "person": "Mr. Ahmed Khan", "extra_json": None}
         return merge.as_mapping(rows[self._preview_index % len(rows)])
 
+    @staticmethod
+    def _another(current: int, count: int) -> int:
+        """A different index from ``current``, at random, for a list of ``count``.
+
+        Random alone repeats itself often enough that pressing the button twice
+        can show the same variant, which looks broken. Stepping on when the draw
+        collides keeps every press visibly different, and that is also how
+        VariantCycler behaves during a real send.
+        """
+        if count <= 1:
+            return 0
+        choice = random.randrange(count)
+        return (current + 1) % count if choice == current % count else choice
+
     def _next_contact(self) -> None:
+        """Show the next recipient, with a freshly drawn subject and body."""
         self._preview_index += 1
+        content = self.current_content()
+        self._subject_pick = self._another(self._subject_pick, len(content.subject_variants))
+        self._body_pick = self._another(self._body_pick, len(content.body_variants))
         self.refresh_preview()
 
     def current_content(self) -> composer.Content:
@@ -484,6 +578,7 @@ class TemplatesPage(Page):
         if not content.subject_variants or not content.body_variants:
             self.preview_subject.setText("Add at least one subject and one body")
             self.preview_body.setPlainText("")
+            self.preview_variant.setText("")
             return
 
         contact = self._sample_contact()
@@ -494,10 +589,19 @@ class TemplatesPage(Page):
             f"Previewing as: {contact.get('person') or '-'} · "
             f"{contact.get('company') or '-'} · {contact.get('email')}")
 
+        # The pick is held on the page rather than drawn here, so editing the
+        # text refreshes the same combination instead of shuffling under the
+        # cursor on every keystroke. Only "Next contact" draws again.
+        subject_index = self._subject_pick % len(content.subject_variants)
+        body_index = self._body_pick % len(content.body_variants)
+        self.preview_variant.setText(
+            f"Subject {subject_index + 1} of {len(content.subject_variants)}  ·  "
+            f"Message {body_index + 1} of {len(content.body_variants)}")
+
         # Rendering and scoring both parse the whole message; neither belongs on
         # the UI thread while the user is still typing.
-        Task(jobs.build_preview, identity, context, content, self._preview_index).start(
-            on_result=self._show_preview)
+        Task(jobs.build_preview, identity, context, content, subject_index, body_index,
+             self._preview_index).start(on_result=self._show_preview)
 
         dns_results = None
         page = self.window_.page("deliverability")

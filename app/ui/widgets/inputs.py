@@ -140,15 +140,32 @@ def update_completer(widget: QLineEdit, options: list[str]) -> None:
 
 
 class _WheelGuard(QObject):
-    """Stops the wheel from changing a combo box that merely has the pointer over it."""
+    """Stops the wheel from changing a combo box that merely has the pointer over it.
+
+    One guard for the whole application, owned by the application object. It
+    used to be parented to whichever widget happened to ask for it first, and
+    the cached Python reference outlived that widget: the next combo box built
+    after the owner was destroyed got handed a dead wrapper and Qt raised
+    "wrapped C/C++ object of type _WheelGuard has been deleted". Changing the
+    text size destroys every page, so this happened routinely.
+    """
 
     _instance: "_WheelGuard | None" = None
 
     @classmethod
     def instance(cls, parent: QWidget) -> "_WheelGuard":
-        if cls._instance is None:
-            cls._instance = _WheelGuard(parent.window() or parent)
-        return cls._instance
+        guard = cls._instance
+        if guard is not None:
+            try:
+                guard.objectName()      # touching a deleted wrapper raises
+            except RuntimeError:
+                guard = cls._instance = None
+        if guard is None:
+            from PyQt6.QtWidgets import QApplication
+
+            owner = QApplication.instance() or parent.window() or parent
+            guard = cls._instance = _WheelGuard(owner)
+        return guard
 
     def eventFilter(self, obj, event):  # noqa: N802 - Qt naming
         from PyQt6.QtCore import QEvent
