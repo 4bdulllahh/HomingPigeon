@@ -38,10 +38,15 @@ next to it. Once the app is installed you can delete the whole folder.
 **If Windows shows a warning:**
 
 - **"Windows protected your PC"**: click **More info**, then **Run anyway**.
-- **"Part of this app has been blocked"** (Smart App Control, on some Windows 11 PCs): close the
-  message and double-click **`Install HomingPigeon (if Setup is blocked).bat`** in the same
-  folder instead. It downloads Python from python.org using Windows' own tools, checks it, and
-  opens exactly the same Setup window.
+- **"Smart App Control blocked an app that may be unsafe"** (some Windows 11 PCs): close the
+  message and use the backup installer in the same folder instead. Right-click
+  **`Install HomingPigeon (if Setup is blocked).bat`** → **Properties** → tick **Unblock** at the
+  bottom of the first tab → **OK**, then double-click it. The Unblock tick matters: without it
+  Windows blocks the `.bat` as well. The backup installer downloads Python from python.org using
+  Windows' own tools, checks it, and opens exactly the same Setup window.
+
+  You can do this once for everyone: tick **Unblock** on the downloaded **`.zip`** the same way
+  *before* you extract it, and nothing inside needs unblocking afterwards.
 
 **Updating:** download the newest release and run its Setup. Your contacts, templates and settings
 are kept.

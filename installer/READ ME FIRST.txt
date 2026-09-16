@@ -23,16 +23,26 @@ Windows shows this for new programs it hasn't seen many times before.
 Click  More info , then  Run anyway .
 
 
-"PART OF THIS APP HAS BEEN BLOCKED" (Smart App Control)?
+"SMART APP CONTROL BLOCKED AN APP THAT MAY BE UNSAFE"?
 
 Some Windows 11 computers block new programs completely. No problem:
-close the message and double-click
+close the message and use the backup installer instead.
 
-    Install HomingPigeon (if Setup is blocked).bat
+    1. Right-click  Install HomingPigeon (if Setup is blocked).bat
+    2. Choose  Properties
+    3. At the bottom of the first tab, tick  Unblock , then click  OK
+    4. Double-click the .bat file
 
-instead. It downloads Python from python.org using Windows' own tools, checks
-the download is genuine, and then opens exactly the same Setup window.
-Leave the "files" folder next to it - it needs it.
+Step 3 is the important one. Without it Windows blocks the .bat too, and says
+"files of this type from the internet can be dangerous". Ticking Unblock tells
+Windows you fetched this file on purpose. It changes nothing else on your PC.
+
+The backup installer downloads Python from python.org using Windows' own
+tools, checks the download is genuine, and then opens exactly the same Setup
+window. Leave the "files" folder next to it - it needs it.
+
+Shortcut: tick Unblock on the downloaded .zip file itself, the same way,
+BEFORE you extract it. Then nothing inside needs unblocking one by one.
 
 
 UPDATING
