@@ -354,25 +354,80 @@ def test_clicking_blank_space_lets_go_of_the_selection(qt_app, store):
 
 
 # --- installer --------------------------------------------------------------
-def test_version_resource_is_a_well_formed_tree():
-    """Windows rejects the whole resource if a node's length is wrong."""
+def test_the_named_copy_of_python_is_left_byte_for_byte_identical():
+    """HomingPigeon.exe has to stay a plain copy, so python.org's signature holds.
+
+    An earlier version rewrote the copy's version resource, which fixed the
+    description column in Task Manager and invalidated its Authenticode
+    signature at the same time. A file carrying a signature that no longer
+    checks out looks worse to Windows and to antivirus than a file that was
+    never signed, so the copy is now left exactly as python.org shipped it.
+    """
     import importlib.util
-    import struct
+    import shutil
+    import subprocess
+    import sys
+    import tempfile
     from pathlib import Path as _Path
 
-    spec = importlib.util.spec_from_file_location(
-        "setup_app_probe",
-        _Path(__file__).resolve().parent.parent / "installer" / "setup_app.py")
+    path = _Path(__file__).resolve().parent.parent / "installer" / "setup_app.py"
+    spec = importlib.util.spec_from_file_location("setup_app_probe", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    data = module.version_resource({"FileDescription": "HomingPigeon"}, (0, 4, 1, 0))
-    length, value_length, kind = struct.unpack("<HHH", data[:6])
-    assert length == len(data)          # the root covers everything
-    assert value_length == 52           # VS_FIXEDFILEINFO
-    assert kind == 0                    # binary value
-    assert struct.unpack("<L", data[40:44])[0] == 0xFEEF04BD
-    assert "HomingPigeon".encode("utf-16-le") in data
+    for gone in ("stamp_version", "version_resource"):
+        assert not hasattr(module, gone), f"{gone} is back, and it breaks the signature"
+    assert "UpdateResourceW" not in path.read_text(encoding="utf-8")
+
+    # Stand in for the "prove it runs" check: a bare copy of python.exe in an
+    # empty folder has no DLLs beside it, so it could not start here anyway.
+    class Finished:
+        returncode = 0
+        stderr = b""
+
+    class FakeSubprocess:
+        TimeoutExpired = subprocess.TimeoutExpired
+
+        @staticmethod
+        def run(*_args, **_kwargs):
+            return Finished()
+
+    real = module.subprocess
+    module.subprocess = FakeSubprocess
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            python_dir = _Path(tmp) / "python"
+            python_dir.mkdir()
+            shutil.copy2(sys.executable, python_dir / "pythonw.exe")
+            before = (python_dir / "pythonw.exe").read_bytes()
+
+            made = module.build_named_exe(_Path(tmp))
+
+            assert made.name == "HomingPigeon.exe", "the shortcuts lost the app's name"
+            assert made.read_bytes() == before, "something wrote into the copy"
+    finally:
+        module.subprocess = real
+
+
+def test_the_installer_is_built_as_one_folder_and_never_upx_packed():
+    """A one-file build is what Defender's model read as a dropper.
+
+    "HomingPigeon Setup.exe" was detected as Trojan:Win32/Wacatac.B!ml on
+    download. A one-file build is a small stub followed by megabytes of
+    compressed data, which is structurally what a self-extracting dropper is,
+    and none of the strings showing what it actually does survive the packing.
+    UPX packing would make it worse again, so it is refused explicitly rather
+    than left to depend on whether the build machine happens to have UPX.
+    """
+    from pathlib import Path as _Path
+
+    source = (_Path(__file__).resolve().parent.parent
+              / "tools" / "build_installer.py").read_text(encoding="utf-8")
+    command = source[source.index("command = ["):source.index("str(ROOT / \"installer\"")]
+    assert '"--onedir"' in command
+    assert '"--noupx"' in command
+    assert '"--onefile"' not in command, "back to a one-file build"
+    assert '"--contents-directory"' in command
 
 
 # --- sidebar ----------------------------------------------------------------

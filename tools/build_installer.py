@@ -4,16 +4,21 @@
     python tools/build_installer.py
 
 Output:
-    dist/HomingPigeon Setup.exe
-    dist/HomingPigeon-v0.2.zip, containing:
+    dist/HomingPigeon Setup/                            the installer, one folder
+    dist/HomingPigeon-vX.Y.Z.zip, containing:
         HomingPigeon Setup.exe                          the installer (app files packed inside)
+        runtime/                                        the installer's own Python and Tk
         Install HomingPigeon (if Setup is blocked).bat  backup for Smart App Control PCs
         READ ME FIRST.txt
         files/                                          app files used by the backup installer
 
-Setup.exe carries its own copy of the app files, so it works even when run straight
-from the zip without extracting. It downloads Python and the add-ons on the user's
-computer (see installer/setup_app.py).
+Setup.exe carries its own copy of the app files, and downloads Python and the
+add-ons on the user's computer (see installer/setup_app.py).
+
+The zip has to be extracted before Setup runs, because Setup.exe needs the
+runtime folder next to it. That is the price of not shipping a one-file build,
+which Defender's machine learning classifier reads as a dropper. Both READ ME
+FIRST.txt and the README say to extract first.
 """
 from __future__ import annotations
 
@@ -107,7 +112,15 @@ def main() -> int:
     command = [
         sys.executable, "-m", "PyInstaller",
         "--name", EXE_NAME,
-        "--onefile", "--windowed", "--clean", "--noconfirm",
+        # A one-folder build on purpose, not one file. A one-file build is a
+        # small stub followed by megabytes of compressed data, which is the
+        # shape of a self-extracting dropper: Microsoft Defender's machine
+        # learning model called it Trojan:Win32/Wacatac.B!ml on download, and
+        # none of the readable strings that show what it really does survive
+        # the compression. One folder keeps the DLLs as ordinary files and the
+        # .exe small and legible. --noupx in case a build machine has UPX.
+        "--onedir", "--contents-directory", "runtime", "--noupx",
+        "--windowed", "--clean", "--noconfirm",
         "--icon", str(ROOT / "assets" / "icon.ico"),
         "--version-file", str(version_file(version)),
         "--add-data", f"{payload};payload",
@@ -124,18 +137,31 @@ def main() -> int:
         print("\nBuild failed.")
         return 1
 
-    exe = DIST / f"{EXE_NAME}.exe"
+    bundle = DIST / EXE_NAME
+    exe = bundle / f"{EXE_NAME}.exe"
+    if not exe.exists():
+        print(f"\nThe build reported success but {exe} is not there.")
+        return 1
+    (DIST / f"{EXE_NAME}.exe").unlink(missing_ok=True)  # leftover one-file build
+
     archive = DIST / f"HomingPigeon-{version}.zip"
     readme = (ROOT / "installer" / "READ ME FIRST.txt").read_text(encoding="utf-8")
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.write(exe, exe.name)
+        # Setup.exe goes at the top of the zip with its runtime folder beside it,
+        # so what the user double-clicks is still the first thing they see.
+        for path in sorted(bundle.rglob("*")):
+            if path.is_file():
+                zf.write(path, path.relative_to(bundle))
         zf.writestr("Install HomingPigeon (if Setup is blocked).bat", backup_installer())
         zf.writestr("READ ME FIRST.txt", readme.replace("{version}", version).replace("\n", "\r\n"))
         for path in sorted(payload.rglob("*")):
             if path.is_file():
                 zf.write(path, Path("files") / path.relative_to(payload))
 
-    print(f"\nSetup:   {exe}  ({exe.stat().st_size / 1_048_576:.1f} MB)")
+    packed = sum(p.stat().st_size for p in bundle.rglob("*") if p.is_file())
+    print(f"\nSetup:   {bundle}"
+          f"\n         {exe.name} is {exe.stat().st_size / 1_048_576:.1f} MB, "
+          f"{packed / 1_048_576:.1f} MB with its runtime folder")
     print(f"Release: {archive}  ({archive.stat().st_size / 1_048_576:.1f} MB)")
     print("Upload the .zip to a GitHub Release.")
     return 0

@@ -12,6 +12,10 @@ That's it. Setup downloads what the app needs (about 80 MB) and shows you
 every step while it works. It takes about 2-5 minutes and needs an internet
 connection. No administrator password is needed.
 
+Keep the extracted folder together while you install. Setup.exe uses the
+"runtime" and "files" folders sitting next to it, so please don't drag it out
+on its own. Once the app is installed you can delete the whole folder.
+
 
 "WINDOWS PROTECTED YOUR PC"?
 

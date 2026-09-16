@@ -33,7 +33,6 @@ import os
 import queue
 import re
 import shutil
-import struct
 import subprocess
 import sys
 import tempfile
@@ -209,100 +208,18 @@ def special_folder(name: str) -> Path:
 CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 
 
-def smart_app_control_on() -> bool:
-    """True when Windows Smart App Control is enforcing or evaluating.
-
-    It refuses to run an executable whose Authenticode signature does not check
-    out, which includes a copy of pythonw.exe whose version resource has been
-    rewritten. Where it is on, the app keeps the plain (still signed) copy.
-    """
-    try:
-        import winreg
-
-        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
-                            r"SYSTEM\CurrentControlSet\Control\CI\Policy") as key:
-            return int(winreg.QueryValueEx(key, "VerifiedAndReputablePolicyState")[0]) != 0
-    except (OSError, ValueError, TypeError):
-        return False
-
-
-def _pad4(data: bytes) -> bytes:
-    return data + b"\0" * (-len(data) % 4)
-
-
-def _version_node(key: str, value: bytes = b"", text: bool = False,
-                  children: list | None = None) -> bytes:
-    """One node of a VS_VERSIONINFO tree, as documented for the resource format.
-
-    Every node is: lengths, a null-terminated UTF-16 key, padding to a 32-bit
-    boundary, the value, more padding, then the children.
-    """
-    children = children or []
-    joined = b"".join(_pad4(c) for c in children[:-1]) + (children[-1] if children else b"")
-    key_bytes = key.encode("utf-16-le") + b"\0\0"
-    head = 6 + len(key_bytes)
-    pad1 = b"\0" * (-head % 4)
-    pad2 = b"\0" * (-(head + len(pad1) + len(value)) % 4) if joined else b""
-    total = head + len(pad1) + len(value) + len(pad2) + len(joined)
-    value_len = (len(value) // 2) if text else len(value)
-    return (struct.pack("<HHH", total, value_len, 1 if text else 0)
-            + key_bytes + pad1 + value + pad2 + joined)
-
-
-def version_resource(strings: dict, numbers: tuple) -> bytes:
-    ms = (numbers[0] << 16) | numbers[1]
-    ls = (numbers[2] << 16) | numbers[3]
-    fixed = struct.pack("<13L", 0xFEEF04BD, 0x00010000, ms, ls, ms, ls,
-                        0x3F, 0, 0x00040004, 1, 0, 0, 0)
-    entries = [_version_node(name, text.encode("utf-16-le") + b"\0\0", True)
-               for name, text in strings.items()]
-    table = _version_node("040904B0", children=entries)
-    string_info = _version_node("StringFileInfo", children=[table])
-    translation = _version_node("Translation", struct.pack("<HH", 0x0409, 0x04B0))
-    var_info = _version_node("VarFileInfo", children=[translation])
-    return _version_node("VS_VERSION_INFO", fixed, False, [string_info, var_info])
-
-
-def stamp_version(path: Path, version: str) -> None:
-    """Give a copy of pythonw.exe HomingPigeon's name in its version resource."""
-    numbers = tuple(([int(n) for n in version.split(".") if n.isdigit()] + [0, 0, 0, 0])[:4])
-    data = version_resource({
-        "CompanyName": PUBLISHER,
-        "FileDescription": APP_NAME,
-        "FileVersion": version,
-        "InternalName": APP_NAME,
-        "LegalCopyright": "Python runtime (c) Python Software Foundation",
-        "OriginalFilename": f"{APP_NAME}.exe",
-        "ProductName": APP_NAME,
-        "ProductVersion": version,
-    }, numbers)
-
-    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    k32.BeginUpdateResourceW.restype = ctypes.c_void_p
-    k32.BeginUpdateResourceW.argtypes = [ctypes.c_wchar_p, ctypes.c_bool]
-    k32.UpdateResourceW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_wchar_p,
-                                    ctypes.c_uint16, ctypes.c_void_p, ctypes.c_uint32]
-    k32.EndUpdateResourceW.argtypes = [ctypes.c_void_p, ctypes.c_bool]
-
-    handle = k32.BeginUpdateResourceW(str(path), False)
-    if not handle:
-        raise OSError("the executable could not be opened for naming")
-    buffer = ctypes.create_string_buffer(data, len(data))
-    written = k32.UpdateResourceW(handle, ctypes.c_wchar_p(16), ctypes.c_wchar_p(1), 0x0409,
-                                  ctypes.cast(buffer, ctypes.c_void_p), len(data))
-    if not k32.EndUpdateResourceW(handle, not written) or not written:
-        raise OSError("the name could not be written")
-
-
-def build_named_exe(install_dir: Path, version: str = "", log=None) -> Path:
+def build_named_exe(install_dir: Path, log=None) -> Path:
     """Make python/HomingPigeon.exe, the program the shortcuts point at.
 
     Task Manager names a running program after its executable, so launching the
     app through pythonw.exe listed it as "python", which is alarming if you are
-    checking what is running on your computer. A copy under the app's own name
-    fixes the process name everywhere; rewriting the copy's version resource
-    also fixes the description, but breaks its signature, so that step is
-    skipped where Smart App Control would then refuse to run it.
+    checking what is running on your computer. A plain copy under the app's own
+    name fixes that everywhere and keeps python.org's signature intact.
+
+    Nothing is written into the copy. An earlier version rewrote its version
+    resource to fix the description column too, which invalidated that
+    signature; an executable whose signature no longer checks out looks worse
+    to Windows and to antivirus than one that was never signed.
     """
     source = install_dir / "python" / "pythonw.exe"
     target = install_dir / "python" / f"{APP_NAME}.exe"
@@ -312,15 +229,6 @@ def build_named_exe(install_dir: Path, version: str = "", log=None) -> Path:
     if target.exists():
         target.unlink()
     shutil.copy2(source, target)  # a plain copy keeps python.org's signature valid
-
-    if version and not smart_app_control_on():
-        try:
-            stamp_version(target, version)
-        except OSError as error:
-            if log:
-                log(f"  keeping the plain copy ({error})")
-    elif log:
-        log("  Smart App Control is on, so the copy is left signed and unmodified.")
 
     # Never hand the user a program that will not start: prove it runs first.
     try:
@@ -840,8 +748,7 @@ class InstallJob(Job):
         self.log(f"Creating {APP_NAME}.exe, so the app runs under its own name "
                  f"rather than Python's.")
         try:
-            started = build_named_exe(self.install_dir, read_version(self.install_dir) or "",
-                                      log=self.log)
+            started = build_named_exe(self.install_dir, log=self.log)
             self.log(f"  the app will start from {started.name}")
         except OSError as error:
             # Cosmetic only. The shortcuts fall back to pythonw.exe
