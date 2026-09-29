@@ -244,7 +244,7 @@ class SettingsPage(Page):
         self.update_button = primary_button("Check for updates", self._check_updates, 190)
         self.update_status = muted("", wrap=False)
         self._put(control, row(self.update_button, self.update_status, None))
-        self.download_button = confirm_button("Download the new version", None, 250)
+        self.download_button = confirm_button("Update now", None, 200)
         self.download_button.setVisible(False)
         self._put(control, self.download_button)
 
@@ -271,16 +271,15 @@ class SettingsPage(Page):
                 "Couldn't check right now. Are you connected to the internet?")
             set_tone(self.update_status, "warning")
             return
-        tag, url = result
-        if maintenance.is_newer(tag, config.APP_VERSION):
-            self.update_status.setText(f"Version {tag} is available!")
+        if maintenance.is_newer(result.tag, config.APP_VERSION):
+            self.update_status.setText(f"Version {result.tag} is available!")
             set_tone(self.update_status, "success")
             try:
                 self.download_button.clicked.disconnect()
             except TypeError:
                 pass
             self.download_button.clicked.connect(
-                lambda _checked=False: open_url(url or f"{config.REPO_URL}/releases"))
+                lambda _checked=False: self.window_.offer_update(result))
             self.download_button.setVisible(True)
         else:
             self.update_status.setText("You have the latest version.")
