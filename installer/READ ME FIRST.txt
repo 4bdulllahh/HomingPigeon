@@ -47,8 +47,11 @@ BEFORE you extract it. Then nothing inside needs unblocking one by one.
 
 UPDATING
 
-Download the newest release and run its Setup the same way. Your contacts,
-templates and settings are kept.
+HomingPigeon updates itself. When a new version is out, a popup appears as
+you open the app: click "Update now" and it downloads the update, installs it
+and opens again by itself. Your contacts, templates and settings are kept.
+
+You can also download the newest release and run its Setup the same way.
 
 
 REMOVING
