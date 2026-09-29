@@ -11,9 +11,70 @@ company domain blacklisted.
 
 HomingPigeon does the things that normally go wrong: it checks that your domain is set up
 correctly, cleans your contact list before you send, makes every message slightly different,
-sends at a human pace, and quietly removes addresses that bounce.
+sends at a human pace, and quietly removes addresses that bounce. It runs on your own computer,
+and your contacts never leave it.
 
-> **Free while in beta (v0.5.1).** Please report anything confusing or broken.
+**Download:** [latest release](../../releases/latest) · **Version:** 0.6.0 (free beta) ·
+**Works on:** Windows, Mac and Linux
+
+![The HomingPigeon dashboard: emails sent today, sendable contacts, replies and bounce rate, sending health checks, the current campaign and recent activity](docs/screenshots/home-dark.png)
+
+> **Free while in beta.** Please [report anything confusing or broken](../../issues/new).
+
+## Features
+
+- **Updates itself.** When you open the app it checks for a new version. If there is one, a
+  popup offers **Update now** or **Update later**. Update now downloads it, checks it is genuine,
+  installs it and opens the app again, and your contacts, templates and settings are kept.
+- **A setup guide that ticks itself off.** The **Start here** page walks you through every step
+  in plain English and marks each one done from the real state of the app, so you always know
+  what is left.
+- **Domain check, with SPF, DKIM and DMARC generators.** These settings at your domain provider
+  prove your email is really from you. Without them your mail is filtered no matter how good it
+  is, and Gmail and Yahoo now require them. The app checks yours and writes the records for you.
+- **Contact list cleaning on import.** Open an Excel or CSV file and the app finds the email,
+  company and contact columns by itself, then removes duplicates, invalid addresses and domains
+  with no mail server before anything is sent. Dead addresses bounce, and bounces are the
+  fastest way to get blacklisted.
+- **Several subjects and messages.** Write a few versions of each, use tags like
+  `{{FirstName}}` and `{{Company}}`, and the app picks a different combination for each person,
+  so hundreds of identical emails never go out.
+- **Spam score before you send.** A live preview shows exactly what one contact will receive,
+  with a score out of 100 and plain-English advice on wording, links and attachments that
+  trigger filters.
+- **A warm-up ramp.** Starts at about 20 emails a day and increases over several weeks. A
+  brand-new sender suddenly sending hundreds looks like a hacked account.
+- **Human pacing.** A random delay between emails (you set the minimum and maximum), office
+  hours only, weekdays only and public holidays skipped. A fixed interval at 3am is an obvious
+  sign of automation.
+- **An automatic stop.** Sending halts by itself if too many emails start failing, before real
+  damage is done to your domain.
+- **Bounce and unsubscribe handling.** The app reads your inbox and permanently removes anyone
+  who bounced or asked to be removed. Every email also carries the standard one-click
+  unsubscribe header, which puts an Unsubscribe button in Gmail and Outlook.
+- **An inbox you can read.** The **My inbox** page keeps every message the check read, so
+  replies, bounces and opt-outs can be opened inside the app instead of only being counted.
+- **A record of everything sent.** The **Sent emails** page lists every message with the time,
+  the subject used and whether it was answered, bounced or failed, and exports it back to Excel
+  so your master list stays current.
+- **Work while it works.** Importing a large spreadsheet checks every domain in the background,
+  so you can set up your account or write your message at the same time.
+- **Easy to read.** Dark, light or match-your-computer themes, five text sizes, high contrast
+  and bold text, and your choice of date and time format.
+- **Backups.** Save everything to one file and restore it later, on this computer or a new one.
+
+## Screenshots
+
+| | |
+|---|---|
+| ![The Contacts page listing imported contacts with company, contact person, status, source file and extra spreadsheet columns](docs/screenshots/contacts-dark.png) | ![The Templates page previewing one personalised email next to its spam score of 82 and advice for improving it](docs/screenshots/templates-dark.png) |
+| **My contacts.** Your imported list, searchable and sortable, with every column from your spreadsheet. | **My message.** A live preview for a real contact, next to the spam score and what to fix. |
+| ![The Sent emails page with a table of every email sent, its outcome and the subject used](docs/screenshots/sent-dark.png) | ![The My inbox page with two replies and one bounce, each labelled](docs/screenshots/inbox-dark.png) |
+| **Sent emails.** Every message that went out, and what came back. Exports to Excel. | **My inbox.** Replies, bounces and opt-outs, readable inside the app. |
+| ![The Deliverability page building an SPF record from a list of email services](docs/screenshots/deliverability-dark.png) | ![The Send page with its before-you-send checklist, counters and the Start Emailing button](docs/screenshots/send-dark.png) |
+| **Domain check.** Checks your domain and writes SPF, DMARC and DKIM records for you. | **Send emails.** A checklist first, then sending at a human pace that you can pause any time. |
+| ![The update popup saying a new version is available, with Update later and Update now buttons](docs/screenshots/update-popup.png) | ![The dashboard in the light theme](docs/screenshots/home-light.png) |
+| **Automatic updates.** One click to update; the app reopens by itself. | **Light theme.** Or dark, or match your computer, at five text sizes. |
 
 ---
 
@@ -21,7 +82,7 @@ sends at a human pace, and quietly removes addresses that bounce.
 
 You don't need to know anything about coding.
 
-1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.5.1.zip`**.
+1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.6.0.zip`**.
 2. Right-click the downloaded file → **Extract All...** → **Extract**.
 3. In the folder that opens, double-click **`HomingPigeon Setup.exe`**.
 4. Click **Install**. Setup shows you every step while it works: it downloads what the app needs
@@ -48,11 +109,18 @@ next to it. Once the app is installed you can delete the whole folder.
   You can do this once for everyone: tick **Unblock** on the downloaded **`.zip`** the same way
   *before* you extract it, and nothing inside needs unblocking afterwards.
 
-**Updating:** download the newest release and run its Setup. Your contacts, templates and settings
-are kept.
+**Updating:** from v0.6.0 on, the app does this for you. When a new version is out, a popup
+appears as you open HomingPigeon: click **Update now** and it downloads the update, closes,
+installs it and opens again by itself, in a minute or two. Click **Update later** to be asked
+next time instead. You can also check any time in **Settings → Updates and help**. Your
+contacts, templates and settings are always kept.
 
-**Removing:** Settings → Apps → Installed apps → HomingPigeon → Uninstall. Your information is
-kept unless you tick the box to delete it too.
+If you have v0.5.1 or older, install v0.6.0 once by hand (download it and run its Setup as
+above); every update after that is automatic.
+
+**Removing:** Settings → Apps → Installed apps → HomingPigeon → Uninstall, or **Settings →
+Uninstall HomingPigeon** inside the app. Your information is kept unless you choose to delete it
+too.
 
 ---
 
@@ -108,27 +176,6 @@ it can only be read by your Windows account on your computer. It is never sent a
 The program itself has its own folder with a private copy of Python that only HomingPigeon uses,
 so it never interferes with other programs (on Windows:
 `C:\Users\<your name>\AppData\Local\Programs\HomingPigeon`).
-
----
-
-## What the app does for you
-
-| What | Why it matters |
-|---|---|
-| **SPF / DKIM / DMARC checker and generators** | These are settings at your domain provider that prove your email is really from you. Without them, your mail is filtered no matter how good it is. Gmail and Yahoo now require them. |
-| **Warm-up ramp** | Starts at about 20 emails a day and increases over several weeks. A brand-new sender suddenly sending hundreds looks like a hacked account. |
-| **Several subjects and messages** | The app picks a different combination for each person, so hundreds of identical emails never go out. |
-| **Random delay between emails** | You set a minimum and maximum with a slider. A fixed interval is an obvious sign of automation. |
-| **Office-hours sending** | Emails arriving at 3am look automated. You can also list public holidays to skip. |
-| **Address checking on import** | Dead addresses bounce, and bounces are the fastest way to get blacklisted. |
-| **Automatic stop** | Sending halts by itself if too many emails start failing, before real damage is done. |
-| **Bounce and unsubscribe handling** | Reads your inbox and permanently removes anyone who bounced or asked to be removed. |
-| **An inbox you can read** | The **My inbox** page keeps every message the check read, so replies, bounces and opt-outs can be opened and read inside the app instead of only being counted. |
-| **Sort your list any way you like** | Sort the contact list by email, company or contact person, either direction, by when it was imported, or with the addresses that need attention at the top. |
-| **Work while it works** | Importing a large spreadsheet checks every domain's mail server in the background. You can set up your email account or write your message while it runs. |
-| **Spam score before you send** | Warns you about wording, links and attachments that trigger filters. |
-| **One-click unsubscribe** | Adds the standard header that puts an Unsubscribe button in Gmail and Outlook, and providers reward this. |
-| **A record of everything sent** | The **Sent emails** page lists every message that went out with the time, the subject used and whether it was answered, bounced or failed, and exports it back to Excel so your master list stays current. |
 
 ---
 
@@ -192,13 +239,16 @@ app/models/                QAbstractTableModel implementations
 
 app/services/              app management that is neither UI nor business logic
   maintenance.py           backup, restore, restart, uninstall, version comparison
+  updater.py               finds a newer release on GitHub, downloads and checks it,
+                           and hands over to the installer's --update mode
 
 app/ui/
   theme.py                 tokens and the whole application stylesheet
   main_window.py           sidebar, page stack, status bar
   pages/                   one module per page, built on first use
   widgets/                 shared building blocks: cards, buttons, tables, dialogs,
-                           inputs (including the typing debouncer) and the range slider
+                           inputs (including the typing debouncer), the range slider
+                           and the "new version available" popup
 
 assets/                    logo.svg and the icons rendered from it
 installer/setup_app.py     the Windows installer (becomes "HomingPigeon Setup.exe")
@@ -206,6 +256,7 @@ installer/install-if-blocked.bat   backup installer for Smart App Control PCs
 tools/build_installer.py   builds Setup.exe and the release zip
 tools/make_icons.py        re-renders assets/ after changing logo.svg
 tools/launch.py            used by the Mac and Linux "Start HomingPigeon" files
+tools/take_screenshots.py  renders docs/screenshots/ from made-up sample data
 tests/                     pytest suite
 ```
 
@@ -244,14 +295,18 @@ Then in the app set the server to `localhost`, port `1025`, security **None (tes
 
 ### Making a release
 
-1. Change `APP_VERSION` in `app/config.py` (for example to `"v0.5.1 beta"`), commit and push.
+1. Change `APP_VERSION` in `app/config.py` (for example to `"v0.6.0 beta"`), commit and push.
 2. On GitHub: **Releases → Draft a new release**. Under **Choose a tag**, type the version
-   (`v0.5.1`) and pick **Create new tag on publish**. Give it a title and notes, then **Publish**.
-3. GitHub Actions builds `HomingPigeon-v0.5.1.zip` and attaches it to the release by itself
+   (`v0.6.0`) and pick **Create new tag on publish**. Give it a title and notes, then **Publish**.
+3. GitHub Actions builds `HomingPigeon-v0.6.0.zip` and attaches it to the release by itself
    (about 5 minutes, watch progress in the **Actions** tab).
 
+Installed copies notice the new release the next time they open. Until the zip is attached,
+their popup's **Update now** opens the release page instead of updating, so nothing breaks while
+the build is still running.
+
 To build it on your own PC instead: `python tools/build_installer.py`, then drag
-`dist\HomingPigeon-v0.5.1.zip` into the release's **Attach binaries** box.
+`dist\HomingPigeon-v0.6.0.zip` into the release's **Attach binaries** box.
 
 ## A note on DKIM
 
