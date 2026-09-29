@@ -146,6 +146,7 @@ def main() -> int:
 
     window = MainWindow()
     window.show()
+    window.check_for_update_soon()
     return app.exec()
 
 
