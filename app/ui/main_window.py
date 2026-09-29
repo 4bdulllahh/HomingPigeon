@@ -573,6 +573,31 @@ class MainWindow(QMainWindow):
         finally:
             self.setUpdatesEnabled(True)
 
+    # --- updates ------------------------------------------------------------
+    def check_for_update_soon(self, delay_ms: int = 2500) -> None:
+        """Ask GitHub for a newer release once the window is up. Silent when offline."""
+        QTimer.singleShot(delay_ms, self._check_for_update)
+
+    def _check_for_update(self) -> None:
+        from app.workers import jobs
+        from app.workers.base import Task
+
+        Task(jobs.available_update).start(on_result=self._offer_update)
+
+    def _offer_update(self, release) -> None:
+        if release is None:
+            return
+        if QApplication.activeModalWidget() is not None:
+            # Something else is asking the user a question; don't stack a popup on it
+            QTimer.singleShot(5000, lambda: self._offer_update(release))
+            return
+        self.offer_update(release)
+
+    def offer_update(self, release) -> None:
+        from app.ui.widgets.update_dialog import UpdateDialog
+
+        UpdateDialog.offer(self, release)
+
     # --- lifecycle ----------------------------------------------------------
     def busy_page_reason(self) -> str | None:
         """The first reason any built page gives for not being torn down."""
