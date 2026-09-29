@@ -5,16 +5,14 @@ layer does is get it off the UI thread and report back by signal.
 """
 from __future__ import annotations
 
-import json
-import urllib.request
 from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
-from app import config
 from app.core import (composer, db, dns_tools, exporter, imap_sync, importer, merge, scorer,
-                      sender, tls)
+                      sender)
+from app.services import updater
 from app.workers.base import Task, Worker
 
 
@@ -123,17 +121,29 @@ def build_preview(identity: composer.SenderIdentity, context: dict, content: com
 
 
 # --- Updates ----------------------------------------------------------------
-def latest_release() -> tuple[str, str] | None:
-    api = config.REPO_URL.replace("https://github.com/", "https://api.github.com/repos/")
-    try:
-        request = urllib.request.Request(
-            f"{api}/releases/latest",
-            headers={"User-Agent": config.APP_NAME, "Accept": "application/vnd.github+json"})
-        with urllib.request.urlopen(request, timeout=15, context=tls.secure_context()) as reply:
-            release = json.loads(reply.read().decode("utf-8"))
-    except Exception:  # noqa: BLE001 - offline, rate limited, no releases yet
-        return None
-    return release.get("tag_name", ""), release.get("html_url", "")
+def latest_release() -> updater.Release | None:
+    return updater.latest_release()
+
+
+def available_update() -> updater.Release | None:
+    return updater.available_update()
+
+
+class UpdateDownloadWorker(Worker):
+    """Download and unpack a release. Finishes with the folder of new app files."""
+
+    def __init__(self, release: updater.Release):
+        super().__init__()
+        self.release = release
+
+    def work(self) -> Path:
+        def progress(received: int, total: int) -> None:
+            self.report(received, total, "")
+
+        try:
+            return updater.download(self.release, progress, lambda: self.cancelled)
+        except updater.UpdateCancelled:
+            return Path()
 
 
 # --- Sending ----------------------------------------------------------------
@@ -179,5 +189,6 @@ __all__ = [
     "test_smtp", "test_imap", "sync_inbox", "dns_report", "generate_dkim",
     "read_sheet_names", "read_preview", "export_contacts", "import_suppression",
     "export_suppression", "score_content", "build_preview", "latest_release",
+    "available_update", "UpdateDownloadWorker",
     "composer", "db", "merge", "Any",
 ]
