@@ -21,6 +21,8 @@ runs this script with it. Uninstalling always uses that signed Python too.
 
     HomingPigeon Setup.exe                 install, update or repair
     setup_app.py --uninstall               remove (used by Settings > Apps)
+    ... --update --target DIR              update in place, then reopen the app (used by
+                                           the app's own "Update now" button)
     ... --uninstall --confirmed [--delete-data]   remove straight away (the app's Settings page)
     ... --target DIR                       install somewhere else (testing)
 """
@@ -424,9 +426,11 @@ class Job:
 class InstallJob(Job):
     steps = INSTALL_STEPS
 
-    def __init__(self, events: queue.Queue, install_dir: Path, register: bool):
+    def __init__(self, events: queue.Queue, install_dir: Path, register: bool,
+                 wait_for_app: bool = False):
         super().__init__(events, install_dir)
         self.register = register
+        self.wait_for_app = wait_for_app
         self.arch = python_arch()
         self.sha256, self.size = PYTHON_BUILDS[self.arch]
         self.url = PYTHON_URL.format(v=PYTHON_VERSION, arch=self.arch)
@@ -441,6 +445,8 @@ class InstallJob(Job):
 
     # -- 1 ---------------------------------------------------------------------
     def step_internet(self) -> str:
+        if self.wait_for_app:
+            self._wait_for_app_to_close()
         self.log(f"Installing to: {self.install_dir}")
         try:
             free = shutil.disk_usage(self.install_dir.anchor or "C:\\").free
@@ -468,6 +474,18 @@ class InstallJob(Job):
                                  "and pypi.org are blocked.") from None
             self.progress((index + 1) / 2)
         return "Connected"
+
+    def _wait_for_app_to_close(self) -> None:
+        """The app closes itself after starting an update; give it time to finish."""
+        for attempt in range(60):
+            if not running_app_pids(self.install_dir):
+                return
+            if attempt == 0:
+                self.log("Waiting for HomingPigeon to close...")
+                self.progress(0, "Waiting for HomingPigeon to close...")
+            self.check_cancel()
+            time.sleep(1)
+        raise StepFailed("HomingPigeon is still open.", "Close HomingPigeon, then click Try again.")
 
     # -- 2 ---------------------------------------------------------------------
     def step_download(self) -> str:
@@ -941,8 +959,9 @@ class StepRow(tk.Frame):
 
 class SetupWindow:
     def __init__(self, uninstall: bool, install_dir: Path, register: bool,
-                 confirmed: bool = False, delete_data: bool = False):
+                 confirmed: bool = False, delete_data: bool = False, auto_update: bool = False):
         self.uninstall = uninstall
+        self.auto_update = auto_update  # started by the app's "Update now": no questions
         self.install_dir = install_dir
         self.register = register
         self.confirmed = confirmed  # already confirmed in the app's Settings page
@@ -993,7 +1012,9 @@ class SetupWindow:
         self._animate()
         self._poll()
 
-        if uninstall and confirmed:
+        if auto_update:
+            self.root.after(300, self.start_auto_update)
+        elif uninstall and confirmed:
             self.root.after(300, self.start_uninstall)
         elif uninstall:
             self.page_confirm_uninstall()
@@ -1174,6 +1195,14 @@ class SetupWindow:
                            f"Installing {APP_NAME}", "Sit back, this takes a few minutes. "
                            "You can watch every step below.")
 
+    def start_auto_update(self) -> None:
+        """Update straight away, as soon as the app that asked for it has closed."""
+        self.install_dir.mkdir(parents=True, exist_ok=True)
+        self.page_progress(InstallJob(self.events, self.install_dir, self.register, wait_for_app=True),
+                           f"Updating {APP_NAME} to v{self.new_version}",
+                           "HomingPigeon opens again by itself when this is done. Your contacts, "
+                           "templates and settings are kept.")
+
     def page_progress(self, job: Job, title: str, subtitle: str) -> None:
         self._clear()
         s = self.scale
@@ -1287,7 +1316,12 @@ class SetupWindow:
                 elif kind == "finished":
                     self.busy = False
                     self.bob_speed = 0.09
-                    self.page_uninstalled() if self.uninstall else self.page_done()
+                    if self.uninstall:
+                        self.page_uninstalled()
+                    elif self.auto_update:
+                        self.finish_auto_update()
+                    else:
+                        self.page_done()
                 elif kind == "failed":
                     self.busy = False
                     self.bob_speed = 0.09
@@ -1398,6 +1432,20 @@ class SetupWindow:
             if problems:
                 self._reveal()
                 messagebox.showwarning(APP_NAME, "Almost done, but:\n\n" + "\n".join(problems),
+                                       parent=self.root)
+        except Exception as error:  # noqa: BLE001 - Setup still has to close
+            print(f"Problem finishing up: {type(error).__name__}: {error}")
+        finally:
+            self.root.destroy()
+
+    def finish_auto_update(self) -> None:
+        """Reopen the app and close Setup; the shortcuts from the first install still work."""
+        self._heading(f"{APP_NAME} is updated!", f"Opening {APP_NAME} v{self.new_version}...")
+        try:
+            problems = self._launch_app()
+            if problems:
+                self._reveal()
+                messagebox.showwarning(APP_NAME, "The update is installed, but:\n\n" + "\n".join(problems),
                                        parent=self.root)
         except Exception as error:  # noqa: BLE001 - Setup still has to close
             print(f"Problem finishing up: {type(error).__name__}: {error}")
@@ -1516,10 +1564,36 @@ class SetupWindow:
 # Entry point
 # =============================================================================
 def remove_folder_after_exit(folder: Path) -> None:
-    """Delete what's left of the install folder once this process (which uses it) has closed."""
-    subprocess.Popen(f'cmd /c ping 127.0.0.1 -n 4 >nul & rmdir /s /q "{folder}"',
-                     creationflags=NO_WINDOW | subprocess.DETACHED_PROCESS, close_fds=True,
-                     cwd=tempfile.gettempdir())
+    """Delete what's left of the install folder once this process (which uses it) has closed.
+
+    Windows won't delete a program while it is running, and the uninstaller runs
+    on the private Python inside the very folder it is removing. So a helper is
+    left behind that waits for this process to exit and then deletes the rest.
+
+    That helper used to be "cmd /c ping 127.0.0.1 -n 4 & rmdir", pinging the
+    computer itself as a makeshift three-second sleep. It was started with
+    DETACHED_PROCESS, which makes Windows ignore CREATE_NO_WINDOW, so cmd had
+    no console at all and ping.exe was handed a brand new, visible one. Now a
+    hidden PowerShell waits for this exact process to end instead of guessing
+    at a delay, and runs with a console that is never shown.
+    """
+    path = str(folder).replace("'", "''")
+    script = (
+        f"Wait-Process -Id {os.getpid()} -Timeout 120 -ErrorAction SilentlyContinue; "
+        f"for ($i = 0; $i -lt 20 -and (Test-Path -LiteralPath '{path}'); $i++) {{ "
+        f"Remove-Item -LiteralPath '{path}' -Recurse -Force -ErrorAction SilentlyContinue; "
+        f"Start-Sleep -Milliseconds 500 }}"
+    )
+    command = ["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
+               "-Command", script]
+    for flags in (NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB, NO_WINDOW):
+        try:
+            subprocess.Popen(command, creationflags=flags, close_fds=True, cwd=tempfile.gettempdir(),
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+            return
+        except OSError:
+            continue  # breakaway is not allowed in this job; try without it
 
 
 def main() -> int:
@@ -1528,7 +1602,7 @@ def main() -> int:
     install_dir = default_install_dir()
     if "--target" in args:
         install_dir = Path(args[args.index("--target") + 1]).resolve()
-    register = install_dir == default_install_dir()
+    register = os.path.normcase(install_dir.resolve()) == os.path.normcase(default_install_dir().resolve())
 
     if sys.platform != "win32":
         print("HomingPigeon Setup is for Windows. On a Mac or Linux, use the Start file in the source download.")
@@ -1546,7 +1620,8 @@ def main() -> int:
         pass
 
     window = SetupWindow(uninstall, install_dir, register, confirmed="--confirmed" in args,
-                         delete_data="--delete-data" in args)
+                         delete_data="--delete-data" in args,
+                         auto_update="--update" in args and not uninstall)
     window.run()
 
     if uninstall and window.uninstalled and install_dir.exists():
