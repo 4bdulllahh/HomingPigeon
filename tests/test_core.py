@@ -775,3 +775,27 @@ def test_the_built_in_examples_score_well():
         assert 80 <= words <= 250, f"{words} words"
         assert not merge.unresolved_tags(body, merge.BUILTIN_TAGS)
         assert merge.validate_spintax(body) is None
+
+
+# --- typed messages -----------------------------------------------------------
+def test_typed_text_keeps_its_lines_paragraphs_and_bullets():
+    """Most users never write HTML, and in HTML a typed line break vanishes."""
+    html = composer.text_to_html("Hi {{FirstName}},\n\nLine one\nline two\n\nWe offer:\n"
+                                 "- Fast delivery\n- Fair prices\n\nThanks")
+    assert html == ("<p>Hi {{FirstName}},</p>\n\n<p>Line one<br>\nline two</p>\n\n"
+                    "<p>We offer:</p>\n\n<ul>\n  <li>Fast delivery</li>\n  <li>Fair prices</li>\n"
+                    "</ul>\n\n<p>Thanks</p>")
+
+
+def test_a_message_already_in_html_is_left_as_written():
+    written = "<p>Hello</p>\nstill the same paragraph"
+    assert composer.text_to_html(written) == written
+
+
+def test_a_subject_typed_over_several_lines_is_sent_as_one():
+    identity = composer.SenderIdentity(name="", email="me@example.com")
+    content = composer.Content(subject_variants=["Hello\n{{Company}}  team"],
+                               body_variants=["Line one\nLine two"])
+    message, subject, _ = composer.build_message(identity, "x@y.com", {"Company": "Acme"}, content)
+    assert subject == "Hello Acme team"
+    assert "Line one<br>" in message.get_body(("html",)).get_content()

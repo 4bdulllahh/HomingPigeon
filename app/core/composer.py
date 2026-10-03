@@ -57,6 +57,64 @@ _ANCHOR = re.compile(r'<a\s[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', re.IGN
 _TAG = re.compile(r"<[^>]+>")
 _HR = re.compile(r"<hr\s*/?>", re.IGNORECASE)
 
+# --- typed text -> HTML -----------------------------------------------------
+# Tags that mean the writer laid the message out in HTML themselves. Anything
+# without one is treated as typed text, the way an email program would.
+_LAID_OUT = re.compile(r"<(p|br|div|table|html)[\s>/]", re.IGNORECASE)
+_BLOCK_START = re.compile(r"<(ul|ol|h[1-6]|blockquote|hr)\b", re.IGNORECASE)
+_BULLET = re.compile(r"^[-*\u2022]\s+(.*)$")
+
+
+def uses_html(text: str) -> bool:
+    """True when the writer laid the message out in HTML themselves."""
+    return bool(_LAID_OUT.search(text))
+
+
+def text_to_html(text: str) -> str:
+    """Turn a message typed like an ordinary email into HTML.
+
+    Most people have never written HTML, and in HTML a line break they typed
+    simply vanishes, so the whole message arrived as one long paragraph. Typed
+    text now behaves the way it looks: a new line stays a new line, an empty
+    line starts a new paragraph, and lines starting with "- " become bullet
+    points. A message that already uses <p> or <br> is left exactly as written.
+    """
+    if not text.strip() or uses_html(text):
+        return text
+
+    blocks: list[str] = []
+    for chunk in re.split(r"\n\s*\n", text.strip()):
+        lines = [line.strip() for line in chunk.splitlines() if line.strip()]
+        if not lines:
+            continue
+        if _BLOCK_START.match(lines[0]):
+            blocks.append("\n".join(lines))
+            continue
+        run: list[str] = []
+        items: list[str] = []
+        for line in lines:
+            bullet = _BULLET.match(line)
+            if bullet:
+                if run:
+                    blocks.append("<p>" + "<br>\n".join(run) + "</p>")
+                    run = []
+                items.append(f"  <li>{bullet.group(1)}</li>")
+            else:
+                if items:
+                    blocks.append("<ul>\n" + "\n".join(items) + "\n</ul>")
+                    items = []
+                run.append(line)
+        if run:
+            blocks.append("<p>" + "<br>\n".join(run) + "</p>")
+        if items:
+            blocks.append("<ul>\n" + "\n".join(items) + "\n</ul>")
+    return "\n\n".join(blocks)
+
+
+def one_line(subject: str) -> str:
+    """A subject header must be a single line; extra lines typed in the editor become spaces."""
+    return " ".join(subject.split())
+
 
 def html_to_text(html: str) -> str:
     """Readable plain-text alternative. Links become 'text (url)'."""
@@ -111,14 +169,14 @@ def unsubscribe_footer(sender: SenderIdentity) -> str:
 
 def assemble_html(body_html: str, content: Content, sender: SenderIdentity) -> str:
     """Body + brochure link + signature + unsubscribe footer, wrapped for email clients."""
-    parts = [body_html.strip()]
+    parts = [text_to_html(body_html).strip()]
 
     block = brochure_block(content)
     if block:
         parts.append(block)
 
     if content.signature_html.strip():
-        parts.append(content.signature_html.strip())
+        parts.append(text_to_html(content.signature_html).strip())
 
     if content.unsubscribe_note:
         parts.append(unsubscribe_footer(sender))
@@ -170,7 +228,7 @@ def build_message(
     subject_template = rng.choice(content.subject_variants)
     body_template = rng.choice(content.body_variants)
 
-    subject = merge.render(subject_template, context, html=False, rng=rng).strip()
+    subject = one_line(merge.render(subject_template, context, html=False, rng=rng))
     body_html = merge.render(body_template, context, html=True, rng=rng)
     full_html = assemble_html(body_html, content, sender)
     text_body = html_to_text(full_html)
@@ -220,7 +278,7 @@ def preview_message(
     body_template = content.body_variants[body_index % len(content.body_variants)] \
         if content.body_variants else "<p>(no body variants)</p>"
 
-    subject = merge.render(subject_template, context, html=False, rng=rng).strip()
+    subject = one_line(merge.render(subject_template, context, html=False, rng=rng))
     body_html = merge.render(body_template, context, html=True, rng=random.Random(seed))
     full_html = assemble_html(body_html, content, sender)
     return subject, full_html, html_to_text(full_html)

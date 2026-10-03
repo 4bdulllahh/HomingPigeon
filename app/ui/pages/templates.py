@@ -1,4 +1,4 @@
-"""Templates: several subjects and bodies, a signature, a live preview and the spam score."""
+"""My message: several subjects and bodies, a signature, a live preview and the spam score."""
 from __future__ import annotations
 
 import random
@@ -7,18 +7,19 @@ import tempfile
 import webbrowser
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QSplitter, QVBoxLayout, QWidget
+from PyQt6 import sip
+from PyQt6.QtCore import QEvent, Qt, QTimer
+from PyQt6.QtGui import QKeySequence, QShortcut
+from PyQt6.QtWidgets import QInputDialog, QSplitter, QVBoxLayout, QWidget
 
 from app.core import composer, db, importer, merge, scorer
 from app.ui import theme
 from app.ui.pages.base import Page
-from app.ui.widgets.common import (Card, ScrollPage, TabBar, clear_layout, danger_button, hint,
-                                   muted, primary_button, row, secondary_button, separator,
+from app.ui.widgets.common import (Card, ScrollPage, TabBar, clear_layout, danger_button, heading,
+                                   hint, muted, primary_button, row, secondary_button, separator,
                                    set_tone, small_button, subheading)
 from app.ui.widgets.dialogs import InfoDialog
-from app.ui.widgets.inputs import (Debouncer, checkbox, get_text, line_edit, read_only_box,
-                                   set_text, text_box)
+from app.ui.widgets.inputs import Debouncer, checkbox, get_text, read_only_box, set_text, text_box
 from app.workers import jobs
 from app.workers.base import Task
 
@@ -31,95 +32,160 @@ EXAMPLE_SUBJECTS = [
     "{{FirstName}}, {could this help|is this useful to} {{Company}}?",
 ]
 
-# Three bodies, each 100 to 160 words, all in sentence case with one link and no
-# promotional wording. Read scorer.py before editing: length, trigger phrases,
-# capitals, exclamation marks and link count are all measured.
+# Three bodies, each 100 to 160 words, all in sentence case with no promotional
+# wording. Read scorer.py before editing: length, trigger phrases, capitals,
+# exclamation marks and link count are all measured.
+#
+# They are typed text, not HTML, because that is what the user will write next
+# to them: each paragraph is one line, an empty line separates paragraphs and
+# "- " starts a bullet point. composer.text_to_html does the rest.
 EXAMPLE_BODIES = [
-    """<p>{Hi|Hello} {{FirstName}},</p>
-
-<p>{I hope your week is going well.|Hope you are having a productive week.|I hope this finds
-you well.} I am [Your Name] from <strong>[Your Company]</strong>, {based in|working out of}
-[your city].</p>
-
-<p>We work with {businesses|companies|firms} like {{Company}} on
-[describe what you do in one sentence]. {Most of the teams we speak to|Most companies we work
-with} come to us because [the problem you solve], and we take that off their hands entirely.</p>
-
-<p>Here is what that usually covers:</p>
-
-<ul>
-  <li>[First thing you handle, and what it saves them]</li>
-  <li>[Second thing you handle]</li>
-  <li>[Third thing you handle]</li>
-</ul>
-
-<p>{If any of that sounds relevant|If that lines up with what you need}, I am happy to send
-over {a short summary|the details} or {arrange|set up} a {fifteen minute|short} call at a time
-that suits you. {Either way, thank you for reading.|Either way, I appreciate your time.}</p>""",
-
-    """<p>{Good morning|Hello} {{FirstName}},</p>
-
-<p>{I came across|I was reading about} {{Company}} {this week|recently} and thought it was
-worth {getting in touch|reaching out}.</p>
-
-<p>{My name is|I am} [Your Name] and I look after [your role] at <strong>[Your
-Company]</strong>. We help {businesses|organisations} in [your industry] with
-[describe what you do in one sentence], and we have been doing it for [number] years.</p>
-
-<p>{The reason I am writing|What made me write} is that {companies|teams} at your stage
-usually run into [the problem you solve]. {We handle that end to end|We take care of that from
-start to finish}, which means:</p>
-
-<ul>
-  <li>[The main result they get]</li>
-  <li>[The second result they get]</li>
-  <li>[Something that makes you different]</li>
-</ul>
-
-<p>You can read more about how we work at <a href="https://www.example.com">our website</a>.
-{If it would help to talk it through|If you would like to hear more}, {just reply to this
-message|reply whenever suits you} and I will {send over the details|follow up with more}.</p>""",
-
-    """<p>{Hi|Hello} {{FirstName}},</p>
-
-<p>{A short note|A quick note} from [your city]. I am [Your Name] at <strong>[Your
-Company]</strong>, and we {work with|support} {businesses|companies} like {{Company}} on
-[describe what you do in one sentence].</p>
-
-<p>{I will keep this brief|I will keep it short}. {Most of the people I speak to in|Most teams
-in} [their industry] tell me the same thing: [the problem you solve]. {That is the part we
-take on|That is exactly what we handle}, and it usually means:</p>
-
-<ul>
-  <li>[What changes for them first]</li>
-  <li>[What it saves them, in time or money]</li>
-  <li>[What they no longer have to think about]</li>
-</ul>
-
-<p>{We have done this for|We already do this for} [number] {businesses|companies} in [your
-region], and I would be glad to {walk you through|talk you through} what it looked like for
-them.</p>
-
-<p>{Would a short call next week be useful|Is a short call next week worth arranging}?
-{If the timing is wrong, no problem at all.|If now is not the moment, that is completely
-fine.}</p>""",
+    "\n\n".join([
+        "{Hi|Hello} {{FirstName}},",
+        "{I hope your week is going well.|Hope you are having a productive week.|I hope this "
+        "finds you well.} I am [Your Name] from [Your Company], {based in|working out of} "
+        "[your city].",
+        "We work with {businesses|companies|firms} like {{Company}} on [describe what you do in "
+        "one sentence]. {Most of the teams we speak to|Most companies we work with} come to us "
+        "because [the problem you solve], and we take that off their hands entirely.",
+        "Here is what that usually covers:\n"
+        "- [First thing you handle, and what it saves them]\n"
+        "- [Second thing you handle]\n"
+        "- [Third thing you handle]",
+        "{If any of that sounds relevant|If that lines up with what you need}, I am happy to "
+        "send over {a short summary|the details} or {arrange|set up} a {fifteen minute|short} "
+        "call at a time that suits you. {Either way, thank you for reading.|Either way, I "
+        "appreciate your time.}",
+    ]),
+    "\n\n".join([
+        "{Good morning|Hello} {{FirstName}},",
+        "{I came across|I was reading about} {{Company}} {this week|recently} and thought it "
+        "was worth {getting in touch|reaching out}.",
+        "{My name is|I am} [Your Name] and I look after [your role] at [Your Company]. We help "
+        "{businesses|organisations} in [your industry] with [describe what you do in one "
+        "sentence], and we have been doing it for [number] years.",
+        "{The reason I am writing|What made me write} is that {companies|teams} at your stage "
+        "usually run into [the problem you solve]. {We handle that end to end|We take care of "
+        "that from start to finish}, which means:\n"
+        "- [The main result they get]\n"
+        "- [The second result they get]\n"
+        "- [Something that makes you different]",
+        "You can read more about how we work on our website, www.example.com. {If it would "
+        "help to talk it through|If you would like to hear more}, {just reply to this "
+        "message|reply whenever suits you} and I will {send over the details|follow up with "
+        "more}.",
+    ]),
+    "\n\n".join([
+        "{Hi|Hello} {{FirstName}},",
+        "{A short note|A quick note} from [your city]. I am [Your Name] at [Your Company], and "
+        "we {work with|support} {businesses|companies} like {{Company}} on [describe what you "
+        "do in one sentence].",
+        "{I will keep this brief|I will keep it short}. {Most of the people I speak to in|Most "
+        "teams in} [their industry] tell me the same thing: [the problem you solve]. {That is "
+        "the part we take on|That is exactly what we handle}, and it usually means:\n"
+        "- [What changes for them first]\n"
+        "- [What it saves them, in time or money]\n"
+        "- [What they no longer have to think about]",
+        "{We have done this for|We already do this for} [number] {businesses|companies} in "
+        "[your region], and I would be glad to {walk you through|talk you through} what it "
+        "looked like for them.",
+        "{Would a short call next week be useful|Is a short call next week worth arranging}? "
+        "{If the timing is wrong, no problem at all.|If now is not the moment, that is "
+        "completely fine.}",
+    ]),
 ]
 
 # Kept for anything that still expects a single example body
 EXAMPLE_BODY = EXAMPLE_BODIES[0]
 
-EXAMPLE_SIGNATURE = """<p style="margin-top:20px;">
-  <strong>[Your Name]</strong><br>
-  <span style="color:#555555;">[Your job title], [Your Company]</span><br>
-  <strong>Phone:</strong> +000 0 000 0000<br>
-  <strong>Email:</strong> [your email address]<br>
-  <strong>Web:</strong> <a href="https://www.example.com">www.example.com</a><br>
-  <em>[Street address, city, country]</em>
-</p>"""
+EXAMPLE_SIGNATURE = "\n".join([
+    "[Your Name]",
+    "[Your job title], [Your Company]",
+    "Phone: +000 0 000 0000",
+    "Email: [your email address]",
+    "Web: www.example.com",
+    "[Street address, city, country]",
+])
 
 EMPTY_HINT = ("Nothing here yet.\n\n"
-              "Press \"Show me an example\" to start from a ready-made template you can edit, "
-              "or \"Add\" to write your own from scratch.")
+              "Press \"Show me an example\" to start from a ready-made one you can change, "
+              "or the Add button to write your own from scratch.")
+
+# What each "personal touch" button puts in, in words a first-time user follows
+TAG_HELP = {
+    "FirstName": "Their first name",
+    "FullName": "Their full name",
+    "Company": "Their company's name",
+    "Email": "Their email address",
+    "Domain": "Their company's web address, taken from their email",
+}
+
+# What the "?" at the top of the page opens. Written for someone who has never
+# heard of HTML or merge tags: what to do, in the order they will do it.
+PAGE_HELP_INTRO = (
+    "You do not need to know any code. Type your email the way you would in Gmail or "
+    "Outlook and the app takes care of the rest. Nothing is sent from this page: you send "
+    "from 'Send emails' when you are ready.")
+
+PAGE_HELP_SECTIONS = [
+    ("The quick way", [
+        "Step 1. Open the Subjects tab and write 3 or more subject lines. Press "
+        "\"Show me an example\" if you would like a head start.",
+        "Step 2. Open the Message tab and write 2 or 3 versions of your email.",
+        "Step 3. Open the Signature tab and add your name, company, phone number and address.",
+        "Step 4. Open Preview & score to see exactly what one person will receive. Aim for a "
+        "score of 85 or more.",
+        "Step 5. Press Save at the bottom of the page.",
+        "Started from an example? Replace everything in [square brackets] with your own words.",
+    ]),
+    ("Why several subjects and messages?", [
+        "The subject is the line people see in their inbox before they open your email. The "
+        "message is the email itself.",
+        "Spam filters notice hundreds of identical emails. The app picks a different subject "
+        "and message for each person, so no two emails look the same.",
+        "Untick the box next to a version to keep it without using it.",
+        "When you have written a lot, scroll the page to see every version. A long subject or "
+        "message also scrolls inside its own box.",
+    ]),
+    ("Typing your message", [
+        "Press Enter (or Ctrl+Enter) to start a new line.",
+        "Leave an empty line between paragraphs.",
+        "Start a line with a dash and a space, like \"- Fast delivery\", to make a bullet point.",
+        "To make words bold or turn them into a link, select them and press Bold or Link above "
+        "the message.",
+        "A subject is always sent as one line. If you press Enter in a subject, the lines are "
+        "joined with a space.",
+    ]),
+    ("Personal touches like {{FirstName}}", [
+        "Words in double curly brackets are filled in for each person from your contact list.",
+        "\"Hi {{FirstName}}\" reaches Sarah as \"Hi Sarah\" and Omar as \"Hi Omar\". "
+        "{{Company}} becomes their company's name.",
+        "Click into a box, then press a button in the \"Personal touch\" row to drop one in "
+        "where your cursor is. Extra columns from your contact spreadsheet appear there too.",
+        "Type them exactly as shown, with two brackets on each side.",
+    ]),
+    ("Mixing words like {Hi|Hello}", [
+        "Put a few choices inside single curly brackets, separated by a straight line, and each "
+        "person gets one of them at random.",
+        "\"{Hi|Hello|Good morning} {{FirstName}}\" sends \"Hi Sarah\" to one person and "
+        "\"Good morning Omar\" to the next.",
+        "The straight line | is Shift and the backslash key, usually just above Enter.",
+        "Every { needs a matching }. A warning appears next to the version's name if one "
+        "is missing.",
+    ]),
+    ("Already know HTML?", [
+        "You can still use it. Once a message contains <p> or <br>, the app sends it exactly as "
+        "written and stops adding line breaks for you.",
+    ]),
+    ("Handy keys", [
+        "Ctrl+S saves.",
+        "Tab moves to the next box.",
+    ]),
+]
+
+PAGE_HELP_FOOTER = (
+    "Not sure how it will look? Preview & score shows the finished email, and "
+    "\"Open in browser\" shows it the way most email programs will.")
 
 
 # What the "?" next to the score opens. The wording is deliberately about what
@@ -186,31 +252,41 @@ SCORE_HELP_FOOTER = (
 
 
 class VariantEditor(Card):
-    """One subject or body variant, with an enable toggle and a delete button."""
+    """One subject or body variant, with an enable toggle and a delete button.
+
+    Both kinds are multi-line boxes of a fixed height that scroll on their own,
+    so a long message never pushes the rest of the list off the page, and the
+    page itself scrolls to show every variant.
+    """
 
     def __init__(self, text: str = "", enabled: bool = True, multiline: bool = False,
-                 on_change=None, on_delete=None, index: int = 1):
+                 on_change=None, on_delete=None, index: int = 1, on_focus=None):
         super().__init__(kind="card", padding=10)
         self.multiline = multiline
+        self.noun = "Message" if multiline else "Subject"
         self._on_change = on_change
+        self._on_focus = on_focus
 
-        self.enabled_box = checkbox(f"Variant {index}", enabled,
+        self.enabled_box = checkbox(f"{self.noun} {index}", enabled,
                                     on_change=lambda _c: self._changed())
+        self.enabled_box.setToolTip("Untick to keep this one without sending it")
         self.info = hint("", wrap=False)
         remove = danger_button("Remove", lambda: on_delete and on_delete(self), 90)
         self.add(row(self.enabled_box, self.info, None, remove))
 
         if multiline:
-            self.editor = text_box("", monospace=True, lines=12)
+            self.editor = text_box(
+                "Type your message here, just like a normal email.\n\n"
+                "Press Enter for a new line and leave an empty line between paragraphs.",
+                lines=12)
         else:
-            self.editor = line_edit("")
+            self.editor = text_box(
+                "Type a subject line, for example: A quick question for {{Company}}", lines=2)
         self.add(self.editor)
+        self.editor.installEventFilter(self)
 
         if text:
-            if multiline:
-                set_text(self.editor, text)
-            else:
-                self.editor.setText(text)
+            set_text(self.editor, text)
 
         # Counting spintax variants parses the text, so it is debounced like the score
         self._debounce = Debouncer(250, self)
@@ -218,15 +294,20 @@ class VariantEditor(Card):
         self.editor.textChanged.connect(lambda *_: self._debounce.poke())
         self._changed()
 
+    def eventFilter(self, obj, event):  # noqa: N802 - Qt naming
+        if obj is self.editor and event.type() == QEvent.Type.FocusIn and self._on_focus:
+            self._on_focus(self)
+        return False
+
     def get_text(self) -> str:
-        return get_text(self.editor) if self.multiline else self.editor.text()
+        return get_text(self.editor)
 
     @property
     def enabled(self) -> bool:
         return self.enabled_box.isChecked()
 
     def set_index(self, index: int) -> None:
-        self.enabled_box.setText(f"Variant {index}")
+        self.enabled_box.setText(f"{self.noun} {index}")
 
     def _changed(self) -> None:
         text = self.get_text()
@@ -236,7 +317,7 @@ class VariantEditor(Card):
             self.info.setText(f"⚠ {error}")
             set_tone(self.info, "error")
         elif variants > 1:
-            self.info.setText(f"{variants:,} spintax variations")
+            self.info.setText(f"{variants:,} mixed versions")
             set_tone(self.info, "success")
         else:
             self.info.setText(f"{len(text)} characters")
@@ -245,12 +326,38 @@ class VariantEditor(Card):
             self._on_change()
 
     def insert(self, snippet: str) -> None:
-        if self.multiline:
-            self.editor.insertPlainText(snippet)
-        else:
-            self.editor.insert(snippet)
+        self.editor.insertPlainText(snippet)
         self.editor.setFocus()
         self._changed()
+
+    def wrap_selection(self, before: str, after: str, placeholder: str) -> None:
+        """Put ``before`` and ``after`` round the selected words, or round a placeholder."""
+        cursor = self.editor.textCursor()
+        # QTextCursor marks line breaks in a selection with U+2029
+        chosen = cursor.selectedText().replace(" ", "\n")
+        cursor.insertText(before + (chosen or placeholder) + after)
+        if not chosen:
+            # Leave the placeholder selected so typing replaces it
+            end = cursor.position() - len(after)
+            cursor.setPosition(end - len(placeholder))
+            cursor.setPosition(end, cursor.MoveMode.KeepAnchor)
+            self.editor.setTextCursor(cursor)
+        self.editor.setFocus()
+
+    def insert_list(self) -> None:
+        """Bullet points: the selected lines become the points, or two to type over."""
+        cursor = self.editor.textCursor()
+        chosen = cursor.selectedText().replace(" ", "\n").strip("\n")
+        points = [line.strip() for line in chosen.splitlines() if line.strip()] \
+            or ["First point", "Second point"]
+        # A message laid out in HTML would ignore "- ", so it gets a real list
+        if composer.uses_html(self.get_text()):
+            block = "<ul>\n" + "\n".join(f"  <li>{p}</li>" for p in points) + "\n</ul>"
+        else:
+            block = "\n".join(f"- {p}" for p in points)
+        before = "" if cursor.atBlockStart() or cursor.hasSelection() else "\n"
+        cursor.insertText(before + block + "\n")
+        self.editor.setFocus()
 
 
 class TemplatesPage(Page):
@@ -258,33 +365,48 @@ class TemplatesPage(Page):
         super().__init__(window)
         self.subject_editors: list[VariantEditor] = []
         self.body_editors: list[VariantEditor] = []
+        self._focused: dict[bool, VariantEditor] = {}   # multiline -> last box typed in
         self._set_id: int | None = None
         self._preview_index = 0
         self._subject_pick = 0
         self._body_pick = 0
         self._preview_html = ""
 
-        self.add_header(
-            "Templates",
-            "Write several subjects and bodies. The app picks a different combination for each "
-            "recipient, so hundreds of identical messages never go out. That is what spam "
-            "filters fingerprint.")
+        # Everything above the Save button scrolls as one page. It used to be a
+        # fixed frame with a small scrolling list squeezed inside it, and once a
+        # few subjects or messages were added there was no room left to see them.
+        scale = theme.text_scale()
+        self.scroll = ScrollPage(margins=(0, 0, round(8 * scale), 0), spacing=round(10 * scale))
+        self.root.addWidget(self.scroll, 1)
+
+        help_button = secondary_button("?  How to write your email", self._explain_page)
+        help_button.setToolTip("A short guide to this page, in plain English")
+        self.scroll.add(row(heading("My message"), None, help_button))
+        self.scroll.add(muted(
+            "Write what you want to say. Give the app a few versions of your subject and "
+            "message and it mixes them, so every person gets a slightly different email. "
+            "That keeps you out of spam folders. Press the ? button above for a quick guide."))
 
         self.tabs = TabBar()
         self.tabs.add("Subjects", self._build_subjects)
-        self.tabs.add("Body", self._build_bodies)
+        self.tabs.add("Message", self._build_bodies)
         self.tabs.add("Signature", self._build_signature)
         self.tabs.add("Preview & score", self._build_preview)
         self.tabs.changed.connect(self._tab_changed)
-        self.root.addWidget(self.tabs, 1)
+        self.scroll.add(self.tabs, 1)
         # The four tabs share the same content, so they are all built up front:
         # loading saved subjects has to be able to reach the Subjects tab even
         # while the Signature tab is the one on screen.
         self.tabs.build_all()
 
         self.save_status = muted("", wrap=False)
-        self.root.addWidget(row(primary_button("Save templates", self.save, 170),
-                                self.save_status, None))
+        save = primary_button("Save", self.save, 170)
+        save.setToolTip("Save your subjects, messages and signature (Ctrl+S)")
+        self.root.addWidget(row(save, self.save_status, None))
+
+        shortcut = QShortcut(QKeySequence(QKeySequence.StandardKey.Save), self)
+        shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        shortcut.activated.connect(self.save)
 
         # Scoring runs after typing stops rather than on every keystroke
         self._score_debounce = Debouncer(450, self)
@@ -293,25 +415,100 @@ class TemplatesPage(Page):
         self.tabs.set("Subjects")
         self.load()
 
+    def _explain_page(self) -> None:
+        InfoDialog.show_for(self, "How to write your email", PAGE_HELP_INTRO,
+                            PAGE_HELP_SECTIONS, PAGE_HELP_FOOTER)
+
     # --- merge tags ---------------------------------------------------------
-    def _tag_bar(self, target) -> QWidget:
+    def _target(self, multiline: bool) -> VariantEditor | None:
+        """The box the toolbar buttons act on: the last one typed in, else the last one."""
+        editors = self.body_editors if multiline else self.subject_editors
+        focused = self._focused.get(multiline)
+        if focused in editors:
+            return focused
+        return editors[-1] if editors else None
+
+    def _remember_focus(self, editor: VariantEditor) -> None:
+        self._focused[editor.multiline] = editor
+
+    def _tag_bar(self, multiline: bool) -> QWidget:
         from app.ui.widgets.common import flow_row
 
         container, layout = flow_row(4)
-        label = hint("Insert:", wrap=False)
+        label = hint("Personal touch:", wrap=False)
+        label.setToolTip("Filled in for each person from your contact list")
         layout.addWidget(label)
         for tag in importer.merge_tag_names()[:8]:
             snippet = "{{" + tag + "}}"
-            layout.addWidget(small_button(snippet, lambda s=snippet: self._insert(target(), s)))
-        layout.addWidget(small_button(
-            "{spin|tax}", lambda: self._insert(target(), "{option one|option two}")))
+            button = small_button(snippet, lambda s=snippet: self._insert(multiline, s))
+            button.setToolTip(TAG_HELP.get(tag, f"The {tag} column from your contact list"))
+            layout.addWidget(button)
+        mix = small_button("{Hi|Hello}", lambda: self._insert(multiline, "{Hi|Hello}"))
+        mix.setToolTip("Mix words: each person gets one of the choices at random. "
+                       "Change them to your own, separated by |")
+        layout.addWidget(mix)
         return container
 
-    def _insert(self, editor: VariantEditor | None, snippet: str) -> None:
+    def _format_bar(self) -> QWidget:
+        """Bold, link and bullet points for people who have never written HTML."""
+        from app.ui.widgets.common import flow_row
+
+        container, layout = flow_row(4)
+        layout.addWidget(hint("Style:", wrap=False))
+        bold = small_button("Bold", lambda: self._format("bold"))
+        bold.setToolTip("Select some words, then press this to make them bold")
+        link = small_button("Link", lambda: self._format("link"))
+        link.setToolTip("Select some words, then press this to turn them into a link")
+        bullets = small_button("Bullet points", lambda: self._format("list"))
+        bullets.setToolTip("Turn the selected lines into bullet points, or start a new list")
+        for button in (bold, link, bullets):
+            layout.addWidget(button)
+        return container
+
+    def _insert(self, multiline: bool, snippet: str) -> None:
+        editor = self._target(multiline)
         if editor is None:
-            self.notify("Add a variant first", "warn")
+            self.notify("Add a subject or message first", "warn")
             return
         editor.insert(snippet)
+
+    def _format(self, kind: str) -> None:
+        editor = self._target(True)
+        if editor is None:
+            self.notify("Add a message first", "warn")
+            return
+        if kind == "bold":
+            editor.wrap_selection("<strong>", "</strong>", "bold words")
+        elif kind == "list":
+            editor.insert_list()
+        else:
+            address, ok = QInputDialog.getText(
+                self, "Add a link", "Web address the link opens, for example www.yourcompany.com")
+            address = address.strip()
+            if not ok or not address:
+                return
+            if "://" not in address and not address.startswith("mailto:"):
+                address = "https://" + address
+            editor.wrap_selection(f'<a href="{address}">', "</a>", "link text")
+
+    def _list_holder(self) -> tuple[QWidget, QVBoxLayout]:
+        holder = QWidget()
+        holder.setProperty("role", "plain")
+        layout = QVBoxLayout(holder)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        return holder, layout
+
+    def _reveal(self, editor: VariantEditor) -> None:
+        """Scroll a newly added box into view and put the cursor in it."""
+        def show() -> None:
+            if sip.isdeleted(self) or sip.isdeleted(editor):
+                return
+            self.scroll.ensureWidgetVisible(editor, 0, round(40 * theme.text_scale()))
+            editor.editor.setFocus()
+
+        # Once the layout has made room for it
+        QTimer.singleShot(30, show)
 
     # --- subjects -----------------------------------------------------------
     def _build_subjects(self) -> QWidget:
@@ -322,32 +519,34 @@ class TemplatesPage(Page):
         layout.setSpacing(8)
 
         layout.addWidget(muted(
-            "Use {{Company}} so each subject is different, and spintax like {Custom|Bespoke} for "
-            "extra variation."))
-        layout.addWidget(self._tag_bar(
-            lambda: self.subject_editors[-1] if self.subject_editors else None))
+            "The subject is the line people see in their inbox before they open your email. "
+            "Write 3 or more and each person gets one of them."))
+        layout.addWidget(self._tag_bar(False))
 
-        self.subjects_area = ScrollPage(spacing=6)
-        layout.addWidget(self.subjects_area, 1)
+        self.subjects_list, self.subjects_layout = self._list_holder()
+        layout.addWidget(self.subjects_list)
+        self._subjects_hint = muted(EMPTY_HINT)
+        self.subjects_layout.addWidget(self._subjects_hint)
 
         layout.addWidget(row(
-            primary_button("+ Add a subject line", lambda: self._add_subject(""), 190),
+            primary_button("+ Add a subject line", self._new_subject, 190),
             secondary_button("Show me an example", self._example_subjects, 190), None))
-
-        self._subjects_hint = muted(EMPTY_HINT)
-        self.subjects_area.add(self._subjects_hint)
-        self.subjects_area.add_stretch()
+        layout.addStretch(1)
         self._refresh_empty_hints()
         return holder
 
-    def _add_subject(self, text: str, enabled: bool = True) -> None:
+    def _new_subject(self) -> None:
+        self._reveal(self._add_subject(""))
+
+    def _add_subject(self, text: str, enabled: bool = True) -> VariantEditor:
         editor = VariantEditor(text, enabled, multiline=False, on_change=self._content_changed,
                                on_delete=self._remove_subject,
-                               index=len(self.subject_editors) + 1)
-        self.subjects_area.body_layout.insertWidget(
-            self.subjects_area.body_layout.count() - 1, editor)
+                               index=len(self.subject_editors) + 1,
+                               on_focus=self._remember_focus)
+        self.subjects_layout.addWidget(editor)
         self.subject_editors.append(editor)
         self._refresh_empty_hints()
+        return editor
 
     def _remove_subject(self, editor: VariantEditor) -> None:
         self.subject_editors.remove(editor)
@@ -366,32 +565,35 @@ class TemplatesPage(Page):
         layout.setSpacing(8)
 
         layout.addWidget(muted(
-            "Write in simple HTML. The plain-text version sent alongside is generated "
-            "automatically, and your signature plus the unsubscribe footer are added at the "
-            "bottom of every message."))
-        layout.addWidget(self._tag_bar(
-            lambda: self.body_editors[-1] if self.body_editors else None))
+            "Type your message just like a normal email: press Enter for a new line and leave "
+            "an empty line between paragraphs. Write 2 or 3 versions. Your signature and an "
+            "unsubscribe line are added at the bottom for you."))
+        layout.addWidget(self._tag_bar(True))
+        layout.addWidget(self._format_bar())
 
-        self.bodies_area = ScrollPage(spacing=6)
-        layout.addWidget(self.bodies_area, 1)
+        self.bodies_list, self.bodies_layout = self._list_holder()
+        layout.addWidget(self.bodies_list)
+        self._bodies_hint = muted(EMPTY_HINT)
+        self.bodies_layout.addWidget(self._bodies_hint)
 
         layout.addWidget(row(
-            primary_button("+ Add a message", lambda: self._add_body(""), 190),
+            primary_button("+ Add a message", self._new_body, 190),
             secondary_button("Show me an example", self._example_body, 190), None))
-
-        self._bodies_hint = muted(EMPTY_HINT)
-        self.bodies_area.add(self._bodies_hint)
-        self.bodies_area.add_stretch()
+        layout.addStretch(1)
         self._refresh_empty_hints()
         return holder
 
-    def _add_body(self, text: str, enabled: bool = True) -> None:
+    def _new_body(self) -> None:
+        self._reveal(self._add_body(""))
+
+    def _add_body(self, text: str, enabled: bool = True) -> VariantEditor:
         editor = VariantEditor(text, enabled, multiline=True, on_change=self._content_changed,
-                               on_delete=self._remove_body, index=len(self.body_editors) + 1)
-        self.bodies_area.body_layout.insertWidget(
-            self.bodies_area.body_layout.count() - 1, editor)
+                               on_delete=self._remove_body, index=len(self.body_editors) + 1,
+                               on_focus=self._remember_focus)
+        self.bodies_layout.addWidget(editor)
         self.body_editors.append(editor)
         self._refresh_empty_hints()
+        return editor
 
     def _remove_body(self, editor: VariantEditor) -> None:
         self.body_editors.remove(editor)
@@ -423,10 +625,13 @@ class TemplatesPage(Page):
         layout.setSpacing(8)
 
         layout.addWidget(muted(
-            "Added to the bottom of every message. A signature with a real name, phone number and "
-            "address is a legitimacy signal that spam filters look for."))
+            "Added to the bottom of every message. Type it the way you want it to look, with "
+            "your name, job title, company, phone number and address each on its own line. A "
+            "real signature helps your email reach the inbox."))
 
-        self.signature_box = text_box("", monospace=True)
+        self.signature_box = text_box(
+            "For example:\nSarah Jones\nSales manager, Jones Supplies\nPhone: ...")
+        self.signature_box.setMinimumHeight(self.signature_box.fontMetrics().lineSpacing() * 12)
         self.signature_box.textChanged.connect(self._content_changed)
         layout.addWidget(self.signature_box, 1)
         layout.addWidget(row(secondary_button("Show me an example",
@@ -458,8 +663,8 @@ class TemplatesPage(Page):
         One body is a finding in its own right: identical bodies sent in volume
         are the easiest thing in the world to fingerprint, and the score says so.
         """
-        for html in EXAMPLE_BODIES:
-            self._add_body(html)
+        for text in EXAMPLE_BODIES:
+            self._add_body(text)
         self._content_changed()
         self.notify(f"{len(EXAMPLE_BODIES)} example messages added. Replace the "
                     f"[square brackets] with your own words", "info", 6000)
@@ -494,7 +699,8 @@ class TemplatesPage(Page):
         self.preview_subject.setWordWrap(True)
         left.add(self.preview_subject)
         left.add(separator())
-        self.preview_body = read_only_box("", role="", lines=18)
+        self.preview_body = read_only_box("", role="", lines=12)
+        self.preview_body.setMaximumHeight(16777215)   # at least 12 lines, then fill the card
         left.add(self.preview_body, 1)
         splitter.addWidget(left)
 
@@ -514,6 +720,8 @@ class TemplatesPage(Page):
 
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
+        # The page scrolls, so the preview needs a height of its own to fill
+        splitter.setMinimumHeight(round(460 * theme.text_scale()))
         layout.addWidget(splitter, 1)
         return holder
 

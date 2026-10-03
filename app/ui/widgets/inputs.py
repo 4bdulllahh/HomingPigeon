@@ -26,9 +26,28 @@ def password_edit(placeholder: str = "", parent=None) -> QLineEdit:
     return widget
 
 
+class TextBox(QPlainTextEdit):
+    """A plain-text editor where every Enter key starts a new line.
+
+    Qt only treats a bare Enter as a new line. Ctrl+Enter, which people use in
+    chat programs and webmail, did nothing at all, and Shift+Enter inserted an
+    invisible Unicode line separator rather than an ordinary one.
+    """
+
+    def keyPressEvent(self, event):  # noqa: N802 - Qt naming
+        if (event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not self.isReadOnly()
+                and event.modifiers() & (Qt.KeyboardModifier.ControlModifier
+                                         | Qt.KeyboardModifier.ShiftModifier)):
+            self.insertPlainText("\n")
+            self.ensureCursorVisible()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
 def text_box(placeholder: str = "", monospace: bool = False, lines: int | None = None,
              parent=None) -> QPlainTextEdit:
-    widget = QPlainTextEdit(parent)
+    widget = TextBox(parent)
     widget.setPlaceholderText(placeholder)
     if monospace:
         widget.setProperty("role", "mono")

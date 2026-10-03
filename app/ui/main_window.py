@@ -168,6 +168,14 @@ class MainWindow(QMainWindow):
         except OSError:
             pass
 
+    def showEvent(self, event):  # noqa: N802 - Qt naming
+        super().showEvent(event)
+        if not getattr(self, "_taskbar_icon_kept", False):
+            self._taskbar_icon_kept = True
+            from app.ui import taskbar
+
+            taskbar.keep_icon(self)
+
     def _size_to_screen(self) -> None:
         screen = QApplication.primaryScreen()
         available = screen.availableGeometry() if screen else None

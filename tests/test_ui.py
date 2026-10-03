@@ -710,3 +710,68 @@ def test_a_finished_import_shows_up_without_reopening_the_app(qt_app, store):
         window.close()
         window.deleteLater()
 
+
+
+# --- the My message page ----------------------------------------------------
+def test_ctrl_and_shift_enter_start_a_new_line(qt_app):
+    from PyQt6.QtTest import QTest
+
+    from app.ui.widgets.inputs import text_box
+
+    box = text_box()
+    QTest.keyClicks(box, "one")
+    QTest.keyClick(box, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
+    QTest.keyClicks(box, "two")
+    QTest.keyClick(box, Qt.Key.Key_Return, Qt.KeyboardModifier.ShiftModifier)
+    QTest.keyClicks(box, "three")
+    assert box.toPlainText() == "one\ntwo\nthree"   # plain new lines, no U+2028
+
+
+def test_my_message_page_scrolls_when_it_fills_up(qt_app, store):
+    """Many subjects used to be squeezed into a fixed frame with no way to reach them."""
+    from PyQt6.QtTest import QTest
+
+    from app.ui.main_window import MainWindow
+
+    qt_app.setStyleSheet(theme.stylesheet())
+    window = MainWindow()
+    window.resize(1000, 650)
+    window.show()
+    try:
+        window.show_page("templates")
+        page = window.page("templates")
+        for index in range(15):
+            page._add_subject(f"Subject {index}")
+        QTest.qWait(100)   # let the layout grow to fit them
+        bar = page.scroll.verticalScrollBar()
+        assert bar.maximum() > 0, "the page does not scroll"
+        last = page.subject_editors[-1]
+        page.scroll.ensureWidgetVisible(last)
+        qt_app.processEvents()
+        assert bar.value() > 0
+        # Every box keeps its own height rather than being squashed to fit
+        assert all(e.editor.height() == last.editor.height() for e in page.subject_editors)
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_toolbar_buttons_act_on_the_box_last_typed_in(qt_app, store):
+    from app.ui.main_window import MainWindow
+
+    window = MainWindow()
+    try:
+        window.show_page("templates")
+        page = window.page("templates")
+        first = page._add_body("")
+        page._add_body("")
+        page._remember_focus(first)
+        page._insert(True, "{{Company}}")
+        assert first.get_text() == "{{Company}}"
+        assert page.body_editors[1].get_text() == ""
+        first.editor.selectAll()
+        page._format("bold")
+        assert first.get_text() == "<strong>{{Company}}</strong>"
+    finally:
+        window.close()
+        window.deleteLater()
