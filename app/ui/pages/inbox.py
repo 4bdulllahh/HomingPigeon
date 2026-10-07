@@ -10,6 +10,7 @@ from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import QHBoxLayout, QPlainTextEdit, QSplitter, QVBoxLayout, QWidget
 
 from app.core import credentials, db, imap_sync, prefs
+from app.i18n import t
 from app.models.table_model import SimpleTableModel
 from app.ui import theme
 from app.ui.pages.base import Page
@@ -67,7 +68,8 @@ class InboxPage(Page):
         self.sync_button = primary_button("Check inbox now", self._sync, 180)
         controls.addWidget(self.sync_button)
         self.auto_sync = checkbox(
-            f"Check automatically every {AUTO_SYNC_MINUTES} minutes",
+            t("Check automatically every {auto_sync_minutes} minutes",
+              auto_sync_minutes=AUTO_SYNC_MINUTES),
             bool(db.get_setting("auto_imap_sync", True)), on_change=self._toggle_auto)
         controls.addWidget(self.auto_sync)
         self.sync_status = muted("", wrap=False)
@@ -145,7 +147,7 @@ class InboxPage(Page):
         self.reader_body.setReadOnly(True)
         self.reader_body.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         self.reader_body.setPlaceholderText(
-            "The message you pick above is shown here in plain text.")
+            t("The message you pick above is shown here in plain text."))
         reader_layout.addWidget(self.reader_body, 1)
         split.addWidget(reader)
 
@@ -219,8 +221,8 @@ class InboxPage(Page):
 
         self._syncing = True
         self.sync_button.setEnabled(False)
-        self.sync_button.setText("Checking...")
-        self.sync_status.setText("Connecting to your mailbox...")
+        self.sync_button.setText(t("Checking..."))
+        self.sync_status.setText(t("Connecting to your mailbox..."))
         set_tone(self.sync_status, "muted")
 
         Task(jobs.sync_inbox, settings).start(
@@ -230,29 +232,30 @@ class InboxPage(Page):
     def _sync_failed(self, message: str) -> None:
         self._syncing = False
         self.sync_button.setEnabled(True)
-        self.sync_button.setText("Check inbox now")
-        self.sync_status.setText(message)
+        self.sync_button.setText(t("Check inbox now"))
+        self.sync_status.setText(t(message))
         set_tone(self.sync_status, "error")
 
     def _sync_done(self, result: imap_sync.SyncResult, quiet: bool = False) -> None:
         self._syncing = False
         self.sync_button.setEnabled(True)
-        self.sync_button.setText("Check inbox now")
+        self.sync_button.setText(t("Check inbox now"))
 
         if result.errors:
-            self.sync_status.setText(result.errors[0])
+            self.sync_status.setText(t(result.errors[0]))
             set_tone(self.sync_status, "error")
         else:
-            self.sync_status.setText(result.summary())
+            self.sync_status.setText(t(result.summary()))
             set_tone(self.sync_status, "muted")
             if result.hard_bounces or result.unsubscribes:
                 self.notify(
-                    f"{len(result.hard_bounces)} bounced and {len(result.unsubscribes)} "
-                    f"opted-out addresses removed", "success")
+                    t("{count} bounced and {count2} opted-out addresses removed",
+                      count=len(result.hard_bounces), count2=len(result.unsubscribes)), "success")
             elif result.replies and not quiet:
-                self.notify(f"{len(result.replies)} new reply(ies)", "success")
+                self.notify(t("{count} new reply(ies)", count=len(result.replies)), "success")
             elif result.scanned and not quiet:
-                self.notify(f"{result.scanned} new message(s) in your inbox", "info")
+                self.notify(t("{scanned} new message(s) in your inbox",
+                              scanned=result.scanned), "info")
 
         self._load()
         self.window_.refresh_status()
@@ -271,18 +274,19 @@ class InboxPage(Page):
     def _show_selected(self) -> None:
         row = self.messages_table.selected_row()
         if row < 0 or row >= len(self._shown):
-            self.reader_from.setText("Pick a message to read it")
+            self.reader_from.setText(t("Pick a message to read it"))
             self.reader_meta.setText("")
             self.reader_body.setPlainText("")
             return
 
         message = self._shown[row]
         name = message["from_name"] or message["from_email"] or "Unknown sender"
-        self.reader_from.setText(message["subject"] or "(no subject)")
+        self.reader_from.setText(t(message["subject"] or "(no subject)"))
         self.reader_meta.setText(
-            f"From {name} <{message['from_email']}>   ·   "
-            f"{prefs.format_datetime(message['received_at'])}   ·   "
-            f"{KIND_LABELS.get(message['kind'], 'Mail')}")
+            t("From {name} <{from_email}>   ·   {datetime}   ·   {get}",
+              name=name, from_email=message['from_email'],
+              datetime=prefs.format_datetime(message['received_at']),
+              get=KIND_LABELS.get(message['kind'], 'Mail')))
         self.reader_body.setPlainText(message["body"] or "(this message had no readable text)")
 
         if not message["seen"] and not self._reading:
@@ -365,7 +369,7 @@ class InboxPage(Page):
         state = db.query_one("SELECT last_sync_at FROM imap_state WHERE id = 1")
         if state and state["last_sync_at"] and not self._syncing:
             self.sync_status.setText(
-                f"Last checked {prefs.format_datetime(state['last_sync_at'])}")
+                t("Last checked {datetime}", datetime=prefs.format_datetime(state['last_sync_at'])))
             set_tone(self.sync_status, "muted")
 
     def on_show(self) -> None:

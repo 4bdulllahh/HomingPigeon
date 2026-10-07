@@ -9,6 +9,7 @@ without rediscovering everything.
 | [architecture.md](architecture.md) | How the app is put together: threads, layers, pages |
 | [data.md](data.md) | The SQLite database, every table, settings keys, migrations |
 | [features.md](features.md) | Where each feature lives and how it works, page by page |
+| [languages.md](languages.md) | The five languages, right to left, and how to add or change text |
 | [working-on-it.md](working-on-it.md) | Conventions, tests, building and releasing, known traps |
 | [changelog.md](changelog.md) | What changed in each release, newest first |
 

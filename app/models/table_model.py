@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt
 
+from app.i18n import t
 from app.ui import theme
 
 
@@ -31,7 +32,7 @@ class SimpleTableModel(QAbstractTableModel):
         if role != Qt.ItemDataRole.DisplayRole:
             return None
         if orientation == Qt.Orientation.Horizontal:
-            return self._headers[section]
+            return t(self._headers[section])
         return section + 1
 
     # --- data ---------------------------------------------------------------
@@ -41,7 +42,9 @@ class SimpleTableModel(QAbstractTableModel):
         row, column = index.row(), index.column()
         if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.ToolTipRole):
             values = self._rows[row]
-            return values[column] if column < len(values) else ""
+            # Cells are mostly data (addresses, dates), but some are app wording
+            # such as a reason or a status, and those are shown translated
+            return t(values[column]) if column < len(values) else ""
         if role == Qt.ItemDataRole.ForegroundRole:
             tones = self._tones[row]
             token = tones[column] if column < len(tones) else None

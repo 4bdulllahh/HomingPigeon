@@ -12,100 +12,29 @@ from PyQt6.QtCore import QEvent, Qt, QTimer
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import QFileDialog, QInputDialog, QSplitter, QVBoxLayout, QWidget
 
-from app.core import composer, db, importer, merge, scorer
+from app.core import composer, db, examples, importer, merge, scorer
+from app.i18n import t
 from app.ui import theme
 from app.ui.pages.base import Page
-from app.ui.widgets.common import (Card, ScrollPage, TabBar, clear_layout, danger_button, heading,
-                                   hint, muted, primary_button, row, secondary_button, separator,
-                                   set_tone, small_button, subheading)
+from app.ui.widgets.common import (Card, ScrollPage, TabBar, body, clear_layout, danger_button,
+                                   heading, hint, muted, primary_button, row, secondary_button,
+                                   separator, set_tone, small_button, subheading)
 from app.ui.widgets.dialogs import ChoiceDialog, InfoDialog
 from app.ui.widgets.inputs import Debouncer, checkbox, get_text, read_only_box, set_text, text_box
 from app.workers import jobs
 from app.workers.base import Task
 
 # Examples are never filled in automatically. The app starts blank and these are
-# only inserted when the user presses "Show me an example".
-EXAMPLE_SUBJECTS = [
-    "{Quick question|A question} about {{Company}}'s suppliers",
-    "{An introduction|Introducing us} to the team at {{Company}}",
-    "{Worth a look|Might be useful} for the team at {{Company}}?",
-    "{{FirstName}}, {could this help|is this useful to} {{Company}}?",
-]
-
-# Three bodies, each 100 to 160 words, all in sentence case with no promotional
-# wording. Read scorer.py before editing: length, trigger phrases, capitals,
-# exclamation marks and link count are all measured.
-#
-# They are typed text, not HTML, because that is what the user will write next
-# to them: each paragraph is one line, an empty line separates paragraphs and
-# "- " starts a bullet point. composer.text_to_html does the rest.
-EXAMPLE_BODIES = [
-    "\n\n".join([
-        "{Hi|Hello} {{FirstName}},",
-        "{I hope your week is going well.|Hope you are having a productive week.|I hope this "
-        "finds you well.} I am [Your Name] from [Your Company], {based in|working out of} "
-        "[your city].",
-        "We work with {businesses|companies|firms} like {{Company}} on [describe what you do in "
-        "one sentence]. {Most of the teams we speak to|Most companies we work with} come to us "
-        "because [the problem you solve], and we take that off their hands entirely.",
-        "Here is what that usually covers:\n"
-        "- [First thing you handle, and what it saves them]\n"
-        "- [Second thing you handle]\n"
-        "- [Third thing you handle]",
-        "{If any of that sounds relevant|If that lines up with what you need}, I am happy to "
-        "send over {a short summary|the details} or {arrange|set up} a {fifteen minute|short} "
-        "call at a time that suits you. {Either way, thank you for reading.|Either way, I "
-        "appreciate your time.}",
-    ]),
-    "\n\n".join([
-        "{Good morning|Hello} {{FirstName}},",
-        "{I came across|I was reading about} {{Company}} {this week|recently} and thought it "
-        "was worth {getting in touch|reaching out}.",
-        "{My name is|I am} [Your Name] and I look after [your role] at [Your Company]. We help "
-        "{businesses|organisations} in [your industry] with [describe what you do in one "
-        "sentence], and we have been doing it for [number] years.",
-        "{The reason I am writing|What made me write} is that {companies|teams} at your stage "
-        "usually run into [the problem you solve]. {We handle that end to end|We take care of "
-        "that from start to finish}, which means:\n"
-        "- [The main result they get]\n"
-        "- [The second result they get]\n"
-        "- [Something that makes you different]",
-        "You can read more about how we work on our website, www.example.com. {If it would "
-        "help to talk it through|If you would like to hear more}, {just reply to this "
-        "message|reply whenever suits you} and I will {send over the details|follow up with "
-        "more}.",
-    ]),
-    "\n\n".join([
-        "{Hi|Hello} {{FirstName}},",
-        "{A short note|A quick note} from [your city]. I am [Your Name] at [Your Company], and "
-        "we {work with|support} {businesses|companies} like {{Company}} on [describe what you "
-        "do in one sentence].",
-        "{I will keep this brief|I will keep it short}. {Most of the people I speak to in|Most "
-        "teams in} [their industry] tell me the same thing: [the problem you solve]. {That is "
-        "the part we take on|That is exactly what we handle}, and it usually means:\n"
-        "- [What changes for them first]\n"
-        "- [What it saves them, in time or money]\n"
-        "- [What they no longer have to think about]",
-        "{We have done this for|We already do this for} [number] {businesses|companies} in "
-        "[your region], and I would be glad to {walk you through|talk you through} what it "
-        "looked like for them.",
-        "{Would a short call next week be useful|Is a short call next week worth arranging}? "
-        "{If the timing is wrong, no problem at all.|If now is not the moment, that is "
-        "completely fine.}",
-    ]),
-]
-
-# Kept for anything that still expects a single example body
+# only inserted when the user presses "Show me an example". They live in
+# app/core/examples.py, one set per language, written to reach the main inbox.
+# These names are the English set, kept for the tests and anything else that
+# wants a fixed example.
+EXAMPLE_SUBJECTS = examples.EXAMPLES["en"]["subjects"]
+EXAMPLE_BODIES = examples.EXAMPLES["en"]["bodies"]
 EXAMPLE_BODY = EXAMPLE_BODIES[0]
+EXAMPLE_SIGNATURE = examples.EXAMPLES["en"]["signature"]
 
-EXAMPLE_SIGNATURE = "\n".join([
-    "[Your Name]",
-    "[Your job title], [Your Company]",
-    "Phone: +000 0 000 0000",
-    "Email: [your email address]",
-    "Web: www.example.com",
-    "[Street address, city, country]",
-])
+SEVERITY_NAMES = {"critical": "Critical", "high": "High", "medium": "Medium", "low": "Low"}
 
 EMPTY_HINT = ("Nothing here yet.\n\n"
               "Press \"Show me an example\" to start from a ready-made one you can change, "
@@ -137,6 +66,24 @@ PAGE_HELP_SECTIONS = [
         "score of 85 or more.",
         "Step 5. Press Save at the bottom of the page.",
         "Started from an example? Replace everything in [square brackets] with your own words.",
+    ]),
+    ("Reaching the main inbox, not spam or Promotions", [
+        "Gmail sorts email by how much it looks like a person writing. Marketing goes to the "
+        "Promotions tab, and anything that looks like a trick goes to spam. Write the way you "
+        "would write to one colleague.",
+        "Greet each person by name: \"Hi {{FirstName}},\".",
+        "Keep it short: 50 to 150 words in three or four short paragraphs.",
+        "No links in the first email. Put your website in the signature as plain text, and "
+        "offer the brochure instead of linking to it: \"Shall I send over our brochure?\".",
+        "No pictures, logos, bold text, colours or bullet points.",
+        "No sales words such as free, offer, discount, deal, limited time or order now, and no "
+        "exclamation marks.",
+        "End with one simple question they can answer in a line. Replies tell Gmail people "
+        "want your emails, which is the strongest signal there is.",
+        "Switch the unsubscribe line off on the Signature tab for personal outreach. It marks "
+        "an email as a mass mailing. Replies asking to be removed are still handled.",
+        "Send slowly, from your own company address, with the Domain check page all green.",
+        "Preview & score tells you where the email is likely to land and what to change.",
     ]),
     ("Why several subjects and messages?", [
         "The subject is the line people see in their inbox before they open your email. The "
@@ -208,9 +155,12 @@ PAGE_HELP_FOOTER = (
 # to do differently, not about the rule engine: the point is that the reader
 # should write a better email afterwards.
 SCORE_HELP_INTRO = (
-    "Every message starts at 100. The checks below run over your subjects, your message, "
-    "your signature and your domain settings, and each problem found takes points off. "
-    "Nothing is sent anywhere. The whole check runs on your computer.")
+    "The score reads the finished email exactly as the person on the left will receive it: "
+    "subject, message, brochure link, signature and unsubscribe line together, with their "
+    "details filled in. It starts at 100 and each problem found takes points off. It also "
+    "checks every subject and message you have written, and your domain settings. Press "
+    "Next contact to score another person's version. Nothing is sent anywhere: the whole "
+    "check runs on your computer.")
 
 SCORE_HELP_SECTIONS = [
     ("How much each problem costs", [
@@ -219,6 +169,15 @@ SCORE_HELP_SECTIONS = [
         "Medium −6: a habit that hurts across a large send.",
         "Low −3: a small improvement worth making.",
         "85 and above reaches the inbox reliably; below 70 is risky; below 50 will be filtered.",
+    ]),
+    ("Main inbox, Promotions or spam", [
+        "Under the score is where the email is likely to land in Gmail.",
+        "Main inbox: it reads like a person writing. This is what you want.",
+        "Promotions tab: it looks like marketing. The items marked Promotions tab say what "
+        "to change: usually the unsubscribe line, links, pictures, formatting or sales words.",
+        "Spam: there is a serious problem. Fix the critical and high items first.",
+        "This is an estimate. Gmail does not publish its rules, so it is based on what Gmail "
+        "is known to look at.",
     ]),
     ("Your subject lines", [
         "Keep them under about 60 characters, or phones cut them off.",
@@ -231,14 +190,15 @@ SCORE_HELP_SECTIONS = [
         "Put {{Company}} in the subject so no two recipients get an identical one.",
     ]),
     ("Your message", [
-        "Aim for 80 to 200 words. Very short mail with a link looks like phishing; very long "
-        "first emails get ignored.",
+        "Aim for 50 to 150 words. Very short mail with a link looks like phishing; long first "
+        "emails read like newsletters.",
         "Write in plain business language. Five or more sales-pitch phrases is a heavy penalty.",
-        "One or two links at most, to your own domain, over https. Link shorteners and raw "
-        "IP addresses are penalised hard because they hide the destination.",
+        "No links is best in a first email; one at most, to your own website, over https. Link "
+        "shorteners and bare IP addresses are penalised hard because they hide where a link "
+        "goes.",
         "Lead with text, not images. An image-heavy email with little text is a classic "
         "spam pattern, and most email programs block images by default anyway.",
-        "Keep a clear opt-out line. The app adds one for you unless you switch it off.",
+        "End with one simple question, and greet the person by name.",
     ]),
     ("Variety, the one most people miss", [
         "Hundreds of identical messages are what filters fingerprint, and it is the most "
@@ -283,9 +243,9 @@ class VariantEditor(Card):
         self._on_change = on_change
         self._on_focus = on_focus
 
-        self.enabled_box = checkbox(f"{self.noun} {index}", enabled,
+        self.enabled_box = checkbox(self._numbered(index), enabled,
                                     on_change=lambda _c: self._changed())
-        self.enabled_box.setToolTip("Untick to keep this one without sending it")
+        self.enabled_box.setToolTip(t("Untick to keep this one without sending it"))
         self.info = hint("", wrap=False)
         remove = danger_button("Remove", lambda: on_delete and on_delete(self), 90)
         self.add(row(self.enabled_box, self.info, None, remove))
@@ -323,20 +283,24 @@ class VariantEditor(Card):
         return self.enabled_box.isChecked()
 
     def set_index(self, index: int) -> None:
-        self.enabled_box.setText(f"{self.noun} {index}")
+        self.enabled_box.setText(self._numbered(index))
+
+    def _numbered(self, index: int) -> str:
+        return t("Message {number}", number=index) if self.multiline \
+            else t("Subject {number}", number=index)
 
     def _changed(self) -> None:
         text = self.get_text()
         error = merge.validate_spintax(text)
         variants = merge.spintax_variants(text)
         if error:
-            self.info.setText(f"⚠ {error}")
+            self.info.setText(t(f"⚠ {error}"))
             set_tone(self.info, "error")
         elif variants > 1:
-            self.info.setText(f"{variants:,} mixed versions")
+            self.info.setText(t("{variants:,} mixed versions", variants=variants))
             set_tone(self.info, "success")
         else:
-            self.info.setText(f"{len(text)} characters")
+            self.info.setText(t("{count} characters", count=len(text)))
             set_tone(self.info, "muted")
         if self._on_change:
             self._on_change()
@@ -398,11 +362,11 @@ class TemplatesPage(Page):
         self.root.addWidget(self.scroll, 1)
 
         help_button = secondary_button("?  How to write your email", self._explain_page)
-        help_button.setToolTip("A short guide to this page, in plain English")
+        help_button.setToolTip(t("A short guide to this page, in plain English"))
         import_button = secondary_button("Import from a spreadsheet...", self._import_sheet)
-        import_button.setToolTip("Bring in subject lines and messages from an Excel or CSV file")
+        import_button.setToolTip(t("Bring in subject lines and messages from an Excel or CSV file"))
         sample_button = secondary_button("Get a blank sheet...", self._save_sample_sheet)
-        sample_button.setToolTip("Save a spreadsheet laid out ready for you to fill in")
+        sample_button.setToolTip(t("Save a spreadsheet laid out ready for you to fill in"))
         self.scroll.add(row(heading("My message"), None, import_button, sample_button,
                             help_button))
         self.scroll.add(muted(
@@ -424,7 +388,7 @@ class TemplatesPage(Page):
 
         self.save_status = muted("", wrap=False)
         save = primary_button("Save", self.save, 170)
-        save.setToolTip("Save your subjects, messages and signature (Ctrl+S)")
+        save.setToolTip(t("Save your subjects, messages and signature (Ctrl+S)"))
         self.root.addWidget(row(save, self.save_status, None))
 
         shortcut = QShortcut(QKeySequence(QKeySequence.StandardKey.Save), self)
@@ -468,16 +432,17 @@ class TemplatesPage(Page):
         clear_layout(layout)
         self._tag_names = list(names)
         label = hint("Personal touch:", wrap=False)
-        label.setToolTip("Filled in for each person from your contact list")
+        label.setToolTip(t("Filled in for each person from your contact list"))
         layout.addWidget(label)
         for tag in names:
             snippet = "{{" + tag + "}}"
             button = small_button(snippet, lambda s=snippet: self._insert(multiline, s))
-            button.setToolTip(TAG_HELP.get(tag, f"The {tag} column from your contact list"))
+            button.setToolTip(t(TAG_HELP.get(tag, t("The {tag} column from your contact list",
+                                                    tag=tag))))
             layout.addWidget(button)
         mix = small_button("{Hi|Hello}", lambda: self._insert(multiline, "{Hi|Hello}"))
-        mix.setToolTip("Mix words: each person gets one of the choices at random. "
-                       "Change them to your own, separated by |")
+        mix.setToolTip(t("Mix words: each person gets one of the choices at random. "
+                       "Change them to your own, separated by |"))
         layout.addWidget(mix)
 
     def _refresh_tag_bars(self) -> None:
@@ -495,11 +460,11 @@ class TemplatesPage(Page):
         container, layout = flow_row(4)
         layout.addWidget(hint("Style:", wrap=False))
         bold = small_button("Bold", lambda: self._format("bold"))
-        bold.setToolTip("Select some words, then press this to make them bold")
+        bold.setToolTip(t("Select some words, then press this to make them bold"))
         link = small_button("Link", lambda: self._format("link"))
-        link.setToolTip("Select some words, then press this to turn them into a link")
+        link.setToolTip(t("Select some words, then press this to turn them into a link"))
         bullets = small_button("Bullet points", lambda: self._format("list"))
-        bullets.setToolTip("Turn the selected lines into bullet points, or start a new list")
+        bullets.setToolTip(t("Turn the selected lines into bullet points, or start a new list"))
         for button in (bold, link, bullets):
             layout.addWidget(button)
         return container
@@ -522,7 +487,7 @@ class TemplatesPage(Page):
             editor.insert_list()
         else:
             address, ok = QInputDialog.getText(
-                self, "Add a link", "Web address the link opens, for example www.yourcompany.com")
+                self, t("Add a link"), t("Web address the link opens, for example www.yourcompany.com"))
             address = address.strip()
             if not ok or not address:
                 return
@@ -709,16 +674,17 @@ class TemplatesPage(Page):
         return (record["signature_html"] or "") if record else ""
 
     def _insert_example_signature(self) -> None:
-        set_text(self.signature_box, EXAMPLE_SIGNATURE)
+        set_text(self.signature_box, examples.for_language()["signature"])
         self._content_changed()
         self.notify("Replace everything in [square brackets] with your own details", "info", 6000)
 
     def _example_subjects(self) -> None:
-        for text in EXAMPLE_SUBJECTS:
+        subjects = examples.for_language()["subjects"]
+        for text in subjects:
             self._add_subject(text)
         self._content_changed()
-        self.notify(f"{len(EXAMPLE_SUBJECTS)} example subject lines added. Edit them to suit "
-                    f"your business", "info", 6000)
+        self.notify(t("{count} example subject lines added. Edit them to suit your business",
+                      count=len(subjects)), "info", 6000)
 
     def _example_body(self) -> None:
         """Add all three examples, not one.
@@ -726,24 +692,26 @@ class TemplatesPage(Page):
         One body is a finding in its own right: identical bodies sent in volume
         are the easiest thing in the world to fingerprint, and the score says so.
         """
-        for text in EXAMPLE_BODIES:
+        bodies = examples.for_language()["bodies"]
+        for text in bodies:
             self._add_body(text)
         self._content_changed()
-        self.notify(f"{len(EXAMPLE_BODIES)} example messages added. Replace the "
-                    f"[square brackets] with your own words", "info", 6000)
+        self.notify(t("{count} example messages added. Replace the [square brackets] with your own "
+                      "words", count=len(bodies)), "info", 6000)
 
     # --- import from a spreadsheet ------------------------------------------
     def _import_sheet(self) -> None:
         path, _filter = QFileDialog.getOpenFileName(
-            self, "Choose a spreadsheet of subjects and messages", "",
-            "Spreadsheets (*.xlsx *.xls *.csv);;All files (*.*)")
+            self, t("Choose a spreadsheet of subjects and messages"), "",
+            t("Spreadsheets (*.xlsx *.xls *.csv);;All files (*.*)"))
         if not path:
             return
         self.notify("Reading the spreadsheet...", "info", 2000)
         Task(importer.read_templates, Path(path)).start(
             on_result=self.guard(self._sheet_ready),
             on_error=self.guard(
-                lambda message: self.notify(f"Could not read that file: {message}", "error", 8000)))
+                lambda message: self.notify(t("Could not read that file: {message}",
+                                              message=message), "error", 8000)))
 
     def _sheet_ready(self, sheet: importer.TemplateSheet) -> None:
         if not sheet.subjects and not sheet.bodies:
@@ -760,18 +728,19 @@ class TemplatesPage(Page):
 
         found = []
         if sheet.subjects:
-            found.append(f"{len(sheet.subjects)} subject line(s)")
+            found.append(t("{count} subject line(s)", count=len(sheet.subjects)))
         if sheet.bodies:
-            found.append(f"{len(sheet.bodies)} message(s)")
+            found.append(t("{count} message(s)", count=len(sheet.bodies)))
         if sheet.signature:
-            found.append("a signature")
-        summary = "Found " + ", ".join(found) + "."
+            found.append(t("a signature"))
+        summary = t("Found {things}.", things=", ".join(found))
 
         mode = "add"
         if any(e.get_text().strip() for e in self.subject_editors + self.body_editors):
             mode = ChoiceDialog.ask(
-                self, "Import subjects and messages", summary + "\n\nYou already have some "
-                "written. What should happen to them?",
+                self, "Import subjects and messages",
+                summary + "\n\n" + t("You already have some written. What should happen to "
+                                     "them?"),
                 [("add", "Keep mine and add these", "primary"),
                  ("replace", "Replace mine with these", "danger"),
                  (None, "Cancel", "secondary")])
@@ -796,26 +765,27 @@ class TemplatesPage(Page):
 
         unknown = sorted({tag for text in sheet.subjects + sheet.bodies
                           for tag in merge.unresolved_tags(text, importer.merge_tag_names())})
-        message = summary + " Check them over, then press Save."
+        message = summary + " " + t("Check them over, then press Save.")
         if unknown:
-            message += (" Some {{tags}} do not match a column in your contacts: "
-                        + ", ".join(unknown))
+            message += " " + t("Some tags do not match a column in your contacts: {tags}",
+                               tags=", ".join("{{" + tag + "}}" for tag in unknown))
         self.notify(message, "warn" if unknown else "success", 9000)
         self.tabs.set("Subjects" if sheet.subjects else "Message")
 
     def _save_sample_sheet(self) -> None:
         path, _filter = QFileDialog.getSaveFileName(
-            self, "Save a blank sheet for your subjects and messages", "my message.xlsx",
-            "Excel (*.xlsx)")
+            self, t("Save a blank sheet for your subjects and messages"), "my message.xlsx",
+            t("Excel (*.xlsx)"))
         if not path:
             return
-        Task(importer.write_template_sample, path, EXAMPLE_SUBJECTS, EXAMPLE_BODIES,
-             EXAMPLE_SIGNATURE).start(
+        sample = examples.for_language()
+        Task(importer.write_template_sample, path, sample["subjects"], sample["bodies"],
+             sample["signature"]).start(
             on_result=self.guard(lambda saved: self.notify(
-                f"Saved {Path(saved).name}. It has examples in it: change them, save the file "
-                f"and import it here", "success", 8000)),
+                t("Saved {name}. It has examples in it: change them, save the file and import "
+                  "it here", name=Path(saved).name), "success", 8000)),
             on_error=self.guard(lambda message: self.notify(
-                f"Could not save the sheet: {message}", "error", 8000)))
+                t("Could not save the sheet: {message}", message=message), "error", 8000)))
 
     # --- preview ------------------------------------------------------------
     def _build_preview(self) -> QWidget:
@@ -826,8 +796,8 @@ class TemplatesPage(Page):
         layout.setSpacing(8)
 
         next_button = secondary_button("Next contact", self._next_contact, 140)
-        next_button.setToolTip("Another recipient, with a different subject and message "
-                               "drawn from your lists")
+        next_button.setToolTip(t("Another recipient, with a different subject and message "
+                               "drawn from your lists"))
         layout.addWidget(row(
             primary_button("Refresh preview", self.refresh_preview, 160),
             next_button,
@@ -854,13 +824,16 @@ class TemplatesPage(Page):
 
         right = Card(kind="card", padding=14)
         help_button = small_button("?  How this works", self._explain_score)
-        help_button.setToolTip("What the score measures, and how to write a better email")
+        help_button.setToolTip(t("What the score measures, and how to write a better email"))
         right.add(row(subheading("Spam score"), None, help_button))
         self.score_label = muted("-", wrap=False)
         self.score_label.setProperty("role", "score")
         right.add(self.score_label)
         self.score_verdict = muted("Refresh to check")
         right.add(self.score_verdict)
+        self.score_landing = body("")
+        self.score_landing.setVisible(False)
+        right.add(self.score_landing)
         right.add(separator())
         self.findings_area = ScrollPage(spacing=8)
         right.add(self.findings_area, 1)
@@ -880,8 +853,7 @@ class TemplatesPage(Page):
     def _sample_contact(self) -> dict:
         rows = db.query("SELECT * FROM contacts WHERE valid = 1 ORDER BY id LIMIT 50")
         if not rows:
-            return {"email": "sample@example.com", "company": "Example Trading LLC",
-                    "person": "Mr. Ahmed Khan", "extra_json": None}
+            return dict(scorer.SAMPLE_CONTACT)
         return merge.as_mapping(rows[self._preview_index % len(rows)])
 
     @staticmethod
@@ -932,18 +904,19 @@ class TemplatesPage(Page):
             return
         content = self.current_content()
         if not content.subject_variants or not content.body_variants:
-            self.preview_subject.setText("Add at least one subject and one body")
+            self.preview_subject.setText(t("Add at least one subject and one body"))
             self.preview_body.setPlainText("")
             self.preview_variant.setText("")
             return
 
         contact = self._sample_contact()
-        context = merge.build_context(contact)
+        context = merge.build_context(contact, importer.extra_columns())
         identity = self._identity()
 
         self.preview_contact.setText(
-            f"Previewing as: {contact.get('person') or '-'} · "
-            f"{contact.get('company') or '-'} · {contact.get('email')}")
+            t("Previewing as: {value} · {value2} · {get}",
+              value=contact.get('person') or '-', value2=contact.get('company') or '-',
+              get=contact.get('email')))
 
         # The pick is held on the page rather than drawn here, so editing the
         # text refreshes the same combination instead of shuffling under the
@@ -951,8 +924,9 @@ class TemplatesPage(Page):
         subject_index = self._subject_pick % len(content.subject_variants)
         body_index = self._body_pick % len(content.body_variants)
         self.preview_variant.setText(
-            f"Subject {subject_index + 1} of {len(content.subject_variants)}  ·  "
-            f"Message {body_index + 1} of {len(content.body_variants)}")
+            t("Subject {number} of {count}  ·  Message {number2} of {count2}",
+              number=subject_index + 1, count=len(content.subject_variants),
+              number2=body_index + 1, count2=len(content.body_variants)))
 
         # Rendering and scoring both parse the whole message; neither belongs on
         # the UI thread while the user is still typing.
@@ -964,13 +938,14 @@ class TemplatesPage(Page):
         if page is not None:
             dns_results = page.cached_results() or None
 
-        Task(jobs.score_content, content, identity.email, identity.reply_to,
-             importer.merge_tag_names(), dns_results).start(on_result=self._show_score)
+        Task(jobs.score_content, content, identity, importer.merge_tag_names(), dns_results,
+             context, subject_index, body_index, self._preview_index).start(
+            on_result=self._show_score)
 
     def _show_preview(self, result) -> None:
         subject, html, text = result
         self._preview_html = html
-        self.preview_subject.setText(subject)
+        self.preview_subject.setText(t(subject))
         self.preview_body.setPlainText(text)
 
     def _show_score(self, report: scorer.ScoreReport) -> None:
@@ -978,11 +953,16 @@ class TemplatesPage(Page):
             scorer.save_report(self._set_id, report)
 
         colour = theme.status_color(report.status)
-        self.score_label.setText(str(report.score))
+        self.score_label.setText(t(str(report.score)))
         self.score_label.setStyleSheet(
             f"color: {colour}; font-size: {theme.px(36)}px; font-weight: 700;")
-        self.score_verdict.setText(f"Grade {report.grade}: {report.verdict}")
+        self.score_verdict.setText(t("Grade {grade}: {verdict}",
+                                     grade=report.grade, verdict=report.verdict))
         self.score_verdict.setStyleSheet(f"color: {colour};")
+        landing_tones = {"primary": "success", "promotions": "warning", "spam": "error"}
+        self.score_landing.setText(t(report.landing_text))
+        set_tone(self.score_landing, landing_tones.get(report.landing, "muted"))
+        self.score_landing.setVisible(bool(report.landing))
 
         clear_layout(self.findings_area.body_layout)
         if not report.findings:
@@ -997,7 +977,8 @@ class TemplatesPage(Page):
             inner = QVBoxLayout(block)
             inner.setContentsMargins(0, 0, 0, 0)
             inner.setSpacing(1)
-            label = hint(f"{finding.severity.upper()} · {finding.category}")
+            label = hint(t(SEVERITY_NAMES.get(finding.severity, finding.severity)) + " · "
+                         + t(finding.category))
             set_tone(label, tones.get(finding.severity, "muted"))
             inner.addWidget(label)
             inner.addWidget(muted(finding.message))
@@ -1017,7 +998,7 @@ class TemplatesPage(Page):
 
     # --- persistence --------------------------------------------------------
     def _content_changed(self) -> None:
-        self.save_status.setText("Unsaved changes")
+        self.save_status.setText(t("Unsaved changes"))
         set_tone(self.save_status, "warning")
         if self.tabs.current() == "Preview & score":
             self._score_debounce.poke()
@@ -1056,7 +1037,7 @@ class TemplatesPage(Page):
              for index, (text, enabled) in enumerate(bodies)])
 
         db.set_setting("template_set_id", self._set_id)
-        self.save_status.setText("Saved")
+        self.save_status.setText(t("Saved"))
         set_tone(self.save_status, "success")
         self.notify("Templates saved", "success")
         self.window_.refresh_status()

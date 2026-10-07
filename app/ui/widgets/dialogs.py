@@ -5,6 +5,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout,
                              QWidget)
 
+from app.i18n import t
 from app.ui import theme
 from app.ui.widgets.common import danger_button, primary_button, secondary_button
 
@@ -14,7 +15,8 @@ class ConfirmDialog(QDialog):
                  confirm_text: str = "Continue", cancel_text: str = "Cancel",
                  danger: bool = False):
         super().__init__(parent)
-        self.setWindowTitle(title)
+        title, message = t(title), t(message)
+        self.setWindowTitle(t(title))
         self.setModal(True)
         self.setMinimumWidth(round(460 * theme.text_scale()))
 
@@ -23,11 +25,11 @@ class ConfirmDialog(QDialog):
         layout.setContentsMargins(pad, pad, pad, pad)
         layout.setSpacing(12)
 
-        heading = QLabel(title)
+        heading = QLabel(t(title))
         heading.setProperty("role", "subheading")
         layout.addWidget(heading)
 
-        text = QLabel(message)
+        text = QLabel(t(message))
         text.setWordWrap(True)
         layout.addWidget(text)
         layout.addSpacing(6)
@@ -56,7 +58,8 @@ class ChoiceDialog(QDialog):
     def __init__(self, parent: QWidget | None, title: str, message: str,
                  choices: list[tuple[str, str, str]]):
         super().__init__(parent)
-        self.setWindowTitle(title)
+        title, message = t(title), t(message)
+        self.setWindowTitle(t(title))
         self.setModal(True)
         self.setMinimumWidth(round(500 * theme.text_scale()))
         self.result_value: str | None = None
@@ -66,11 +69,11 @@ class ChoiceDialog(QDialog):
         layout.setContentsMargins(pad, pad, pad, pad)
         layout.setSpacing(12)
 
-        heading = QLabel(title)
+        heading = QLabel(t(title))
         heading.setProperty("role", "subheading")
         layout.addWidget(heading)
 
-        text = QLabel(message)
+        text = QLabel(t(message))
         text.setWordWrap(True)
         layout.addWidget(text)
         layout.addSpacing(6)
@@ -105,7 +108,8 @@ class InfoDialog(QDialog):
     def __init__(self, parent: QWidget | None, title: str, intro: str,
                  sections: list[tuple[str, list[str]]], footer: str = ""):
         super().__init__(parent)
-        self.setWindowTitle(title)
+        title, intro, footer = t(title), t(intro), t(footer)
+        self.setWindowTitle(t(title))
         self.setModal(True)
         scale = theme.text_scale()
         self.setMinimumWidth(round(560 * scale))
@@ -116,12 +120,12 @@ class InfoDialog(QDialog):
         layout.setContentsMargins(pad, pad, pad, pad)
         layout.setSpacing(round(10 * scale))
 
-        heading = QLabel(title)
+        heading = QLabel(t(title))
         heading.setProperty("role", "heading")
         layout.addWidget(heading)
 
         if intro:
-            lead = QLabel(intro)
+            lead = QLabel(t(intro))
             lead.setProperty("role", "muted")
             lead.setWordWrap(True)
             layout.addWidget(lead)
@@ -139,11 +143,11 @@ class InfoDialog(QDialog):
         inner.setSpacing(round(6 * scale))
 
         for section_title, points in sections:
-            label = QLabel(section_title)
+            label = QLabel(t(section_title))
             label.setProperty("role", "subheading")
             inner.addWidget(label)
             for point in points:
-                item = QLabel(f"•  {point}")
+                item = QLabel(t("•  " + t(point)))
                 item.setWordWrap(True)
                 item.setProperty("role", "muted")
                 item.setContentsMargins(round(6 * scale), 0, 0, 0)
@@ -155,7 +159,7 @@ class InfoDialog(QDialog):
         layout.addWidget(area, 1)
 
         if footer:
-            note = QLabel(footer)
+            note = QLabel(t(footer))
             note.setProperty("role", "hint")
             note.setWordWrap(True)
             layout.addWidget(note)

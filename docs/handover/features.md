@@ -57,6 +57,36 @@ Where each feature lives and how it works. Paths are from the repository root.
 - Typed text becomes HTML in `composer.text_to_html`; a message already
   containing `<p>`/`<br>` is left alone.
 
+## The spam score (`app/core/scorer.py`)
+
+- Reads the **finished email**, not the parts: `score()` renders exactly what
+  the Preview tab shows (same contact, subject, message and spintax choices via
+  `subject_index`, `body_index`, `seed`) with signature, brochure link and
+  unsubscribe line, then checks the subject, the whole text, every link (the
+  signature's included), pictures, tags left over or blank for this contact.
+- Also checks across every version: unknown tags and brace mistakes in any
+  subject or message, variety, identity and DNS, attachment, signature.
+- `report.landing` estimates Gmail's tab: `primary`, `promotions` or `spam`,
+  from the bulk-mail signals in `_check_promotions` (unsubscribe line and
+  header, links, pictures, formatting, sales words, length, attachment). Items
+  in the "Promotions tab" category say what to change.
+- The Preview tab calls it through `jobs.score_content` with the preview's own
+  contact and choices, so "Next contact" scores another person's version.
+- Trigger and sales word lists cover all five languages.
+
+## Example messages (`app/core/examples.py`)
+
+- One set per language, written to land in the main inbox: greeting by name,
+  short plain paragraphs, no links, pictures, formatting or sales words, one
+  closing question. A test scores every subject/message pair in every language
+  and requires 90+ and "primary".
+- The guide on My message ("How to write your email" → "Reaching the main
+  inbox, not spam or Promotions") explains the same rules to the user.
+
+## Languages
+
+See [languages.md](languages.md). Settings → Language; `MainWindow.change_language()`.
+
 ## The unsubscribe line
 
 - `composer.Content.unsubscribe_note`. When true, `assemble_html` appends the

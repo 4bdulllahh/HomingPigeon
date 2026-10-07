@@ -58,6 +58,7 @@ user ticks "delete my data" in Settings.
 | `warmup_enabled`, `manual_daily_cap`, `provider_limit*` | Daily cap |
 | `appearance`, `text_size`, `high_contrast`, `bold_text`, `date_format`, `time_format`, `start_page`, `last_page` | Look and feel (`app/core/prefs.py`) |
 | `contacts_sort` | Remembered sort on My contacts |
+| `language` | `en`, `ar`, `de`, `es` or `fr`. Empty until chosen in Settings: then the computer's language is used if supported, else English |
 
 ## Migrations
 

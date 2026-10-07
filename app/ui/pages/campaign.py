@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import QButtonGroup, QFileDialog, QGridLayout, QVBoxLayout,
 
 from app import config
 from app.core import db, prefs, warmup
+from app.i18n import t
 from app.ui.pages.base import Page
 from app.ui.widgets.common import (FormRow, Section, hint, muted, primary_button, row,
                                    secondary_button, set_tone)
@@ -101,8 +102,8 @@ class CampaignPage(Page):
 
     def _choose_attachment(self) -> None:
         path, _filter = QFileDialog.getOpenFileName(
-            self, "Select your brochure", "",
-            "PDF (*.pdf);;Images (*.png *.jpg *.jpeg);;All files (*.*)")
+            self, t("Select your brochure"), "",
+            t("PDF (*.pdf);;Images (*.png *.jpg *.jpeg);;All files (*.*)"))
         if not path:
             return
         file_path = Path(path)
@@ -110,20 +111,20 @@ class CampaignPage(Page):
         limit = config.MAX_ATTACHMENT_BYTES
 
         if size > limit:
-            self.attach_label.setText(file_path.name)
+            self.attach_label.setText(t(file_path.name))
             set_tone(self.attach_label, "error")
             self.attach_warning.setText(
-                f"✕ {size / 1_048_576:.1f} MB, over the {limit // 1_048_576} MB limit. "
-                f"Compress the PDF or switch to a link.")
+                t("✕ {number:.1f} MB, over the {number2} MB limit. Compress the PDF or switch "
+                  "to a link.", number=size / 1_048_576, number2=limit // 1_048_576))
             set_tone(self.attach_warning, "error")
             return
 
         db.set_setting("attachment_path", str(file_path))
-        self.attach_label.setText(file_path.name)
+        self.attach_label.setText(t(file_path.name))
         set_tone(self.attach_label, "bright")
         self.attach_warning.setText(
-            f"⚠ {size / 1_048_576:.1f} MB. Every recipient receives this file, which raises "
-            f"your spam score on first contact.")
+            t("⚠ {number:.1f} MB. Every recipient receives this file, which raises your "
+              "spam score on first contact.", number=size / 1_048_576))
         set_tone(self.attach_warning, "warning")
 
     # --- pacing -------------------------------------------------------------
@@ -153,7 +154,7 @@ class CampaignPage(Page):
         return section
 
     def _slider_moved(self, low: int, high: int) -> None:
-        self.slider_readout.setText(self.slider.readout())
+        self.slider_readout.setText(t(self.slider.readout()))
         self._update_pace_note(low, high)
 
     def _slider_released(self, low: int, high: int) -> None:
@@ -175,8 +176,9 @@ class CampaignPage(Page):
         else:
             warning, tone = "", "muted"
         self.pace_note.setText(
-            f"About {per_hour} emails per hour. Today's limit of {cap} would take roughly "
-            f"{hours:.1f} hours.{warning}")
+            t("About {per_hour} emails per hour. Today's limit of {cap} would take roughly "
+              "{hours:.1f} hours.{warning}",
+              per_hour=per_hour, cap=cap, hours=hours, warning=warning))
         set_tone(self.pace_note, tone)
 
     # --- window -------------------------------------------------------------
@@ -197,12 +199,12 @@ class CampaignPage(Page):
 
         hours = [prefs.format_clock(f"{h:02d}:00") for h in range(24)]
         start_row = FormRow("Start")
-        self.start_picker = combo(hours, on_change=lambda _t: self._mark_dirty())
+        self.start_picker = combo(hours, on_change=lambda _t: self._mark_dirty(), translate=False)
         start_row.add(self.start_picker)
         grid.addWidget(start_row, 0, 0)
 
         end_row = FormRow("End")
-        self.end_picker = combo(hours, on_change=lambda _t: self._mark_dirty())
+        self.end_picker = combo(hours, on_change=lambda _t: self._mark_dirty(), translate=False)
         end_row.add(self.end_picker)
         grid.addWidget(end_row, 0, 1)
         section.add(holder)
@@ -271,17 +273,19 @@ class CampaignPage(Page):
     def _refresh_warmup(self) -> None:
         status = warmup.status()
         self.warmup_status.setText(
-            f"{status.describe()} · {status.remaining} remaining today "
-            f"· provider ceiling {status.provider_limit:,}/day")
+            t("{describe} · {remaining} remaining today · provider ceiling {provider_limit:,}/day",
+              describe=status.describe(), remaining=status.remaining,
+              provider_limit=status.provider_limit))
         upcoming = warmup.projected_schedule(7)
         self.schedule_label.setText(
-            "Next days: " + "  ".join(f"day {d}: {c}" for d, c in upcoming))
+            t("Next days: {days}", days="  ".join(t("day {day}: {count}", day=d, count=c)
+                                                  for d, c in upcoming)))
         low, high = self.slider.get()
         self._update_pace_note(low, high)
 
     # --- persistence --------------------------------------------------------
     def _mark_dirty(self) -> None:
-        self.save_status.setText("Unsaved changes")
+        self.save_status.setText(t("Unsaved changes"))
         set_tone(self.save_status, "warning")
 
     def _parse_holidays(self) -> list[str]:
@@ -310,7 +314,7 @@ class CampaignPage(Page):
         except ValueError:
             pass
 
-        self.save_status.setText("Saved")
+        self.save_status.setText(t("Saved"))
         set_tone(self.save_status, "success")
         self.notify("Campaign settings saved", "success")
         self._refresh_warmup()
@@ -327,15 +331,16 @@ class CampaignPage(Page):
         attachment = db.get_setting("attachment_path", "")
         if attachment and Path(attachment).exists():
             path = Path(attachment)
-            self.attach_label.setText(path.name)
+            self.attach_label.setText(t(path.name))
             set_tone(self.attach_label, "bright")
             self.attach_warning.setText(
-                f"⚠ {path.stat().st_size / 1_048_576:.1f} MB attached to every email.")
+                t("⚠ {number:.1f} MB attached to every email.",
+                  number=path.stat().st_size / 1_048_576))
             set_tone(self.attach_warning, "warning")
 
         self.slider.set(int(db.get_setting("delay_min_s", 75)),
                         int(db.get_setting("delay_max_s", 150)))
-        self.slider_readout.setText(self.slider.readout())
+        self.slider_readout.setText(t(self.slider.readout()))
         self.start_picker.setCurrentText(
             prefs.format_clock(db.get_setting("window_start", config.DEFAULT_WINDOW_START)))
         self.end_picker.setCurrentText(

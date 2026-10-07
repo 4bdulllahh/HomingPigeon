@@ -14,6 +14,7 @@ from typing import Any
 import pandas as pd
 
 from app.core import db
+from app.i18n import t
 
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-']+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
 
@@ -65,19 +66,20 @@ class ImportResult:
     problems: list[tuple[str, str]] = field(default_factory=list)
 
     def summary(self) -> str:
-        bits = [f"{self.total_rows:,} rows read", f"{self.imported:,} imported"]
+        bits = [t("{total_rows:,} rows read", total_rows=self.total_rows), t("{imported:,} imported",
+                                                                             imported=self.imported)]
         if self.updated:
-            bits.append(f"{self.updated:,} updated")
+            bits.append(t("{updated:,} updated", updated=self.updated))
         if self.duplicates:
-            bits.append(f"{self.duplicates:,} duplicates")
+            bits.append(t("{duplicates:,} duplicates", duplicates=self.duplicates))
         if self.invalid:
-            bits.append(f"{self.invalid:,} invalid")
+            bits.append(t("{invalid:,} invalid", invalid=self.invalid))
         if self.no_mx:
-            bits.append(f"{self.no_mx:,} dead domains")
+            bits.append(t("{no_mx:,} dead domains", no_mx=self.no_mx))
         if self.suppressed:
-            bits.append(f"{self.suppressed:,} suppressed")
+            bits.append(t("{suppressed:,} suppressed", suppressed=self.suppressed))
         if self.risky:
-            bits.append(f"{self.risky:,} flagged risky")
+            bits.append(t("{risky:,} flagged risky", risky=self.risky))
         return " · ".join(bits)
 
 
@@ -172,7 +174,8 @@ def validate_email(email: str) -> tuple[bool, str]:
         return False, "not a valid address format"
     domain = email.split("@", 1)[1].lower()
     if domain in TYPO_DOMAINS:
-        return False, f"likely typo, did you mean {TYPO_DOMAINS[domain]}?"
+        return False, t("likely typo, did you mean {typo_domains}?",
+                        typo_domains=TYPO_DOMAINS[domain])
     if domain.endswith("."):
         return False, "domain ends with a dot"
     return True, ""
@@ -295,7 +298,8 @@ def import_dataframe(
                 mx_cache[domain] = dns_tools.has_mx(domain)
             if not mx_cache[domain]:
                 result.no_mx += 1
-                result.problems.append((email, f"{domain} has no mail server (MX)"))
+                result.problems.append((email, t("{domain} has no mail server (MX)",
+                                                 domain=domain)))
                 continue
 
         flags = risk_flags(email)
@@ -441,14 +445,22 @@ class TemplateSheet:
     signature: str = ""
 
 
+# Column headings recognised in every app language, so a German user's sheet
+# headed Betreff / Nachricht / Signatur imports just like an English one
+_SUBJECT_HEADINGS = ("subject", "betreff", "asunto", "objet", "موضوع")
+_SIGNATURE_HEADINGS = ("signature", "sign off", "signatur", "firma", "توقيع")
+_BODY_HEADINGS = ("message", "body", "bodies", "email", "content", "text", "template",
+                  "nachricht", "inhalt", "mensaje", "cuerpo", "texte", "contenu", "رسالة",
+                  "نص")
+
+
 def _template_role(header: str) -> str | None:
-    name = re.sub(r"[^a-z ]", " ", str(header).lower())
-    if "subject" in name:
+    name = re.sub(r"[^\w ]", " ", str(header).lower())
+    if any(word in name for word in _SUBJECT_HEADINGS):
         return "subject"
-    if "signature" in name or "sign off" in name:
+    if any(word in name for word in _SIGNATURE_HEADINGS):
         return "signature"
-    if any(word in name for word in ("message", "body", "bodies", "email", "content", "text",
-                                     "template")):
+    if any(word in name for word in _BODY_HEADINGS):
         return "body"
     return None
 
@@ -502,19 +514,23 @@ def read_templates(path: str | Path) -> TemplateSheet:
 
 def write_template_sample(path: str | Path, subjects: list[str], bodies: list[str],
                           signature: str = "") -> Path:
-    """A ready-to-fill spreadsheet in the layout read_templates() expects."""
+    """A ready-to-fill spreadsheet in the layout read_templates() expects.
+
+    The headings are in the app's language; read_templates() knows them all.
+    """
     path = Path(path)
     rows = max(len(subjects), len(bodies), 1)
     df = pd.DataFrame({
-        "Subject": subjects + [""] * (rows - len(subjects)),
-        "Message": bodies + [""] * (rows - len(bodies)),
-        "Signature": [signature] + [""] * (rows - 1),
+        t("Subject"): subjects + [""] * (rows - len(subjects)),
+        t("Message"): bodies + [""] * (rows - len(bodies)),
+        t("Signature"): [signature] + [""] * (rows - 1),
     })
     from openpyxl.styles import Alignment
 
+    sheet_name = t("My message")[:31]
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="My message")
-        sheet = writer.sheets["My message"]
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+        sheet = writer.sheets[sheet_name]
         for letter, width in (("A", 50), ("B", 90), ("C", 40)):
             sheet.column_dimensions[letter].width = width
         for row in sheet.iter_rows(min_row=2):

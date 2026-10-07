@@ -505,7 +505,7 @@ def test_no_em_dashes_or_typographic_ellipses_anywhere():
     # Built from code points so that this test is not itself an offender
     banned = {chr(0x2014), chr(0x2013), chr(0x2026)}   # em dash, en dash, ellipsis
     offenders = []
-    for pattern in ("*.py", "*.md", "*.txt", "*.bat", "*.sh", "*.command"):
+    for pattern in ("*.py", "*.md", "*.txt", "*.bat", "*.sh", "*.command", "*.json"):
         for path in root.rglob(pattern):
             if any(part in skip for part in path.parts):
                 continue

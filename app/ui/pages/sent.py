@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (QDialog, QFileDialog, QGridLayout, QHBoxLayout, QLa
                              QTextBrowser, QVBoxLayout, QWidget)
 
 from app.core import composer, db, prefs
+from app.i18n import t
 from app.models.sent_model import FILTERS, SentModel, outcome_of
 from app.ui import theme
 from app.ui.pages.base import Page
@@ -114,18 +115,19 @@ class SentPage(Page):
     def _update_summary(self) -> None:
         counts = self.model.counts()
         chosen = dict(FILTERS).get(self.filters.get(), "All")
-        text = f"{counts['attempted']:,} emails sent in total"
+        text = t("{attempted:,} emails sent in total", attempted=counts['attempted'])
         if self.filters.get() != "all":
-            text += f"  ·  showing: {chosen}"
+            text += t("  ·  showing: {chosen}", chosen=chosen)
         if self.model.search_text():
-            text += f"  ·  matching “{self.model.search_text()}”"
-        self.summary.setText(text)
+            text += t("  ·  matching “{search_text}”", search_text=self.model.search_text())
+        self.summary.setText(t(text))
 
     def _update_tiles(self, counts: dict) -> None:
         total = max(1, counts["attempted"])
         self.tile_sent.update_value(f"{counts['attempted']:,}")
         self.tile_replied.update_value(
-            f"{counts['replied']:,}", f"{counts['replied'] / total * 100:.1f}% reply rate")
+            f"{counts['replied']:,}", t("{number:.1f}% reply rate",
+                                        number=counts['replied'] / total * 100))
         self.tile_bounced.update_value(
             f"{counts['bounced']:,}", "keep below 5%"
             if counts["bounced"] / total <= 0.05 else "too high, clean your list")
@@ -144,30 +146,31 @@ class SentPage(Page):
             return None
 
         menu = QMenu(self)
-        view = QAction("See the email that was sent", menu)
+        view = QAction(t("See the email that was sent"), menu)
         view.triggered.connect(lambda: self._open_email(index))
         menu.addAction(view)
         menu.addSeparator()
 
-        copy = QAction(f"Copy {email}", menu)
+        copy = QAction(t("Copy {email}", email=email), menu)
         copy.triggered.connect(lambda: self._copy(email))
         menu.addAction(copy)
 
         subject = record.get("subject_used", "")
         if subject:
-            copy_subject = QAction("Copy the subject that was used", menu)
+            copy_subject = QAction(t("Copy the subject that was used"), menu)
             copy_subject.triggered.connect(lambda: self._copy(subject))
             menu.addAction(copy_subject)
 
         menu.addSeparator()
-        find = QAction("Find this person in my contacts", menu)
+        find = QAction(t("Find this person in my contacts"), menu)
         find.triggered.connect(lambda: self._open_in_contacts(email))
         menu.addAction(find)
 
         menu.addSeparator()
         rows = self.table.selected_rows()
-        delete = QAction(f"Delete {len(rows)} emails from the history" if len(rows) > 1
-                         else "Delete from the history", menu)
+        delete = QAction(t(t("Delete {count} emails from the history",
+                             count=len(rows)) if len(rows) > 1
+                         else "Delete from the history"), menu)
         delete.triggered.connect(self._delete_selected)
         menu.addAction(delete)
         return menu
@@ -188,16 +191,17 @@ class SentPage(Page):
         count = len(self.table.selected_rows())
         self.delete_button.setEnabled(count > 0)
         self.delete_button.setText(
-            f"Delete {count} selected" if count > 1 else "Delete selected")
+            t(t("Delete {count} selected", count=count) if count > 1 else "Delete selected"))
 
     def _delete_selected(self) -> None:
         rows = self.table.selected_rows()
         if not rows:
             return
         if len(rows) == 1:
-            question = f"Delete the email to {self.model.email_at(rows[0])} from this history?"
+            question = t("Delete the email to {email_at} from this history?",
+                         email_at=self.model.email_at(rows[0]))
         else:
-            question = f"Delete these {len(rows):,} emails from this history?"
+            question = t("Delete these {count:,} emails from this history?", count=len(rows))
         if not ConfirmDialog.ask(
             self, "Delete from the history", question + HISTORY_NOTE,
             confirm_text="Delete", danger=True,
@@ -206,7 +210,7 @@ class SentPage(Page):
         removed = self.model.delete_rows(rows)
         self.table.clear_selection()
         self._selection_changed()
-        self.notify(f"{removed:,} email(s) deleted from the history", "success")
+        self.notify(t("{removed:,} email(s) deleted from the history", removed=removed), "success")
 
     def _clear_history(self) -> None:
         total = self.model.counts()["attempted"]
@@ -215,7 +219,7 @@ class SentPage(Page):
             return
         if not ConfirmDialog.ask(
             self, "Clear the whole history?",
-            f"All {total:,} emails will be removed from this list." + HISTORY_NOTE
+            t("All {total:,} emails will be removed from this list.", total=total) + HISTORY_NOTE
             + "\n\nThis cannot be undone. Use 'Export to Excel...' first if you want a copy.",
             confirm_text="Clear history", danger=True,
         ):
@@ -224,7 +228,7 @@ class SentPage(Page):
         self.table.clear_selection()
         self.model.reload()
         self._selection_changed()
-        self.notify(f"{removed:,} emails removed from the history", "success")
+        self.notify(t("{removed:,} emails removed from the history", removed=removed), "success")
 
     def _copy(self, text: str) -> None:
         copy_to_clipboard(text)
@@ -239,15 +243,17 @@ class SentPage(Page):
     # --- export -------------------------------------------------------------
     def _export(self) -> None:
         path, _filter = QFileDialog.getSaveFileName(
-            self, "Export the sent emails", "sent emails.xlsx", "Excel (*.xlsx)")
+            self, t("Export the sent emails"), "sent emails.xlsx", t("Excel (*.xlsx)"))
         if not path:
             return
         from app.core import exporter
 
         self.notify("Building the spreadsheet...", "info", 2000)
         Task(exporter.export_sent, path).start(
-            on_result=lambda saved: self.notify(f"Saved to {Path(saved).name}", "success"),
-            on_error=lambda message: self.notify(f"Export failed: {message}", "error"))
+            on_result=lambda saved: self.notify(t("Saved to {name}",
+                                                  name=Path(saved).name), "success"),
+            on_error=lambda message: self.notify(t("Export failed: {message}",
+                                                   message=message), "error"))
 
     # --- lifecycle ----------------------------------------------------------
     def on_show(self) -> None:
@@ -265,7 +271,7 @@ class SentEmailDialog(QDialog):
 
     def __init__(self, parent: QWidget | None, message: dict):
         super().__init__(parent)
-        self.setWindowTitle("Sent email")
+        self.setWindowTitle(t("Sent email"))
         self.setModal(True)
         scale = theme.text_scale()
         self.setMinimumWidth(round(600 * scale))
@@ -277,7 +283,7 @@ class SentEmailDialog(QDialog):
         layout.setContentsMargins(pad, pad, pad, pad)
         layout.setSpacing(round(10 * scale))
 
-        subject = QLabel(message.get("subject") or "(no subject)")
+        subject = QLabel(t(message.get("subject") or "(no subject)"))
         subject.setProperty("role", "subheading")
         subject.setWordWrap(True)
         subject.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -309,7 +315,7 @@ class SentEmailDialog(QDialog):
         grid.setColumnStretch(1, 1)
         for row_index, (name, value) in enumerate(d for d in details if d[1]):
             grid.addWidget(muted(name, wrap=False), row_index, 0, Qt.AlignmentFlag.AlignTop)
-            text = QLabel(value)
+            text = QLabel(t(value))
             text.setWordWrap(True)
             text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             grid.addWidget(text, row_index, 1)

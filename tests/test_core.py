@@ -250,7 +250,8 @@ def test_scorer_flags_unresolved_tags_as_critical():
 
 def test_scorer_does_not_complain_about_auto_footer():
     report = scorer.score(_content(unsubscribe_note=True), sender_email="sam@example.com")
-    assert not any("unsubscribe" in f.message.lower() for f in report.findings)
+    assert not any(f.message == "No unsubscribe wording anywhere in the email."
+                   for f in report.findings)
 
 
 def test_scorer_flags_missing_footer_when_disabled():
@@ -741,40 +742,109 @@ def test_next_contact_never_shows_the_same_variant_twice_in_a_row():
 
 
 # --- the built-in examples --------------------------------------------------
-def test_the_built_in_examples_score_well():
-    """The examples are what a new user starts from, so they must pass the scorer.
+@pytest.mark.parametrize("code", ["en", "ar", "de", "es", "fr"])
+def test_the_built_in_examples_score_well_and_reach_the_main_inbox(code):
+    """The examples are what a new user starts from, in their own language.
 
-    Read scorer.py before editing them: subject length, trigger wording,
-    capitals, exclamation marks, link count, body length and the variety checks
-    are all measured.
+    Every subject paired with every message is scored as the finished email,
+    for a real-looking contact, with the unsubscribe line off as the guide
+    recommends for personal outreach. Read app/core/examples.py before editing.
     """
-    from app.core import composer, merge, scorer
-    from app.ui.pages import templates
+    from app import i18n
+    from app.core import examples
 
-    content = composer.Content(
-        subject_variants=list(templates.EXAMPLE_SUBJECTS),
-        body_variants=list(templates.EXAMPLE_BODIES),
-        signature_html=templates.EXAMPLE_SIGNATURE,
-        attach_mode="link",
-        link_url="https://www.example.com/brochure.pdf",
-        unsubscribe_note=True,
-    )
-    report = scorer.score(content, sender_email="hello@mycompany.com",
-                          known_tags=merge.BUILTIN_TAGS)
-    assert report.score >= 90, (
-        f"examples score {report.score}: "
-        + "; ".join(f.message for f in report.by_severity()))
+    i18n.set_language(code)
+    try:
+        sample = examples.for_language(code)
+        content = composer.Content(
+            subject_variants=list(sample["subjects"]), body_variants=list(sample["bodies"]),
+            signature_html=sample["signature"], attach_mode="none", unsubscribe_note=False)
+        context = merge.build_context({"email": "sarah@acme.test", "person": "Sarah Jones",
+                                       "company": "Acme Trading"})
+        for subject_index in range(len(sample["subjects"])):
+            for body_index in range(len(sample["bodies"])):
+                report = scorer.score(content, sender_email="hello@mycompany.com",
+                                      context=context, subject_index=subject_index,
+                                      body_index=body_index)
+                assert report.score >= 90 and report.landing == scorer.PRIMARY, (
+                    f"{code} subject {subject_index + 1} message {body_index + 1}: "
+                    f"{report.score} {report.landing}: "
+                    + "; ".join(f.message for f in report.by_severity()))
 
-    assert len(templates.EXAMPLE_SUBJECTS) >= 3
-    assert len(templates.EXAMPLE_BODIES) >= 2
-    for subject in templates.EXAMPLE_SUBJECTS:
-        assert 15 <= len(subject) <= 70, subject
-        assert not merge.unresolved_tags(subject, merge.BUILTIN_TAGS), subject
-    for body in templates.EXAMPLE_BODIES:
-        words = len(composer.html_to_text(body).split())
-        assert 80 <= words <= 250, f"{words} words"
-        assert not merge.unresolved_tags(body, merge.BUILTIN_TAGS)
-        assert merge.validate_spintax(body) is None
+        assert len(sample["subjects"]) >= 3 and len(sample["bodies"]) >= 2
+        for subject in sample["subjects"]:
+            assert 15 <= len(subject) <= 70, subject
+            assert not merge.unresolved_tags(subject, merge.BUILTIN_TAGS), subject
+        for body in sample["bodies"]:
+            words = len(composer.html_to_text(body).split())
+            assert 40 <= words <= 150, f"{words} words"
+            assert not merge.unresolved_tags(body, merge.BUILTIN_TAGS)
+            assert merge.validate_spintax(body) is None
+    finally:
+        i18n.set_language("en")
+
+
+# --- v0.7.0: the score reads the finished email -----------------------------
+def test_the_score_reads_the_finished_email_not_the_parts():
+    """A link only in the signature, and a tag empty for this contact, only show up together."""
+    content = _content(
+        body_variants=["Hi {{FirstName}},\n\nWe make office furniture in {{City}} for teams like "
+                       "yours and would like to hear how you furnish new offices. Would a "
+                       "short call next week be useful?"],
+        signature_html='Sam Taylor<br>+1 555 010 0000<br><a href="https://bit.ly/x">site</a>',
+        attach_mode="none", unsubscribe_note=False)
+    context = merge.build_context({"email": "a@b.test", "person": "Ann", "company": "Acme"},
+                                  ["City"])
+    report = scorer.score(content, sender_email="sam@example.com", context=context)
+    messages = " ".join(f.message for f in report.findings)
+    assert "bit.ly" in messages                      # the link is in the signature
+    assert "{{City}}" in messages and "blank" in messages
+    assert report.version == "Subject 1 and message 1"
+
+
+def test_a_tag_left_in_the_finished_email_is_critical():
+    content = _content(body_variants=["Hi {{FirstName}}, about {{Region}}. Would a call help?"])
+    report = scorer.score(content, sender_email="sam@example.com",
+                          known_tags=merge.BUILTIN_TAGS + ["Region"])
+    assert any(f.severity == "critical" and "{{Region}}" in f.message for f in report.findings)
+    assert report.landing == scorer.SPAM
+
+
+def test_marketing_signals_point_to_the_promotions_tab():
+    content = _content(
+        subject_variants=["Our spring newsletter for {{Company}}"],
+        body_variants=["Hi {{FirstName}},\n\n- New range\n- Special price on every order\n"
+                       "- <strong>Exclusive</strong> deal this month\n\nSee "
+                       '<a href="https://example.com/a">the range</a> and '
+                       '<a href="https://example.com/b">prices</a>. Shop now?'],
+        unsubscribe_note=True)
+    report = scorer.score(content, sender_email="sam@example.com", reply_to="sam@example.com")
+    assert report.landing == scorer.PROMOTIONS, [f.message for f in report.findings]
+    assert any(f.category == "Promotions tab" for f in report.findings)
+
+
+def test_the_unsubscribe_footer_follows_the_app_language():
+    from app import i18n
+
+    i18n.set_language("de")
+    try:
+        footer = composer.unsubscribe_footer(composer.SenderIdentity("A", "a@b.test"))
+    finally:
+        i18n.set_language("en")
+    assert "Abmelden" in footer
+
+
+def test_an_arabic_email_is_laid_out_right_to_left():
+    html = composer.assemble_html("مرحبًا أحمد، كيف حالكم؟", _content(unsubscribe_note=False),
+                                  composer.SenderIdentity("A", "a@b.test"))
+    assert 'dir="rtl"' in html
+    assert 'dir="rtl"' not in composer.assemble_html(
+        "Hello Ahmed", _content(unsubscribe_note=False), composer.SenderIdentity("A", "a@b.test"))
+
+
+def test_a_column_empty_for_one_contact_is_left_blank_not_sent_as_a_tag():
+    context = merge.build_context({"email": "a@b.test", "person": "Ann"}, ["City"])
+    assert merge.render("in {{City}}.", context) == "in ."
 
 
 # --- typed messages -----------------------------------------------------------

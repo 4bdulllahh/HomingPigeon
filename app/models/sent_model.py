@@ -15,6 +15,7 @@ import json
 from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt, pyqtSignal
 
 from app.core import db, merge
+from app.i18n import t
 from app.ui import theme
 
 PAGE_SIZE = 300
@@ -34,6 +35,9 @@ BASE_COLUMNS = [
     ("Tries", "attempts"),
     ("Details", "last_error"),
 ]
+
+# Columns whose values are the app's own words rather than imported data
+TRANSLATED_KEYS = {"_outcome"}
 
 # (key, label) for the filter buttons above the list
 FILTERS = [
@@ -96,7 +100,7 @@ class SentModel(QAbstractTableModel):
         if role != Qt.ItemDataRole.DisplayRole:
             return None
         if orientation == Qt.Orientation.Horizontal:
-            return self._columns[section][0]
+            return t(self._columns[section][0])
         return section + 1
 
     # --- data ---------------------------------------------------------------
@@ -107,7 +111,10 @@ class SentModel(QAbstractTableModel):
         key = self._columns[index.column()][1]
 
         if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.ToolTipRole):
-            return row.get(key, "")
+            value = row.get(key, "")
+            # The app's own wording (a status, an outcome) is translated; the
+            # spreadsheet's data is shown exactly as imported
+            return t(value) if key in TRANSLATED_KEYS else value
         if role == Qt.ItemDataRole.ForegroundRole:
             if key == "_outcome":
                 return theme.qcolor(row.get("_tone", "fg"))

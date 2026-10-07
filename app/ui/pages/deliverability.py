@@ -4,6 +4,7 @@ from __future__ import annotations
 from PyQt6.QtWidgets import QGridLayout, QVBoxLayout, QWidget
 
 from app.core import db, dns_tools
+from app.i18n import t
 from app.ui import theme
 from app.ui.pages.base import Page
 from app.ui.widgets.common import (Card, FormRow, ScrollPage, Section, StatusRow, TabBar,
@@ -80,8 +81,8 @@ class DeliverabilityPage(Page):
 
         db.set_setting("check_domain", domain)
         self.check_button.setEnabled(False)
-        self.check_button.setText("Checking...")
-        self.verdict.setText("Querying DNS...")
+        self.check_button.setText(t("Checking..."))
+        self.verdict.setText(t("Querying DNS..."))
         set_tone(self.verdict, "muted")
         self.results_area.clear()
 
@@ -94,17 +95,17 @@ class DeliverabilityPage(Page):
 
     def _checks_failed(self, message: str) -> None:
         self.check_button.setEnabled(True)
-        self.check_button.setText("Run checks")
-        self.verdict.setText(f"Could not complete the checks: {message}")
+        self.check_button.setText(t("Run checks"))
+        self.verdict.setText(t("Could not complete the checks: {message}", message=message))
         set_tone(self.verdict, "error")
 
     def _show_results(self, results: list[dns_tools.CheckResult]) -> None:
         self._results = results
         self.check_button.setEnabled(True)
-        self.check_button.setText("Run checks")
+        self.check_button.setText(t("Run checks"))
 
         status, message = dns_tools.overall_grade(results)
-        self.verdict.setText(f"{theme.STATUS_ICONS.get(status, '')}  {message}")
+        self.verdict.setText(f"{theme.STATUS_ICONS.get(status, '')}  {t(message)}")
         self.verdict.setStyleSheet(f"color: {theme.status_color(status)};")
 
         self.results_area.clear()
@@ -296,24 +297,25 @@ class DeliverabilityPage(Page):
             return
 
         self.dkim_button.setEnabled(False)
-        self.dkim_button.setText("Generating...")
+        self.dkim_button.setText(t("Generating..."))
 
         def reset() -> None:
             self.dkim_button.setEnabled(True)
-            self.dkim_button.setText("Generate 2048-bit key pair")
+            self.dkim_button.setText(t("Generate 2048-bit key pair"))
 
         Task(jobs.generate_dkim, selector, domain).start(
             on_result=self._show_dkim_result,
-            on_error=lambda message: self.notify(f"Key generation failed: {message}", "error"),
+            on_error=lambda message: self.notify(t("Key generation failed: {message}",
+                                                   message=message), "error"),
             on_done=reset)
 
     def _show_dkim_result(self, result: dict) -> None:
         self.dkim_host_output.setPlainText(result["host"])
         self.dkim_record_output.setPlainText(result["record"])
         self.dkim_key_note.setText(
-            f"Private key saved to:\n{result['private_key_path']}\n\n"
-            f"Keep this file secret. Anyone holding it can sign mail as your domain. "
-            f"Point your mail server's DKIM module at it.")
+            t("Private key saved to:\n{private_key_path}\n\nKeep this file secret. Anyone "
+              "holding it can sign mail as your domain. Point your mail server's DKIM "
+              "module at it.", private_key_path=result['private_key_path']))
         set_tone(self.dkim_key_note, "warning")
         self.notify("Key pair generated", "success")
 
@@ -340,7 +342,7 @@ class DeliverabilityPage(Page):
 
     @staticmethod
     def _show_warnings(label, warnings: list[str]) -> None:
-        label.setText("\n".join(f"⚠  {w}" for w in warnings))
+        label.setText(t("\n".join(f"⚠  {w}" for w in warnings)))
         set_tone(label, "warning" if warnings else "muted")
 
     # =======================================================================
@@ -355,4 +357,4 @@ class DeliverabilityPage(Page):
                 if self.tabs.page("DKIM setup") is not None:
                     self.dkim_domain.setText(domain)
                 if self.tabs.page("DMARC generator") is not None and not self.dmarc_rua.text():
-                    self.dmarc_rua.setText(f"dmarc@{domain}")
+                    self.dmarc_rua.setText(t(f"dmarc@{domain}"))

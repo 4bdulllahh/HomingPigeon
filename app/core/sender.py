@@ -27,6 +27,7 @@ from pathlib import Path
 
 from app import config
 from app.core import composer, db, merge, prefs, tls, warmup
+from app.i18n import t
 
 
 class State(str, Enum):
@@ -109,24 +110,30 @@ def friendly_smtp_error(error: Exception, settings: SmtpSettings) -> str:
         if "username and password not accepted" in lowered:
             return ("The server did not accept this username/password. Check the address is the full "
                     "mailbox name, and whether your provider requires an app-specific password.")
-        return f"Authentication failed ({code}): {text.strip() or 'check the username and password'}"
+        return t("Authentication failed ({code}): {value}",
+                 code=code, value=text.strip() or 'check the username and password')
 
     if isinstance(error, smtplib.SMTPConnectError):
-        return (f"Could not connect to {settings.host}:{settings.port}. The port may be blocked by "
-                f"your network or firewall. Many ISPs block port 25. Try 587.")
+        return (t("Could not connect to {host}:{port}. The port may be blocked by your network "
+                  "or firewall. Many ISPs block port 25. Try 587.",
+                  host=settings.host, port=settings.port))
     if isinstance(error, smtplib.SMTPServerDisconnected):
         return "The server closed the connection unexpectedly. This often means the wrong port or security setting."
     if isinstance(error, smtplib.SMTPNotSupportedError):
-        return f"The server does not support the requested feature: {error}"
+        return t("The server does not support the requested feature: {error}", error=error)
     if isinstance(error, ssl.SSLError):
-        return (f"TLS handshake failed. Port 465 needs SSL and port 587 needs STARTTLS, so "
-                f"you currently have {settings.resolved_security()} on port {settings.port}.")
+        return (t("TLS handshake failed. Port 465 needs SSL and port 587 needs STARTTLS, so "
+                  "you currently have {resolved_security} on port {port}.",
+                  resolved_security=settings.resolved_security(), port=settings.port))
     if isinstance(error, socket.timeout):
-        return f"Timed out connecting to {settings.host}:{settings.port}. Check the host name and your connection."
+        return t("Timed out connecting to {host}:{port}. Check the host name and your connection.",
+                 host=settings.host, port=settings.port)
     if isinstance(error, socket.gaierror):
-        return f"Host name '{settings.host}' could not be resolved. Check it for typos."
+        return t("Host name '{host}' could not be resolved. Check it for typos.",
+                 host=settings.host)
     if isinstance(error, ConnectionRefusedError):
-        return f"{settings.host} refused the connection on port {settings.port}."
+        return t("{host} refused the connection on port {port}.",
+                 host=settings.host, port=settings.port)
     return f"{type(error).__name__}: {error}"
 
 
@@ -158,7 +165,8 @@ def test_connection(settings: SmtpSettings) -> tuple[bool, str]:
                 server.quit()
             except Exception:
                 pass
-        return True, f"Connected to {settings.host}:{settings.port} and signed in successfully."
+        return True, t("Connected to {host}:{port} and signed in successfully.",
+                       host=settings.host, port=settings.port)
     except Exception as error:  # noqa: BLE001 - surfaced to the user verbatim
         return False, friendly_smtp_error(error, settings)
 
@@ -192,7 +200,8 @@ def in_send_window(plan: SendPlan, moment: datetime | None = None) -> tuple[bool
     else:  # window crosses midnight
         inside = current >= start or current <= end
     if not inside:
-        return False, f"Outside the sending window ({plan.window_start} to {plan.window_end})"
+        return False, t("Outside the sending window ({window_start} to {window_end})",
+                        window_start=plan.window_start, window_end=plan.window_end)
     return True, ""
 
 
@@ -290,7 +299,8 @@ class SendWorker(threading.Thread):
             except Exception:
                 pass  # fall through and reconnect
         self._close_server()
-        self._log(f"Connecting to {self.plan.smtp.host}:{self.plan.smtp.port}...")
+        self._log(t("Connecting to {host}:{port}...",
+                    host=self.plan.smtp.host, port=self.plan.smtp.port))
         self._server = open_smtp(self.plan.smtp)
         self._since_reconnect = 0
         self._log("Connected and authenticated.", "success")
@@ -335,7 +345,8 @@ class SendWorker(threading.Thread):
                 message_id=str(message["Message-ID"] or "") if message is not None else "",
                 sent_at=sent_at, last_error=error)
         except Exception as problem:  # noqa: BLE001 - the history must never stop a send
-            self._log(f"Could not save a copy of the email to {contact['email']}: {problem}", "warn")
+            self._log(t("Could not save a copy of the email to {email}: {problem}",
+                        email=contact['email'], problem=problem), "warn")
 
     def _mark(self, contact_id: int, status: str, **fields) -> None:
         sets = ["status = ?", "attempts = attempts + 1"]
@@ -362,7 +373,8 @@ class SendWorker(threading.Thread):
             self._run()
         except Exception as error:  # noqa: BLE001 - the thread must never die silently
             self._set_state(State.ERROR)
-            self._log(f"Unexpected error: {type(error).__name__}: {error}", "error")
+            self._log(t("Unexpected error: {name}: {error}",
+                        name=type(error).__name__, error=error), "error")
             db.log_event("error", "send", f"{type(error).__name__}: {error}", self.plan.campaign_id)
         finally:
             self._close_server()
@@ -381,18 +393,21 @@ class SendWorker(threading.Thread):
         cap_remaining = warmup.remaining_today(self.plan.daily_cap_override)
         if cap_remaining <= 0:
             status = warmup.status()
-            self._log(f"Today's limit is already reached ({status.sent_today}/{status.cap}). "
-                      f"Sending resumes tomorrow.", "warn")
+            self._log(t("Today's limit is already reached ({sent_today}/{cap}). Sending resumes "
+                        "tomorrow.", sent_today=status.sent_today, cap=status.cap), "warn")
             self._set_state(State.WAITING)
             return
 
         total = min(len(recipients), cap_remaining)
-        self._log(f"{len(recipients):,} pending · today's limit allows {cap_remaining} · "
-                  f"sending {total} now.")
+        self._log(t("{count:,} pending · today's limit allows {cap_remaining} · sending {total} "
+                    "now.", count=len(recipients), cap_remaining=cap_remaining, total=total))
         self._set_state(State.RUNNING)
         db.execute("UPDATE campaigns SET status = 'running', started_at = COALESCE(started_at, ?) "
                    "WHERE id = ?", (db.now(), self.plan.campaign_id))
 
+        from app.core import importer
+
+        columns = importer.extra_columns()
         subject_cycler = merge.VariantCycler(self.plan.content.subject_variants)
         body_cycler = merge.VariantCycler(self.plan.content.body_variants)
         rng = random.Random()
@@ -404,8 +419,8 @@ class SendWorker(threading.Thread):
             if not self._wait_while_paused():
                 break
             if processed >= cap_remaining:
-                self._log(f"Daily limit of {cap_remaining} reached. Sending stops here and "
-                          f"resumes tomorrow.", "warn")
+                self._log(t("Daily limit of {cap_remaining} reached. Sending stops here and resumes "
+                            "tomorrow.", cap_remaining=cap_remaining), "warn")
                 self._set_state(State.WAITING)
                 break
 
@@ -413,7 +428,9 @@ class SendWorker(threading.Thread):
             open_now, reason = in_send_window(self.plan)
             if not open_now:
                 resume_at = next_window_open(self.plan)
-                self._log(f"{reason}. Waiting until {resume_at:%A} {prefs.format_datetime(resume_at)}.", "warn")
+                self._log(t("{reason}. Waiting until {resume_at:%A} {datetime}.",
+                            reason=reason, resume_at=resume_at,
+                            datetime=prefs.format_datetime(resume_at)), "warn")
                 self._set_state(State.WAITING)
                 wait_seconds = max(30, (resume_at - datetime.now()).total_seconds())
                 if not self._sleep_interruptible(wait_seconds, countdown=False):
@@ -425,19 +442,19 @@ class SendWorker(threading.Thread):
             if db.is_suppressed(email):
                 self._mark(contact["id"], "skipped", last_error="On the suppression list")
                 self.skipped += 1
-                self._log(f"Skipped {email}: on the suppression list.", "warn")
+                self._log(t("Skipped {email}: on the suppression list.", email=email), "warn")
                 continue
 
             try:
                 server = self._ensure_server()
             except Exception as error:  # noqa: BLE001
                 message = friendly_smtp_error(error, self.plan.smtp)
-                self._log(f"Cannot connect: {message}", "error")
+                self._log(t("Cannot connect: {message}", message=message), "error")
                 db.log_event("error", "send", message, self.plan.campaign_id)
                 self._set_state(State.ERROR)
                 break
 
-            context = merge.build_context(contact)
+            context = merge.build_context(contact, columns)
             local_content = composer.Content(
                 subject_variants=[subject_cycler.next()],
                 body_variants=[body_cycler.next()],
@@ -454,10 +471,12 @@ class SendWorker(threading.Thread):
                     self.plan.sender, email, context, local_content, rng=rng
                 )
             except Exception as error:  # noqa: BLE001
-                self._mark(contact["id"], "failed", last_error=f"Compose error: {error}")
-                self._record(contact, "failed", error=f"Compose error: {error}")
+                self._mark(contact["id"], "failed", last_error=t("Compose error: {error}",
+                                                                 error=error))
+                self._record(contact, "failed", error=t("Compose error: {error}", error=error))
                 self.failed += 1
-                self._log(f"Could not build the message for {email}: {error}", "error")
+                self._log(t("Could not build the message for {email}: {error}",
+                            email=email, error=error), "error")
                 continue
 
             try:
@@ -472,22 +491,26 @@ class SendWorker(threading.Thread):
                 self.failed += 1
                 self._consecutive_failures += 1
                 if permanent:
-                    db.suppress(email, f"Rejected by server ({code})", source="send")
-                    self._log(f"Rejected permanently: {email}, {detail}", "error")
+                    db.suppress(email, t("Rejected by server ({code})", code=code), source="send")
+                    self._log(t("Rejected permanently: {email}, {detail}",
+                                email=email, detail=detail), "error")
                 else:
-                    self._log(f"Temporary failure: {email}, {detail}", "warn")
+                    self._log(t("Temporary failure: {email}, {detail}",
+                                email=email, detail=detail), "warn")
             except (smtplib.SMTPServerDisconnected, smtplib.SMTPConnectError) as error:
                 self._mark(contact["id"], "retry", last_error=str(error)[:400])
                 self._consecutive_failures += 1
                 self._close_server()
-                self._log(f"Connection lost on {email}; will reconnect. ({error})", "warn")
+                self._log(t("Connection lost on {email}; will reconnect. ({error})",
+                            email=email, error=error), "warn")
             except Exception as error:  # noqa: BLE001
                 self._mark(contact["id"], "failed", last_error=f"{type(error).__name__}: {error}"[:400])
                 self._record(contact, "failed", message, subject,
                              error=f"{type(error).__name__}: {error}"[:400])
                 self.failed += 1
                 self._consecutive_failures += 1
-                self._log(f"Failed to send to {email}: {error}", "error")
+                self._log(t("Failed to send to {email}: {error}",
+                            email=email, error=error), "error")
             else:
                 self.sent += 1
                 self._since_reconnect += 1
@@ -509,20 +532,22 @@ class SendWorker(threading.Thread):
             # --- circuit breakers -------------------------------------------
             if self._consecutive_failures >= config.MAX_CONSECUTIVE_FAILURES:
                 self._log(
-                    f"Stopped: {self._consecutive_failures} failures in a row. Something is wrong "
-                    f"with the connection or the account. Continuing would damage your sending "
-                    f"reputation.", "error")
+                    t("Stopped: {consecutive_failures} failures in a row. Something is wrong with "
+                      "the connection or the account. Continuing would damage your sending "
+                      "reputation.", consecutive_failures=self._consecutive_failures), "error")
                 self._set_state(State.ERROR)
                 break
 
             rate = self._hard_bounce_rate()
             if rate > config.MAX_HARD_BOUNCE_RATE:
                 self._log(
-                    f"Stopped: {rate:.0%} of messages are failing (limit {config.MAX_HARD_BOUNCE_RATE:.0%}). "
-                    f"A bounce rate this high gets domains blacklisted. Clean the list before "
-                    f"continuing.", "error")
+                    t("Stopped: {rate:.0%} of messages are failing (limit "
+                      "{max_hard_bounce_rate:.0%}). A bounce rate this high gets domains "
+                      "blacklisted. Clean the list before continuing.",
+                      rate=rate, max_hard_bounce_rate=config.MAX_HARD_BOUNCE_RATE), "error")
                 self._set_state(State.ERROR)
-                db.log_event("error", "send", f"Circuit breaker: bounce rate {rate:.0%}",
+                db.log_event("error", "send", t("Circuit breaker: bounce rate {rate:.0%}",
+                                                rate=rate),
                              self.plan.campaign_id)
                 break
 
@@ -541,20 +566,24 @@ class SendWorker(threading.Thread):
 
         if self._stop_event.is_set():
             self._set_state(State.STOPPED)
-            self._log(f"Stopped by user. Sent {self.sent}, {left:,} still pending.", "warn")
+            self._log(t("Stopped by user. Sent {sent}, {left:,} still pending.",
+                        sent=self.sent, left=left), "warn")
             db.execute("UPDATE campaigns SET status = 'paused' WHERE id = ?", (self.plan.campaign_id,))
         elif self.state in (State.ERROR, State.WAITING):
             db.execute("UPDATE campaigns SET status = 'paused' WHERE id = ?", (self.plan.campaign_id,))
         elif left == 0:
             self._set_state(State.FINISHED)
-            self._log(f"Campaign complete. Sent {self.sent}, failed {self.failed}.", "success")
+            self._log(t("Campaign complete. Sent {sent}, failed {failed}.",
+                        sent=self.sent, failed=self.failed), "success")
             db.execute("UPDATE campaigns SET status = 'finished', finished_at = ? WHERE id = ?",
                        (db.now(), self.plan.campaign_id))
         else:
             self._set_state(State.FINISHED)
-            self._log(f"Batch complete. Sent {self.sent}; {left:,} remain for the next run.", "success")
+            self._log(t("Batch complete. Sent {sent}; {left:,} remain for the next run.",
+                        sent=self.sent, left=left), "success")
             db.execute("UPDATE campaigns SET status = 'paused' WHERE id = ?", (self.plan.campaign_id,))
 
         db.log_event("info", "send",
-                     f"Campaign {self.plan.campaign_id}: sent {self.sent}, failed {self.failed}, "
-                     f"skipped {self.skipped}", self.plan.campaign_id)
+                     t("Campaign {campaign_id}: sent {sent}, failed {failed}, skipped {skipped}",
+                       campaign_id=self.plan.campaign_id, sent=self.sent, failed=self.failed,
+                       skipped=self.skipped), self.plan.campaign_id)

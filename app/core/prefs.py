@@ -43,11 +43,22 @@ DEFAULTS = {
     "date_format": DEFAULT_DATE_FORMAT,
     "time_format": DEFAULT_TIME_FORMAT,
     "start_page": "dashboard",
+    "language": "",          # "" until chosen: the computer's own language, if supported
 }
 
 
 def get(key: str):
     return db.get_setting(key, DEFAULTS[key])
+
+
+def language(system_locale: str | None = None) -> str:
+    """The app's language: the one chosen in Settings, else the computer's, else English."""
+    from app import i18n
+
+    chosen = get("language")
+    if chosen in i18n.CODES:
+        return chosen
+    return i18n.system_language(system_locale)
 
 
 def text_scale() -> float:

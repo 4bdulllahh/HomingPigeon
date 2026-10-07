@@ -122,14 +122,38 @@ def as_mapping(contact: Any) -> dict[str, Any]:
     return dict(contact)
 
 
-def build_context(contact: Mapping[str, Any] | Any) -> dict[str, str]:
-    """Merge-tag values for one contact row (a DB row or plain dict)."""
+# What {{FirstName}} and {{Company}} become when a contact has no name or
+# company, per app language: "Hi there", "Hallo zusammen", "Bonjour à vous".
+FALLBACKS = {
+    "en": ("there", "your company"),
+    "ar": ("بكم", "شركتكم"),
+    "de": ("zusammen", "Ihr Unternehmen"),
+    "es": ("a todos", "su empresa"),
+    "fr": ("à vous", "votre entreprise"),
+}
+
+
+def fallbacks() -> tuple[str, str]:
+    from app import i18n
+
+    return FALLBACKS.get(i18n.language(), FALLBACKS["en"])
+
+
+def build_context(contact: Mapping[str, Any] | Any,
+                  columns: list[str] | None = None) -> dict[str, str]:
+    """Merge-tag values for one contact row (a DB row or plain dict).
+
+    ``columns`` is every spreadsheet column the list has. A column this contact
+    left empty then becomes an empty string rather than staying as a literal
+    {{Column}}, which is what a real person would otherwise receive.
+    """
     contact = as_mapping(contact)
     email = str(contact.get("email") or "").strip()
+    name_fallback, company_fallback = fallbacks()
     context: dict[str, str] = {
-        "FirstName": clean_first_name(contact.get("person")),
-        "FullName": str(contact.get("person") or "").strip() or "there",
-        "Company": clean_company(contact.get("company")),
+        "FirstName": clean_first_name(contact.get("person"), name_fallback),
+        "FullName": str(contact.get("person") or "").strip() or name_fallback,
+        "Company": clean_company(contact.get("company"), company_fallback),
         "Email": email,
         "Domain": email.split("@", 1)[1] if "@" in email else "",
     }
@@ -148,6 +172,8 @@ def build_context(contact: Mapping[str, Any] | Any) -> dict[str, str]:
                 text = str(value).strip()
                 if text and text.lower() != "nan":
                     context.setdefault(str(key), text)
+    for column in columns or []:
+        context.setdefault(str(column), "")
     return context
 
 

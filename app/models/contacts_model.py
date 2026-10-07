@@ -16,6 +16,7 @@ import json
 from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt, pyqtSignal
 
 from app.core import db
+from app.i18n import t
 from app.ui import theme
 
 PAGE_SIZE = 300
@@ -30,6 +31,9 @@ BASE_COLUMNS = [
     ("Source file", "source_file"),
     ("Imported", "imported_at"),
 ]
+
+# Columns whose values are the app's own words rather than imported data
+TRANSLATED_KEYS = {"_status"}
 
 # Extra spreadsheet columns are shown after those, so nothing imported is hidden.
 # The cap only guards against a sheet with hundreds of junk columns.
@@ -141,7 +145,7 @@ class ContactsModel(QAbstractTableModel):
         if role != Qt.ItemDataRole.DisplayRole:
             return None
         if orientation == Qt.Orientation.Horizontal:
-            return self._columns[section][0]
+            return t(self._columns[section][0])
         return section + 1
 
     # --- data ---------------------------------------------------------------
@@ -152,7 +156,10 @@ class ContactsModel(QAbstractTableModel):
         key = self._columns[index.column()][1]
 
         if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.ToolTipRole):
-            return row.get(key, "")
+            value = row.get(key, "")
+            # The app's own wording (a status, an outcome) is translated; the
+            # spreadsheet's data is shown exactly as imported
+            return t(value) if key in TRANSLATED_KEYS else value
         if role == Qt.ItemDataRole.ForegroundRole:
             if key == "_status":
                 return theme.qcolor(row.get("_status_tone", "fg_muted"))

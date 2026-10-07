@@ -9,6 +9,7 @@ import pandas as pd
 
 from app import config
 from app.core import db
+from app.i18n import t
 
 STATUS_LABELS = {
     "pending": "Pending",
@@ -81,7 +82,8 @@ def export_campaign(campaign_id: int | None = None, path: str | Path | None = No
                 min(max(12, longest + 2), 55)
         sheet.freeze_panes = "A2"
 
-    db.log_event("info", "export", f"Exported {len(df)} rows to {path.name}")
+    db.log_event("info", "export", t("Exported {count} rows to {name}",
+                                     count=len(df), name=path.name))
     return path
 
 
@@ -152,7 +154,8 @@ def export_sent(path: str | Path | None = None) -> Path:
             sheet.column_dimensions[letter].width = min(max(12, longest + 2), 55)
         sheet.freeze_panes = "A2"
 
-    db.log_event("info", "export", f"Exported {len(df)} sent emails to {path.name}")
+    db.log_event("info", "export", t("Exported {count} sent emails to {name}",
+                                     count=len(df), name=path.name))
     return path
 
 

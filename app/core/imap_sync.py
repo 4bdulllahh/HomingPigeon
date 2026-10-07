@@ -20,11 +20,18 @@ from datetime import datetime, timedelta
 from email.message import Message
 
 from app.core import composer, db, tls
+from app.i18n import t
 
 UNSUBSCRIBE_PHRASES = [
     "unsubscribe", "remove me", "opt out", "opt-out", "take me off", "stop emailing",
     "do not contact", "don't contact", "no longer wish", "remove from your list",
     "stop sending", "not interested",
+    # The other app languages, so a reply to a German or Arabic email is caught too
+    "abmelden", "austragen", "keine e-mails mehr", "kein interesse",
+    "darse de baja", "darme de baja", "baja", "no me interesa", "no deseo recibir",
+    "désabonner", "désinscrire", "desinscrire", "désabonnement", "pas intéressé",
+    "ne plus recevoir",
+    "إلغاء الاشتراك", "الغاء الاشتراك", "أزلني", "لا أرغب", "غير مهتم", "توقفوا عن",
 ]
 
 BOUNCE_SENDERS = {
@@ -66,15 +73,15 @@ class SyncResult:
     def summary(self) -> str:
         if not self.scanned:
             return "No new messages since the last check."
-        parts = [f"{self.scanned} message(s) scanned"]
+        parts = [t("{scanned} message(s) scanned", scanned=self.scanned)]
         if self.hard_bounces:
-            parts.append(f"{len(self.hard_bounces)} hard bounce(s)")
+            parts.append(t("{count} hard bounce(s)", count=len(self.hard_bounces)))
         if self.soft_bounces:
-            parts.append(f"{len(self.soft_bounces)} soft bounce(s)")
+            parts.append(t("{count} soft bounce(s)", count=len(self.soft_bounces)))
         if self.unsubscribes:
-            parts.append(f"{len(self.unsubscribes)} unsubscribe(s)")
+            parts.append(t("{count} unsubscribe(s)", count=len(self.unsubscribes)))
         if self.replies:
-            parts.append(f"{len(self.replies)} reply(ies)")
+            parts.append(t("{count} reply(ies)", count=len(self.replies)))
         return " · ".join(parts)
 
 
@@ -97,9 +104,11 @@ def test_connection(settings: ImapSettings) -> tuple[bool, str]:
         try:
             status, data = client.select(settings.folder, readonly=True)
             if status != "OK":
-                return False, f"Signed in, but folder '{settings.folder}' could not be opened."
+                return False, t("Signed in, but folder '{folder}' could not be opened.",
+                                folder=settings.folder)
             count = int(data[0]) if data and data[0] else 0
-            return True, f"Connected to {settings.host}, {count:,} messages in {settings.folder}."
+            return True, t("Connected to {host}, {count:,} messages in {folder}.",
+                           host=settings.host, count=count, folder=settings.folder)
         finally:
             try:
                 client.logout()
@@ -110,9 +119,10 @@ def test_connection(settings: ImapSettings) -> tuple[bool, str]:
         if "AUTHENTICATIONFAILED" in text.upper():
             return False, ("Sign-in rejected. If this is Gmail or Outlook with 2-step verification, "
                            "you need an app password here too.")
-        return False, f"IMAP error: {text}"
+        return False, t("IMAP error: {text}", text=text)
     except (socket.gaierror, socket.timeout, OSError) as error:
-        return False, f"Could not reach {settings.host}:{settings.port}: {error}"
+        return False, t("Could not reach {host}:{port}: {error}",
+                        host=settings.host, port=settings.port, error=error)
 
 
 # --- Parsing ----------------------------------------------------------------
@@ -286,18 +296,25 @@ def parse_bounce(message: Message) -> tuple[str | None, bool, str]:
         else:
             hard = any(m in lowered for m in hard_markers)
 
-    detail = diagnostic or (status_code and f"Status {status_code}") or "Delivery failed"
+    detail = diagnostic or (status_code and t("Status {status_code}",
+                                              status_code=status_code)) or "Delivery failed"
     return failed, hard, detail
+
+
+# Whole words only: "baja" must not match inside "trabajamos", or an ordinary
+# Spanish reply would take the sender off the list
+_UNSUBSCRIBE = re.compile(
+    "|".join(r"(?<!\w)" + re.escape(phrase) + r"(?!\w)" for phrase in UNSUBSCRIBE_PHRASES))
 
 
 def is_unsubscribe(message: Message) -> bool:
     subject = _decode_header(message.get("Subject", "")).lower()
-    if any(phrase in subject for phrase in UNSUBSCRIBE_PHRASES):
+    if _UNSUBSCRIBE.search(subject):
         return True
     body = _body_text(message, limit=4000).lower()
     # Only the first part of a reply counts; quoted history contains our own footer
     head = body.split(">")[0][:1500]
-    return any(phrase in head for phrase in UNSUBSCRIBE_PHRASES)
+    return bool(_UNSUBSCRIBE.search(head))
 
 
 def sender_address(message: Message) -> str:
@@ -324,13 +341,13 @@ def sync(settings: ImapSettings, days_back: int = 30, progress=None) -> SyncResu
     try:
         client = connect(settings)
     except Exception as error:  # noqa: BLE001
-        result.errors.append(f"Could not connect: {error}")
+        result.errors.append(t("Could not connect: {error}", error=error))
         return result
 
     try:
         status, _ = client.select(settings.folder, readonly=True)
         if status != "OK":
-            result.errors.append(f"Could not open folder '{settings.folder}'.")
+            result.errors.append(t("Could not open folder '{folder}'.", folder=settings.folder))
             return result
 
         if last_uid:
@@ -375,7 +392,7 @@ def sync(settings: ImapSettings, days_back: int = 30, progress=None) -> SyncResu
                     received_at=received_at(message),
                     kind=kind, known=known)
             except Exception as error:  # noqa: BLE001 - never lose a sync over one message
-                db.log_event("warn", "imap", f"Could not save a message: {error}")
+                db.log_event("warn", "imap", t("Could not save a message: {error}", error=error))
 
         db.execute(
             "UPDATE imap_state SET last_uid = ?, last_sync_at = ?, folder = ? WHERE id = 1",
@@ -408,7 +425,7 @@ def _classify(message: Message, result: SyncResult) -> tuple[str, bool]:
             return "bounce", False
         if hard:
             result.hard_bounces.append((address, detail))
-            db.suppress(address, f"Hard bounce: {detail}"[:200], source="bounce")
+            db.suppress(address, t("Hard bounce: {detail}", detail=detail)[:200], source="bounce")
             db.execute("UPDATE contacts SET bounced_at = ?, valid = 0 WHERE email = ?",
                        (db.now(), address))
             db.execute(

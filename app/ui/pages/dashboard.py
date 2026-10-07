@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QHBoxLayout, QProgressBar, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QProgressBar, QSizePolicy, QVBoxLayout, QWidget
 
 from app.core import db, imap_sync, importer, prefs, scorer, warmup
+from app.i18n import t
 from app.models.table_model import SimpleTableModel
 from app.ui import theme
 from app.ui.pages.base import Page
@@ -88,17 +89,20 @@ class DashboardPage(Page):
 
     def _refresh_tiles(self) -> None:
         status = warmup.status()
-        self.tile_today.update_value(f"{status.sent_today}", f"of {status.cap} allowed today")
+        self.tile_today.update_value(f"{status.sent_today}", t("of {cap} allowed today",
+                                                               cap=status.cap))
 
         total = importer.contact_count()
         suppressed = len(db.suppression_list())
-        self.tile_contacts.update_value(f"{total:,}", f"{suppressed:,} suppressed")
+        self.tile_contacts.update_value(f"{total:,}", t("{suppressed:,} suppressed",
+                                                        suppressed=suppressed))
 
         replies = db.query_one("SELECT COUNT(*) AS n FROM contacts WHERE replied_at IS NOT NULL")
         sent = db.query_one("SELECT COUNT(*) AS n FROM campaign_recipients WHERE status = 'sent'")
         reply_count = replies["n"] if replies else 0
         sent_count = sent["n"] if sent else 0
-        rate = f"{reply_count / sent_count * 100:.1f}% reply rate" if sent_count else "none yet"
+        rate = t("{number:.1f}% reply rate",
+                 number=reply_count / sent_count * 100) if sent_count else "none yet"
         self.tile_replies.update_value(f"{reply_count:,}", rate)
 
         bounce_rate = imap_sync.bounce_rate()
@@ -110,8 +114,8 @@ class DashboardPage(Page):
 
         email = db.get_setting("sender_email", "")
         self.greeting.setText(
-            f"Sending as {email}" if email
-            else "No account configured yet. Start with the setup guide.")
+            t(t("Sending as {email}", email=email) if email
+            else "No account configured yet. Start with the setup guide."))
 
     def _row(self, label: str, status: str, detail: str, action=None,
              action_label: str = "Fix") -> None:
@@ -121,6 +125,9 @@ class DashboardPage(Page):
 
         holder = QWidget()
         holder.setProperty("role", "plain")
+        # Never squeezed below its natural height: on a short window the page
+        # scrolls instead of drawing the title over the line underneath.
+        holder.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         layout = QHBoxLayout(holder)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(round(10 * theme.text_scale()))
@@ -148,11 +155,12 @@ class DashboardPage(Page):
             for name in ("SPF", "DKIM", "DMARC"):
                 state = dns_status.get(name, "info")
                 messages = {
-                    "pass": f"{name} is published and valid.",
-                    "warn": f"{name} needs attention.",
-                    "fail": f"{name} is missing or broken. This is why mail lands in spam.",
+                    "pass": t("{name} is published and valid.", name=name),
+                    "warn": t("{name} needs attention.", name=name),
+                    "fail": t("{name} is missing or broken. This is why mail lands in spam.",
+                              name=name),
                 }
-                self._row(name, state, messages.get(state, f"{name} not checked"),
+                self._row(name, state, messages.get(state, t("{name} not checked", name=name)),
                           action=lambda: self.go("deliverability"))
             self._row("Last checked", "info", prefs.format_datetime(checked_at))
         else:
@@ -162,7 +170,8 @@ class DashboardPage(Page):
 
         report = scorer.latest_report()
         if report:
-            self._row(f"Content score: {report.score}/100 ({report.grade})", report.status,
+            self._row(t("Content score: {score}/100 ({grade})",
+                        score=report.score, grade=report.grade), report.status,
                       report.verdict, action=lambda: self.go("templates"), action_label="Review")
             if scorer.is_stale():
                 self._row("Score is out of date", "warn",
@@ -174,7 +183,8 @@ class DashboardPage(Page):
                       action=lambda: self.go("templates"), action_label="Check")
 
         status = warmup.status()
-        self._row(f"Warm-up: day {status.day_index}, {status.cap} emails/day",
+        self._row(t("Warm-up: day {day_index}, {cap} emails/day",
+                    day_index=status.day_index, cap=status.cap),
                   "pass" if status.enabled else "warn",
                   "Volume rises gradually so receiving servers learn to trust you."
                   if status.enabled
@@ -204,8 +214,8 @@ class DashboardPage(Page):
         total = stats.get("total", 0)
 
         self.campaign_body.addWidget(muted(
-            f"{record['name']}: {sent:,} sent, {pending:,} pending, "
-            f"{stats.get('bounced', 0):,} bounced"))
+            t("{name}: {sent:,} sent, {pending:,} pending, {get:,} bounced",
+              name=record['name'], sent=sent, pending=pending, get=stats.get('bounced', 0))))
 
         bar = QProgressBar()
         bar.setRange(0, max(1, total))
@@ -216,7 +226,8 @@ class DashboardPage(Page):
         if pending:
             days = max(1, -(-pending // max(1, warmup.status().cap)))
             self.campaign_body.addWidget(hint(
-                f"At the current daily limit this takes about {days} more sending day(s)."))
+                t("At the current daily limit this takes about {days} more sending day(s).",
+                  days=days)))
             self.campaign_body.addWidget(
                 row(primary_button("Continue sending", lambda: self.go("send"), 170), None))
 

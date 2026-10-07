@@ -9,6 +9,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QProgressBar, QVBoxLayout, QWidget
 
 from app.core import credentials, db, importer, scorer, shortcut
+from app.i18n import t
 from app.ui import theme
 from app.ui.pages.base import Page
 from app.ui.widgets.common import (Card, clear_layout, confirm_button, hint, muted,
@@ -33,7 +34,7 @@ class GuideStep(Card):
 
         header = QHBoxLayout()
         header.setSpacing(10)
-        badge = QLabel("✓" if done else str(number))
+        badge = QLabel(t("✓" if done else str(number)))
         size = round(22 * theme.text_scale())
         badge.setFixedSize(size, size)
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -103,7 +104,7 @@ class GuidePage(Page):
 
     def _make_shortcut(self) -> None:
         ok, message = shortcut.create_desktop_shortcut()
-        self.shortcut_status.setText(message)
+        self.shortcut_status.setText(t(message))
         set_tone(self.shortcut_status, "success" if ok else "error")
         self.notify(message, "success" if ok else "error", 6000)
 
@@ -135,8 +136,8 @@ class GuidePage(Page):
                 "why": "SPF lists which servers are allowed to send email for your domain. "
                        "Without it, a receiving server has no way to tell your mail from a "
                        "forgery, and treats it with suspicion.",
-                "how": f"Open 'Domain check', run the checks on {domain}, then use the SPF "
-                       f"generator and add the result as a TXT record at your DNS host.",
+                "how": t("Open 'Domain check', run the checks on {domain}, then use the SPF generator "
+                         "and add the result as a TXT record at your DNS host.", domain=domain),
                 "done": dns_status.get("SPF") == "pass",
                 "action": lambda: self.go("deliverability"),
             },
@@ -245,7 +246,8 @@ class GuidePage(Page):
         done = sum(1 for step in steps if step["done"])
         self.progress.setRange(0, len(steps))
         self.progress.setValue(done)
-        self.progress_label.setText(f"{done} of {len(steps)} steps complete")
+        self.progress_label.setText(t("{done} of {count} steps complete",
+                                      done=done, count=len(steps)))
         set_tone(self.progress_label, "success" if done == len(steps) else "muted")
 
         for number, step in enumerate(steps, start=1):

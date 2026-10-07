@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 from app import config
+from app.i18n import t
 
 
 def app_location() -> Path:
@@ -65,14 +66,16 @@ def how_to_launch() -> str:
         )
     if sys.platform == "win32":
         return (
-            f"You are running HomingPigeon from its source folder:\n{app_location()}\n\n"
-            f"Press the button below to put an icon on your Desktop, then just double-click "
-            f"that icon from now on. (Most people install with HomingPigeon Setup from the "
-            f"GitHub Releases page instead, which adds a Start menu entry too.)"
+            t("You are running HomingPigeon from its source "
+              "folder:\n{app_location}\n\nPress the button below to put an icon on your "
+              "Desktop, then just double-click that icon from now on. (Most people install "
+              "with HomingPigeon Setup from the GitHub Releases page instead, which adds a "
+              "Start menu entry too.)", app_location=app_location())
         )
     return (
-        f"HomingPigeon lives in this folder:\n{app_location()}\n\n"
-        f"To open it again, double-click  {start_file().name}  in that folder."
+        t("HomingPigeon lives in this folder:\n{app_location}\n\nTo open it again, "
+          "double-click  {name}  in that folder.",
+          app_location=app_location(), name=start_file().name)
     )
 
 
@@ -86,12 +89,12 @@ def desktop_dir() -> Path:
 def create_desktop_shortcut() -> tuple[bool, str]:
     """Create (or refresh) a Desktop shortcut. Returns (ok, message)."""
     if sys.platform != "win32":
-        return False, (f"Desktop icons can only be made on Windows. To open the app, "
-                       f"double-click '{start_file().name}' in the app's folder.")
+        return False, (t("Desktop icons can only be made on Windows. To open the app, double-click "
+                         "'{name}' in the app's folder.", name=start_file().name))
 
     desktop = desktop_dir()
     if not desktop.exists():
-        return False, f"Could not find your Desktop folder at {desktop}."
+        return False, t("Could not find your Desktop folder at {desktop}.", desktop=desktop)
 
     link = desktop / f"{config.APP_TITLE}.lnk"
     program, arguments, icon = launch_target()
@@ -120,13 +123,14 @@ def create_desktop_shortcut() -> tuple[bool, str]:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.TimeoutExpired) as error:
-        return False, f"Could not create the shortcut: {error}"
+        return False, t("Could not create the shortcut: {error}", error=error)
 
     if result.returncode != 0 or not link.exists():
         detail = (result.stderr or result.stdout or "").strip()[:200]
-        return False, f"Could not create the shortcut. {detail}".strip()
+        return False, t("Could not create the shortcut. {detail}", detail=detail).strip()
 
-    return True, f"Done. Look for the '{config.APP_TITLE}' icon on your Desktop."
+    return True, t("Done. Look for the '{app_title}' icon on your Desktop.",
+                   app_title=config.APP_TITLE)
 
 
 def open_folder(path: Path | str) -> None:

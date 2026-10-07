@@ -7,15 +7,16 @@ from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QCompleter, QLineEdit, QPlainTextEdit,
                              QRadioButton, QWidget)
 
+from app.i18n import t
 from app.ui import theme
 
 
 # --- text -------------------------------------------------------------------
 def line_edit(placeholder: str = "", text: str = "", parent=None) -> QLineEdit:
     widget = QLineEdit(parent)
-    widget.setPlaceholderText(placeholder)
+    widget.setPlaceholderText(t(placeholder))
     if text:
-        widget.setText(text)
+        widget.setText(t(text))
     widget.setClearButtonEnabled(False)
     return widget
 
@@ -48,7 +49,7 @@ class TextBox(QPlainTextEdit):
 def text_box(placeholder: str = "", monospace: bool = False, lines: int | None = None,
              parent=None) -> QPlainTextEdit:
     widget = TextBox(parent)
-    widget.setPlaceholderText(placeholder)
+    widget.setPlaceholderText(t(placeholder))
     if monospace:
         widget.setProperty("role", "mono")
     widget.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
@@ -88,10 +89,48 @@ def get_text(widget: QPlainTextEdit) -> str:
 
 
 # --- choosers ---------------------------------------------------------------
+class Combo(QComboBox):
+    """A drop-down that shows its choices translated but hands the code the English.
+
+    Page code compares and saves the English value ("Automatic", "(none)"), so
+    ``currentText()`` and ``setCurrentText()`` work in English whatever language
+    is on screen. Choices that are the user's own data (sheet names, column
+    headings, times) are shown exactly as they are.
+
+    ``translate`` is True for every choice, False for none, or a set of the
+    English values to translate (for a list of data with one app choice in it).
+    """
+
+    def __init__(self, translate: bool | set = True, parent=None):
+        super().__init__(parent)
+        self._translate = translate
+
+    def _shown(self, value: str) -> str:
+        wanted = self._translate is True or (
+            isinstance(self._translate, set) and value in self._translate)
+        return t(value) if wanted else value
+
+    def set_values(self, values: list[str]) -> None:
+        self.clear()
+        for value in values:
+            self.addItem(self._shown(value), value)
+
+    def currentText(self) -> str:  # noqa: N802 - Qt naming
+        value = self.currentData()
+        return value if isinstance(value, str) else super().currentText()
+
+    def setCurrentText(self, text: str) -> None:  # noqa: N802 - Qt naming
+        index = self.findData(text)
+        if index >= 0:
+            self.setCurrentIndex(index)
+        else:
+            super().setCurrentText(text)
+
+
 def combo(values: list[str], value: str | None = None, on_change: Callable | None = None,
-          parent=None) -> QComboBox:
-    widget = QComboBox(parent)
-    widget.addItems(values)
+          parent=None, translate: bool | set = True) -> QComboBox:
+    widget = Combo(translate, parent)
+    widget.set_values(values)
     widget.setCursor(Qt.CursorShape.PointingHandCursor)
     # Wheel over a drop-down inside a scrolling page should scroll the page,
     # not silently change the setting under the pointer.
@@ -100,14 +139,18 @@ def combo(values: list[str], value: str | None = None, on_change: Callable | Non
     if value is not None and value in values:
         widget.setCurrentText(value)
     if on_change:
-        widget.currentTextChanged.connect(on_change)
+        # Called with the English value, like currentText()
+        widget.currentIndexChanged.connect(lambda _index: on_change(widget.currentText()))
     return widget
 
 
 def set_combo_values(widget: QComboBox, values: list[str], value: str | None = None) -> None:
     blocked = widget.blockSignals(True)
-    widget.clear()
-    widget.addItems(values)
+    if isinstance(widget, Combo):
+        widget.set_values(values)
+    else:
+        widget.clear()
+        widget.addItems(values)
     if value and value in values:
         widget.setCurrentText(value)
     widget.blockSignals(blocked)
@@ -115,7 +158,7 @@ def set_combo_values(widget: QComboBox, values: list[str], value: str | None = N
 
 def checkbox(text: str, checked: bool = False, on_change: Callable | None = None,
              parent=None) -> QCheckBox:
-    widget = QCheckBox(text, parent)
+    widget = QCheckBox(t(text), parent)
     widget.setChecked(checked)
     widget.setCursor(Qt.CursorShape.PointingHandCursor)
     if on_change:
@@ -125,7 +168,7 @@ def checkbox(text: str, checked: bool = False, on_change: Callable | None = None
 
 def radio(text: str, checked: bool = False, on_change: Callable | None = None,
           parent=None) -> QRadioButton:
-    widget = QRadioButton(text, parent)
+    widget = QRadioButton(t(text), parent)
     widget.setChecked(checked)
     widget.setCursor(Qt.CursorShape.PointingHandCursor)
     if on_change:

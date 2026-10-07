@@ -13,6 +13,7 @@ from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QAbstractItemView, QHeaderView, QLabel, QStackedWidget, QTableView,
                              QVBoxLayout, QWidget)
 
+from app.i18n import t
 from app.ui import theme
 
 # Columns are sized from the first N rows only. Measuring every row of a large
@@ -49,7 +50,7 @@ class DataTable(QWidget):
         self._configure(multi_select)
         self._stack.addWidget(self.view)
 
-        self.empty_label = QLabel(empty_message)
+        self.empty_label = QLabel(t(empty_message))
         self.empty_label.setProperty("role", "muted")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty_label.setWordWrap(True)
@@ -152,7 +153,7 @@ class DataTable(QWidget):
             self.fit_columns()
 
     def set_empty_message(self, message: str) -> None:
-        self.empty_label.setText(message)
+        self.empty_label.setText(t(message))
 
     # --- selection ----------------------------------------------------------
     def selected_rows(self) -> list[int]:

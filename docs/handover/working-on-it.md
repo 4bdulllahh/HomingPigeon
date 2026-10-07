@@ -3,7 +3,9 @@
 ## Conventions
 
 - **Writing on screen.** Plain English for someone who has never set up email
-  software. Say what to do, not how the code works. Short sentences.
+  software. Say what to do, not how the code works. Short sentences. Then
+  translate it: see [languages.md](languages.md). The build fails until every
+  language has it.
 - **No em dashes, en dashes or typographic ellipses**, anywhere in the
   repository. `test_no_em_dashes_or_typographic_ellipses_anywhere` enforces it.
   Use a comma, colon or full stop, and `...` typed as three dots.
@@ -27,6 +29,8 @@ python -m pytest tests/ -q
 - `tests/test_core.py`: business rules, no Qt. Module-wide temporary database.
 - `tests/test_ui.py`: models, pages and widgets, headless. The `store` fixture
   gives each test a fresh database.
+- `tests/test_i18n.py`: every language complete, templates, right to left,
+  every page opening in every language.
 - `tests/test_updater.py`, `tests/test_prefs.py`: updater and preferences.
 - GitHub Actions runs the tests on every push and pull request
   (`.github/workflows/build.yml`).

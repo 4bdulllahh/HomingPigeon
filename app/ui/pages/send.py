@@ -8,6 +8,7 @@ from PyQt6.QtGui import QTextCursor
 from PyQt6.QtWidgets import QHBoxLayout, QProgressBar, QVBoxLayout, QWidget
 
 from app.core import composer, credentials, db, importer, prefs, scorer, sender, warmup
+from app.i18n import t
 from app.ui import theme
 from app.ui.pages.base import Page
 from app.ui.widgets.common import (Card, Section, StatTile, clear_layout, confirm_button,
@@ -115,7 +116,7 @@ class SendPage(Page):
                        "Set your SMTP details on the 'My email account' page"))
 
         count = importer.contact_count()
-        checks.append((f"Contacts imported ({count:,} sendable)", count > 0,
+        checks.append((t("Contacts imported ({count:,} sendable)", count=count), count > 0,
                        "Import your spreadsheet on the 'My contacts' page"))
 
         templates = db.query_one("SELECT 1 FROM bodies WHERE enabled = 1")
@@ -127,7 +128,8 @@ class SendPage(Page):
             failures = [name for name, state in dns_status.items() if state == "fail"]
             checks.append(
                 ("Domain authentication (SPF / DKIM / DMARC)", not failures,
-                 f"Failing: {', '.join(failures)}. Fix these on the 'Domain check' page"
+                 t("Failing: {join}. Fix these on the 'Domain check' page",
+                   join=', '.join(failures))
                  if failures else ""))
         else:
             checks.append(("Domain authentication checked", False,
@@ -136,7 +138,8 @@ class SendPage(Page):
 
         report = scorer.latest_report()
         if report:
-            checks.append((f"Spam score {report.score}/100 ({report.grade})", report.score >= 70,
+            checks.append((t("Spam score {score}/100 ({grade})",
+                             score=report.score, grade=report.grade), report.score >= 70,
                            "Improve the content on the 'My message' page"
                            if report.score < 70 else ""))
         else:
@@ -144,7 +147,8 @@ class SendPage(Page):
                            "Open 'My message' → 'Preview & score' to run the check"))
 
         status = warmup.status()
-        checks.append((f"Daily limit: {status.sent_today}/{status.cap} used", not status.at_limit,
+        checks.append((t("Daily limit: {sent_today}/{cap} used",
+                         sent_today=status.sent_today, cap=status.cap), not status.at_limit,
                        "Today's limit is reached. Sending resumes tomorrow"))
         return checks
 
@@ -168,7 +172,7 @@ class SendPage(Page):
             set_tone(text, "muted" if ok else "bright")
             line.addWidget(text)
             if not ok and fix:
-                line.addWidget(hint(f"Fix: {fix}", wrap=False))
+                line.addWidget(hint(t("Fix: {fix}", fix=fix), wrap=False))
             line.addStretch(1)
             self.checks_layout.addWidget(holder)
 
@@ -178,7 +182,7 @@ class SendPage(Page):
         colour = theme.color(LEVEL_TOKENS.get(level, "fg"))
         self.console.appendHtml(
             f'<span style="color:{theme.color("fg_muted")}">{stamp}</span>&nbsp;&nbsp;'
-            f'<span style="color:{colour}">{_escape(message)}</span>')
+            f'<span style="color:{colour}">{_escape(t(message))}</span>')
         self.console.moveCursor(QTextCursor.MoveOperation.End)
 
     def _clear_console(self) -> None:
@@ -284,10 +288,11 @@ class SendPage(Page):
         if report and report.score < 70:
             if not ConfirmDialog.ask(
                 self, "Your content scored poorly",
-                f"The last spam check scored {report.score}/100 (grade {report.grade}).\n\n"
-                f"{report.verdict}\n\nSending anyway risks your domain's reputation. You can fix "
-                f"the issues on the 'My message' page, or continue if you have already reviewed "
-                f"them.", confirm_text="Send anyway", danger=True,
+                t("The last spam check scored {score}/100 (grade "
+                  "{grade}).\n\n{verdict}\n\nSending anyway risks your domain's reputation. "
+                  "You can fix the issues on the 'My message' page, or continue if you have "
+                  "already reviewed them.",
+                  score=report.score, grade=report.grade, verdict=report.verdict), confirm_text="Send anyway", danger=True,
             ):
                 self.go("templates")
                 return
@@ -297,10 +302,10 @@ class SendPage(Page):
         if failures:
             if not ConfirmDialog.ask(
                 self, "Domain authentication is failing",
-                f"These checks are failing: {', '.join(failures)}.\n\n"
-                f"Mail from a domain without working authentication is very likely to be "
-                f"spam-foldered or rejected, and repeated attempts damage your domain's "
-                f"reputation for months.\n\nFix them on the 'Domain check' page first.",
+                t("These checks are failing: {join}.\n\nMail from a domain without working "
+                  "authentication is very likely to be spam-foldered or rejected, and repeated "
+                  "attempts damage your domain's reputation for months.\n\nFix them on the "
+                  "'Domain check' page first.", join=', '.join(failures)),
                 confirm_text="Send anyway", danger=True,
             ):
                 self.go("deliverability")
@@ -310,12 +315,14 @@ class SendPage(Page):
         batch = min(pending, limit)
         if not ConfirmDialog.ask(
             self, "Start sending?",
-            f"{pending:,} contacts are waiting.\n\n"
-            f"Today's limit allows {limit}, so {batch} will be sent now, at "
-            f"{format_seconds(plan.delay_min_s)} to {format_seconds(plan.delay_max_s)} intervals "
-            f"between {plan.window_start} and {plan.window_end}.\n\n"
-            f"You can pause or stop at any time; progress is saved after every email.",
-            confirm_text=f"Send {batch} emails",
+            t("{pending:,} contacts are waiting.\n\nToday's limit allows {limit}, so "
+              "{batch} will be sent now, at {seconds} to {seconds2} intervals between "
+              "{window_start} and {window_end}.\n\nYou can pause or stop at any time; "
+              "progress is saved after every email.",
+              pending=pending, limit=limit, batch=batch, seconds=format_seconds(plan.delay_min_s),
+              seconds2=format_seconds(plan.delay_max_s), window_start=plan.window_start,
+              window_end=plan.window_end),
+            confirm_text=t("Send {batch} emails", batch=batch),
         ):
             return
 
@@ -335,9 +342,9 @@ class SendPage(Page):
         self.pump.start()
 
         self.start_button.setEnabled(False)
-        self.start_button.setText("Sending...")
+        self.start_button.setText(t("Sending..."))
         self.pause_button.setEnabled(True)
-        self.pause_button.setText("Pause")
+        self.pause_button.setText(t("Pause"))
         self.stop_button.setEnabled(True)
         self.tile_sent.update_value("0")
         self.tile_failed.update_value("0")
@@ -348,10 +355,10 @@ class SendPage(Page):
             return
         if self.worker.is_paused:
             self.worker.request_resume()
-            self.pause_button.setText("Pause")
+            self.pause_button.setText(t("Pause"))
         else:
             self.worker.request_pause()
-            self.pause_button.setText("Resume")
+            self.pause_button.setText(t("Resume"))
 
     def _stop(self) -> None:
         if not self.is_running():
@@ -393,7 +400,7 @@ class SendPage(Page):
             self._log(event.message, event.level)
 
         elif event.type == sender.EventType.SENT:
-            self._log(f"Sent → {event.message}", "success")
+            self._log(t("Sent → {message}", message=event.message), "success")
             self.tile_sent.update_value(str(self.worker.sent if self.worker else 0))
 
         elif event.type == sender.EventType.PROGRESS:
@@ -411,15 +418,15 @@ class SendPage(Page):
 
         elif event.type == sender.EventType.STATE:
             state = (event.data or {}).get("state", "")
-            self.state_label.setText(STATE_LABELS.get(state, state))
+            self.state_label.setText(t(STATE_LABELS.get(state, state)))
             set_tone(self.state_label, STATE_TONES.get(state, "muted"))
 
         elif event.type == sender.EventType.DONE:
             data = event.data or {}
             self.start_button.setEnabled(True)
-            self.start_button.setText("Start Emailing")
+            self.start_button.setText(t("Start Emailing"))
             self.pause_button.setEnabled(False)
-            self.pause_button.setText("Pause")
+            self.pause_button.setText(t("Pause"))
             self.stop_button.setEnabled(False)
             self.tile_next.update_value("-")
             self._render_checks()
@@ -434,7 +441,7 @@ class SendPage(Page):
             sent = data.get("sent", 0)
             if sent:
                 self.notify(
-                    f"Finished: {sent} sent, {data.get('failed', 0)} failed",
+                    t("Finished: {sent} sent, {get} failed", sent=sent, get=data.get('failed', 0)),
                     "success" if not data.get("failed") else "warn")
 
     # --- lifecycle ----------------------------------------------------------
@@ -446,7 +453,8 @@ class SendPage(Page):
         stats = db.campaign_stats(self.campaign_id) if self.campaign_id else {}
         pending = stats.get("pending", 0) + stats.get("retry", 0)
         limit = warmup.remaining_today()
-        self.tile_queue.update_value(f"{min(pending, limit)}", f"{pending:,} pending overall")
+        self.tile_queue.update_value(f"{min(pending, limit)}", t("{pending:,} pending overall",
+                                                                 pending=pending))
         self.tile_sent.update_value(str(stats.get("sent", 0)))
         self.tile_failed.update_value(
             str(stats.get("failed", 0) + stats.get("bounced", 0)))

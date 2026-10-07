@@ -12,6 +12,7 @@ from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 from app.core import (composer, db, dns_tools, exporter, imap_sync, importer, merge, scorer,
                       sender)
+from app.i18n import t
 from app.services import updater
 from app.workers.base import Task, Worker
 
@@ -74,7 +75,8 @@ class ImportWorker(Worker):
 
             def dns_progress(done: int, total: int) -> None:
                 self.report(done, max(total, 1),
-                            f"Checking mail servers: {done:,} of {total:,} domains")
+                            t("Checking mail servers: {done:,} of {total:,} domains",
+                              done=done, total=total))
 
             answers = importer.resolve_domains(
                 domains, progress=dns_progress, cancelled=lambda: self.cancelled)
@@ -82,7 +84,8 @@ class ImportWorker(Worker):
                 return importer.ImportResult(total_rows=len(self.dataframe))
 
         def progress(done: int, total: int) -> None:
-            self.report(done, total, f"Saving contacts: {done:,} of {total:,} rows")
+            self.report(done, total, t("Saving contacts: {done:,} of {total:,} rows",
+                                       done=done, total=total))
 
         return importer.import_dataframe(
             self.dataframe, self.mapping, source_file=self.source_file,
@@ -102,10 +105,14 @@ def export_suppression(path: str | Path | None = None) -> Path:
 
 
 # --- Content scoring --------------------------------------------------------
-def score_content(content: composer.Content, sender_email: str, reply_to: str,
-                  known_tags: list[str], dns_results) -> scorer.ScoreReport:
-    return scorer.score(content, sender_email=sender_email, reply_to=reply_to,
-                        known_tags=known_tags, dns_results=dns_results)
+def score_content(content: composer.Content, identity: composer.SenderIdentity,
+                  known_tags: list[str], dns_results, context: dict, subject_index: int,
+                  body_index: int, seed: int) -> scorer.ScoreReport:
+    """Score the finished email the Preview tab is showing, for the same contact."""
+    return scorer.score(content, sender_email=identity.email, reply_to=identity.reply_to,
+                        known_tags=known_tags, dns_results=dns_results, context=context,
+                        subject_index=subject_index, body_index=body_index, seed=seed,
+                        sender_name=identity.name)
 
 
 def build_preview(identity: composer.SenderIdentity, context: dict, content: composer.Content,

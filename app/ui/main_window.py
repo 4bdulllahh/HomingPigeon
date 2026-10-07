@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QMainWin
 
 from app import config
 from app.core import db, prefs, warmup
+from app.i18n import t
 from app.ui import theme
 from app.ui.widgets.common import restyle, separator, toast
 
@@ -74,12 +75,12 @@ class NavButton(QPushButton):
         text = QVBoxLayout()
         text.setContentsMargins(0, 0, 0, 0)
         text.setSpacing(round(3 * scale))
-        self.title_label = QLabel(title)
+        self.title_label = QLabel(t(title))
         text.addWidget(self.title_label)
         # Parented to the button from the outset. A parentless QLabel that is
         # made visible *is* a top-level window, so showing it before the layout
         # adopted it blinked one small window open per menu entry at start-up.
-        self.subtitle_label = QLabel(subtitle, self)
+        self.subtitle_label = QLabel(t(subtitle), self)
         self.subtitle_label.setProperty("role", "hint")
         if show_subtitle:
             text.addWidget(self.subtitle_label)
@@ -120,7 +121,7 @@ class NavButton(QPushButton):
         return hint
 
     def set_badge(self, show: bool) -> None:
-        self.badge.setText("●" if show else "")
+        self.badge.setText(t("●" if show else ""))
         self.badge.setStyleSheet(
             f"color: {theme.color('warning')}; font-size: {theme.px(9)}px;")
 
@@ -132,7 +133,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"{config.APP_TITLE} {config.APP_VERSION}  ·  {config.APP_TAGLINE}")
+        self._set_title()
         self._set_icon()
 
         self._builders: dict[str, Callable[[], QWidget]] = {}
@@ -156,6 +157,9 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(200, self.refresh_status)
 
     # --- chrome -------------------------------------------------------------
+    def _set_title(self) -> None:
+        self.setWindowTitle(f"{config.APP_TITLE} {config.APP_VERSION}  ·  {t(config.APP_TAGLINE)}")
+
     def _set_icon(self) -> None:
         try:
             path = config.resource_path("assets/icon.ico")
@@ -252,7 +256,7 @@ class MainWindow(QMainWindow):
         self.refresh_button.setProperty("kind", "ghost")
         self.refresh_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.refresh_button.setFixedSize(QSize(round(30 * scale), round(30 * scale)))
-        self.refresh_button.setToolTip("Refresh this page (F5)")
+        self.refresh_button.setToolTip(t("Refresh this page (F5)"))
         family = theme.icon_family()
         self.refresh_button.setStyleSheet(
             (f'font-family: "{family}"; ' if family else "")
@@ -321,7 +325,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(12, 0, 12, 0)
         layout.setSpacing(16)
 
-        self.status_account = QLabel("No account configured")
+        self.status_account = QLabel(t("No account configured"))
         self.status_middle = QLabel("")
         self.status_right = QLabel("")
         layout.addWidget(self.status_account)
@@ -401,7 +405,7 @@ class MainWindow(QMainWindow):
             try:
                 on_show()
             except Exception as error:  # noqa: BLE001 - a broken page must not break navigation
-                toast(self, f"Could not refresh this page: {error}", "error")
+                toast(self, t("Could not refresh this page: {error}", error=error), "error")
         self.refresh_status()
 
     def refresh_app(self) -> None:
@@ -431,7 +435,8 @@ class MainWindow(QMainWindow):
 
         if reason:
             self._soft_refresh(page)
-            toast(self, f"Reloaded what is on screen. Left the page alone because {reason}.",
+            toast(self, t("Reloaded what is on screen. Left the page alone because {reason}.",
+                          reason=reason),
                   "info", 5000)
             return
 
@@ -468,19 +473,20 @@ class MainWindow(QMainWindow):
         email = db.get_setting("sender_email", "")
         host = db.get_setting("smtp_host", "")
         if email:
-            self.status_account.setText(email + (f"  ·  {host}" if host else ""))
+            self.status_account.setText(t(email + (f"  ·  {host}" if host else "")))
         else:
-            self.status_account.setText("No account configured. Open 'My email account'")
+            self.status_account.setText(t("No account configured. Open 'My email account'"))
 
         try:
-            self.status_middle.setText(warmup.status().describe())
+            self.status_middle.setText(t(warmup.status().describe()))
         except Exception:  # noqa: BLE001
             self.status_middle.setText("")
 
         from app.core import importer
 
         try:
-            self.status_right.setText(f"{importer.contact_count():,} contacts")
+            self.status_right.setText(t("{contact_count:,} contacts",
+                                        contact_count=importer.contact_count()))
         except Exception:  # noqa: BLE001
             self.status_right.setText("")
 
@@ -558,9 +564,37 @@ class MainWindow(QMainWindow):
         reason = self.busy_page_reason()
         if reason:
             self.apply_theme()
-            toast(self, f"Text size applies fully once {reason} has finished.", "warn", 6000)
+            toast(self, t("Text size applies fully once {reason} has finished.", reason=reason),
+                  "warn", 6000)
             return
+        self._rebuild()
 
+    def change_language(self, code: str) -> None:
+        """Switch every word in the app, and the reading direction for Arabic.
+
+        Text is translated as widgets are built, so the window is rebuilt the
+        same way a text size change rebuilds it. Nothing typed and saved is lost.
+        """
+        from app import i18n
+
+        reason = self.busy_page_reason()
+        if reason:
+            toast(self, t("The language can be changed once {reason} has finished.",
+                          reason=reason), "warn", 6000)
+            return
+        db.set_setting("language", code)
+        i18n.set_language(code)
+        direction = (Qt.LayoutDirection.RightToLeft if i18n.is_rtl()
+                     else Qt.LayoutDirection.LeftToRight)
+        app = QApplication.instance()
+        if app is not None:
+            app.setLayoutDirection(direction)
+        self.setLayoutDirection(direction)
+        self._set_title()
+        self._rebuild()
+
+    def _rebuild(self) -> None:
+        """Throw away every built page and the frame around them, and show the page again."""
         current = self.current or "dashboard"
         self.setUpdatesEnabled(False)
         try:

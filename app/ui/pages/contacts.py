@@ -8,6 +8,7 @@ from PyQt6.QtGui import QAction, QKeySequence, QShortcut
 from PyQt6.QtWidgets import QFileDialog, QGridLayout, QHBoxLayout, QMenu, QVBoxLayout, QWidget
 
 from app.core import db, importer, prefs
+from app.i18n import t
 from app.models.contacts_model import (SORT_MENU, SORT_SHORT, ContactsModel,
                                        all_contact_emails)
 from app.models.table_model import SimpleTableModel
@@ -63,7 +64,8 @@ class ContactsPage(Page):
         picker.add(row(self.file_label, None, primary_button("Browse...", self._browse, 120)))
 
         self.sheet_row = FormRow("Sheet")
-        self.sheet_picker = combo(["-"], on_change=lambda _t: self._load_preview())
+        self.sheet_picker = combo(["-"], on_change=lambda _t: self._load_preview(),
+                                  translate=False)
         self.sheet_row.add(self.sheet_picker)
         self.sheet_row.setVisible(False)
         picker.add(self.sheet_row)
@@ -112,19 +114,20 @@ class ContactsPage(Page):
 
     def _browse(self) -> None:
         path, _filter = QFileDialog.getOpenFileName(
-            self, "Select your contact list", "",
-            "Spreadsheets (*.xlsx *.xls *.csv);;All files (*.*)")
+            self, t("Select your contact list"), "",
+            t("Spreadsheets (*.xlsx *.xls *.csv);;All files (*.*)"))
         if not path:
             return
         self._path = Path(path)
-        self.file_label.setText(self._path.name)
+        self.file_label.setText(t(self._path.name))
         set_tone(self.file_label, "bright")
-        self.import_status.setText("Opening the file...")
+        self.import_status.setText(t("Opening the file..."))
 
         Task(jobs.read_sheet_names, self._path).start(
             on_result=self.guard(self._sheets_ready),
             on_error=self.guard(
-                lambda message: self._fail(f"Could not open the file: {message}")))
+                lambda message: self._fail(t("Could not open the file: {message}",
+                                             message=message))))
 
     def _sheets_ready(self, sheets: list[str]) -> None:
         set_combo_values(self.sheet_picker, sheets, sheets[0] if sheets else None)
@@ -135,13 +138,14 @@ class ContactsPage(Page):
         if not self._path:
             return
         sheet = self.sheet_picker.currentText()
-        self.import_status.setText("Reading the sheet...")
+        self.import_status.setText(t("Reading the sheet..."))
         set_tone(self.import_status, "muted")
 
         Task(jobs.read_preview, self._path, None if sheet in ("CSV", "-") else sheet).start(
             on_result=self.guard(self._preview_ready),
             on_error=self.guard(
-                lambda message: self._fail(f"Could not read the sheet: {message}")))
+                lambda message: self._fail(t("Could not read the sheet: {message}",
+                                             message=message))))
 
     def _preview_ready(self, result) -> None:
         self._dataframe, mapping = result
@@ -166,7 +170,8 @@ class ContactsPage(Page):
         ]):
             form = FormRow(title)
             picker = combo(columns, str(detected) if detected else "(none)",
-                           on_change=lambda _t: self._refresh_preview_rows())
+                           on_change=lambda _t: self._refresh_preview_rows(),
+                           translate={"(none)"})
             form.add(picker)
             grid.addWidget(form, 0, index)
             self._column_pickers[key] = picker
@@ -174,8 +179,8 @@ class ContactsPage(Page):
 
         found = sum(1 for m in (mapping.email, mapping.company, mapping.person) if m)
         self.mapping_section.add(muted(
-            f"{len(self._dataframe):,} rows · {len(self._dataframe.columns)} columns · "
-            f"{found} of 3 mapped automatically"))
+            t("{count:,} rows · {count2} columns · {found} of 3 mapped automatically",
+              count=len(self._dataframe), count2=len(self._dataframe.columns), found=found)))
         self.extras_label = hint("")
         self.mapping_section.add(self.extras_label)
 
@@ -207,8 +212,9 @@ class ContactsPage(Page):
         if mapping.extras:
             names = ", ".join("{{" + str(c) + "}}" for c in mapping.extras)
             self.extras_label.setText(
-                f"Also kept, all {len(mapping.extras)} of them: {names}. Each one shows as a "
-                f"column in My contacts and can be used in your message.")
+                t("Also kept, all {count} of them: {names}. Each one shows as a column in My "
+                  "contacts and can be used in your message.",
+                  count=len(mapping.extras), names=names))
         else:
             self.extras_label.setText("")
         rows, tones = [], []
@@ -233,11 +239,11 @@ class ContactsPage(Page):
             return
 
         self.import_button.setEnabled(False)
-        self.import_button.setText("Importing...")
+        self.import_button.setText(t("Importing..."))
         self.cancel_button.setVisible(True)
         self.progress.setVisible(True)
         self.progress.set_busy()              # sweeping until the first report
-        self.import_status.setText("Starting...")
+        self.import_status.setText(t("Starting..."))
         set_tone(self.import_status, "muted")
 
         worker = jobs.ImportWorker(self._dataframe, mapping,
@@ -254,16 +260,16 @@ class ContactsPage(Page):
             self._import_worker.cancel()
             self._import_worker = None
         self._reset_import_controls()
-        self.import_status.setText("Import cancelled. Nothing already imported was removed.")
+        self.import_status.setText(t("Import cancelled. Nothing already imported was removed."))
         set_tone(self.import_status, "warning")
 
     def _import_progress(self, done: int, total: int, detail: str) -> None:
         self.progress.set_progress(done, total)
-        self.import_status.setText(detail)
+        self.import_status.setText(t(detail))
 
     def _reset_import_controls(self) -> None:
         self.import_button.setEnabled(True)
-        self.import_button.setText("Import contacts")
+        self.import_button.setText(t("Import contacts"))
         self.cancel_button.setVisible(False)
         self.progress.setVisible(False)
         self.progress.reset()
@@ -271,34 +277,34 @@ class ContactsPage(Page):
     def _import_failed(self, message: str) -> None:
         self._import_worker = None
         self._reset_import_controls()
-        self.import_status.setText(f"Import failed: {message}")
+        self.import_status.setText(t("Import failed: {message}", message=message))
         set_tone(self.import_status, "error")
 
     def _import_done(self, result: importer.ImportResult) -> None:
         self._import_worker = None
         self._reset_import_controls()
-        self.import_status.setText("Done.")
+        self.import_status.setText(t("Done."))
         set_tone(self.import_status, "success")
 
         self.result_section.setVisible(True)
-        self.result_label.setText(result.summary())
+        self.result_label.setText(t(result.summary()))
 
         if result.problems:
-            lines = [f"{email or '(blank)':40} {reason}" for email, reason in result.problems[:200]]
+            lines = [f"{email or t('(blank)'):40} {t(reason)}" for email, reason in result.problems[:200]]
             if len(result.problems) > 200:
-                lines.append(f"... and {len(result.problems) - 200:,} more")
+                lines.append(t("... and {number:,} more", number=len(result.problems) - 200))
             self.problems_box.setPlainText("\n".join(lines))
             self.problems_box.setVisible(True)
         else:
             self.problems_box.setVisible(False)
 
-        self.notify(f"{result.imported:,} contacts imported", "success")
+        self.notify(t("{imported:,} contacts imported", imported=result.imported), "success")
         self.window_.refresh_status()
         self._reload_list()
         self._refresh_completer()
 
     def _fail(self, message: str) -> None:
-        self.import_status.setText(message)
+        self.import_status.setText(t(message))
         set_tone(self.import_status, "error")
         self.notify(message, "error")
 
@@ -383,15 +389,18 @@ class ContactsPage(Page):
         count = len(self.contacts_table.selected_rows())
         self.delete_button.setEnabled(count > 0)
         self.delete_button.setText(
-            f"Delete {count} selected" if count > 1 else "Delete selected")
+            t(t("Delete {count} selected", count=count) if count > 1 else "Delete selected"))
 
     def _update_counts(self, total: int, sendable: int, matching: int) -> None:
         if self.contacts_model.search_text():
             self.contacts_summary.setText(
-                f"{matching:,} match “{self.contacts_model.search_text()}”  ·  "
-                f"{total:,} contacts in total  ·  {sendable:,} sendable")
+                t("{matching:,} match “{search_text}”  ·  {total:,} contacts in total  ·  "
+                  "{sendable:,} sendable",
+                  matching=matching, search_text=self.contacts_model.search_text(), total=total,
+                  sendable=sendable))
         else:
-            self.contacts_summary.setText(f"{total:,} contacts  ·  {sendable:,} sendable")
+            self.contacts_summary.setText(t("{total:,} contacts  ·  {sendable:,} sendable",
+                                            total=total, sendable=sendable))
 
     def _contact_menu(self, index: int) -> QMenu | None:
         if index < 0:
@@ -402,17 +411,17 @@ class ContactsPage(Page):
         email = self.contacts_model.email_at(index)
 
         menu = QMenu(self)
-        delete = QAction(f"Delete {len(rows)} contacts" if len(rows) > 1
-                         else f"Delete {email}", menu)
+        delete = QAction(t(t("Delete {count} contacts", count=len(rows)) if len(rows) > 1
+                         else t("Delete {email}", email=email)), menu)
         delete.triggered.connect(self._delete_selected)
         menu.addAction(delete)
 
-        suppress = QAction("Delete and never contact again", menu)
+        suppress = QAction(t("Delete and never contact again"), menu)
         suppress.triggered.connect(lambda: self._delete_selected(suppress_too=True))
         menu.addAction(suppress)
 
         menu.addSeparator()
-        copy = QAction("Copy email address", menu)
+        copy = QAction(t("Copy email address"), menu)
         copy.triggered.connect(lambda: self._copy_email(email))
         menu.addAction(copy)
         return menu
@@ -430,9 +439,9 @@ class ContactsPage(Page):
             return
         emails = self.contacts_model.emails_for_rows(rows)
         if len(emails) == 1:
-            question = f"Remove {emails[0]} from your contact list?"
+            question = t("Remove {emails0} from your contact list?", emails0=emails[0])
         else:
-            question = f"Remove these {len(emails):,} contacts from your list?"
+            question = t("Remove these {count:,} contacts from your list?", count=len(emails))
         extra = ("\n\nThey will also be added to the do-not-contact list, so a future import "
                  "cannot put them back." if suppress_too else
                  "\n\nThis only removes them from the list here; the original spreadsheet is "
@@ -452,7 +461,7 @@ class ContactsPage(Page):
         self._refresh_completer()
         if suppress_too:
             self._reload_suppression()
-        self.notify(f"{removed:,} contact(s) deleted", "success")
+        self.notify(t("{removed:,} contact(s) deleted", removed=removed), "success")
 
     def _clear_list(self) -> None:
         total = importer.contact_count(valid_only=False)
@@ -461,10 +470,11 @@ class ContactsPage(Page):
             return
         if not ConfirmDialog.ask(
             self, "Clear the whole contact list?",
-            f"All {total:,} contacts will be removed, along with the progress of any campaign "
-            f"that has not finished.\n\nYour do-not-contact list is kept, so anyone who has "
-            f"unsubscribed or bounced stays protected when you import a new spreadsheet.\n\n"
-            f"This cannot be undone. Export first if you want a copy.",
+            t("All {total:,} contacts will be removed, along with the progress of any "
+              "campaign that has not finished.\n\nYour do-not-contact list is kept, so "
+              "anyone who has unsubscribed or bounced stays protected when you import a "
+              "new spreadsheet.\n\nThis cannot be undone. Export first if you want a copy.",
+              total=total),
             confirm_text="Clear the list", danger=True,
         ):
             return
@@ -479,8 +489,8 @@ class ContactsPage(Page):
         self.contacts_table.clear_selection()
         self.contacts_model.set_rows_empty()
         self.clear_button.setEnabled(False)
-        self.clear_button.setText("Clearing...")
-        self.contacts_summary.setText("Clearing the contact list...")
+        self.clear_button.setText(t("Clearing..."))
+        self.contacts_summary.setText(t("Clearing the contact list..."))
 
         Task(ContactsModel.clear_all).start(
             on_result=self._clear_done, on_error=self._clear_failed,
@@ -488,35 +498,38 @@ class ContactsPage(Page):
 
     def _clear_finished(self) -> None:
         self.clear_button.setEnabled(True)
-        self.clear_button.setText("Clear whole list...")
+        self.clear_button.setText(t("Clear whole list..."))
 
     def _clear_done(self, removed: int) -> None:
         self.contacts_model.reload()
         self._selection_changed()
         self.window_.refresh_status()
         self._refresh_completer()
-        self.notify(f"{removed:,} contacts removed, ready for a new import", "success")
+        self.notify(t("{removed:,} contacts removed, ready for a new import",
+                      removed=removed), "success")
 
     def _clear_failed(self, message: str) -> None:
         self.contacts_model.reload()
         self._selection_changed()
-        self.notify(f"The list could not be cleared: {message}", "error", 8000)
+        self.notify(t("The list could not be cleared: {message}", message=message), "error", 8000)
 
     def _export_contacts(self) -> None:
         path, _filter = QFileDialog.getSaveFileName(
-            self, "Export contacts", "contacts.xlsx", "Excel (*.xlsx)")
+            self, t("Export contacts"), "contacts.xlsx", t("Excel (*.xlsx)"))
         if not path:
             return
         Task(jobs.export_contacts, path).start(
-            on_result=lambda saved: self.notify(f"Exported to {Path(saved).name}", "success"),
-            on_error=lambda message: self.notify(f"Export failed: {message}", "error"))
+            on_result=lambda saved: self.notify(t("Exported to {name}",
+                                                  name=Path(saved).name), "success"),
+            on_error=lambda message: self.notify(t("Export failed: {message}",
+                                                   message=message), "error"))
 
     def search_for(self, text: str) -> None:
         """Open the list tab filtered to one address. Used by the Sent emails page."""
         self.tabs.set("My contacts")
         box = getattr(self, "search_box", None)
         if box is not None:
-            box.setText(text)
+            box.setText(t(text))
             self._search_debounce.flush()
 
     def _reload_list(self) -> None:
@@ -598,7 +611,7 @@ class ContactsPage(Page):
         self._reload_suppression()
         self._reload_list()
         self.window_.refresh_status()
-        self.notify(f"{email} will never be contacted", "success")
+        self.notify(t("{email} will never be contacted", email=email), "success")
 
     def _remove_suppression(self) -> None:
         rows = self.suppression_table.selected_rows()
@@ -608,36 +621,39 @@ class ContactsPage(Page):
         emails = [self.suppression_model.value(r, 0) for r in rows]
         if not ConfirmDialog.ask(
             self, "Allow contact again?",
-            f"{len(emails):,} address(es) will be taken off the do-not-contact list and may "
-            f"receive email again.\n\nOnly do this if they asked you to.",
+            t("{count:,} address(es) will be taken off the do-not-contact list and may "
+              "receive email again.\n\nOnly do this if they asked you to.", count=len(emails)),
             confirm_text="Remove from list", danger=True,
         ):
             return
         for email in emails:
             db.unsuppress(email)
         self._reload_suppression()
-        self.notify(f"{len(emails):,} address(es) removed", "success")
+        self.notify(t("{count:,} address(es) removed", count=len(emails)), "success")
 
     def _import_suppression(self) -> None:
         path, _filter = QFileDialog.getOpenFileName(
-            self, "Select a do-not-contact list", "",
-            "Spreadsheets (*.xlsx *.xls *.csv);;All files (*.*)")
+            self, t("Select a do-not-contact list"), "",
+            t("Spreadsheets (*.xlsx *.xls *.csv);;All files (*.*)"))
         if not path:
             return
 
         def done(count: int) -> None:
             self._reload_suppression()
             self._reload_list()
-            self.notify(f"{count:,} addresses suppressed", "success")
+            self.notify(t("{count:,} addresses suppressed", count=count), "success")
 
         Task(jobs.import_suppression, path).start(
             on_result=done,
-            on_error=lambda message: self.notify(f"Could not import: {message}", "error"))
+            on_error=lambda message: self.notify(t("Could not import: {message}",
+                                                   message=message), "error"))
 
     def _export_suppression(self) -> None:
         Task(jobs.export_suppression).start(
-            on_result=lambda saved: self.notify(f"Exported to {Path(saved).name}", "success"),
-            on_error=lambda message: self.notify(f"Export failed: {message}", "error"))
+            on_result=lambda saved: self.notify(t("Exported to {name}",
+                                                  name=Path(saved).name), "success"),
+            on_error=lambda message: self.notify(t("Export failed: {message}",
+                                                   message=message), "error"))
 
     def busy_reason(self) -> str | None:
         if self._import_worker is not None:

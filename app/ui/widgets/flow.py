@@ -69,6 +69,10 @@ class FlowLayout(QLayout):
         margins = self.contentsMargins()
         area = rect.adjusted(margins.left(), margins.top(), -margins.right(), -margins.bottom())
         x, y, line_height = area.x(), area.y(), 0
+        # Qt mirrors its own layouts for Arabic; this one is hand-made, so it
+        # mirrors itself: rows start at the right edge and run leftwards.
+        owner = self.parentWidget()
+        mirrored = owner is not None and owner.isRightToLeft()
 
         for item in self._items:
             widget = item.widget()
@@ -82,7 +86,10 @@ class FlowLayout(QLayout):
                 next_x = x + hint.width() + self._spacing
                 line_height = 0
             if apply:
-                item.setGeometry(QRect(QPoint(x, y), hint))
+                place = QRect(QPoint(x, y), hint)
+                if mirrored:
+                    place.moveLeft(area.right() - (x - area.x()) - hint.width() + 1)
+                item.setGeometry(place)
             x = next_x
             line_height = max(line_height, hint.height())
 

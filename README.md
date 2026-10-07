@@ -23,6 +23,9 @@ and your contacts never leave it.
 
 ## Features
 
+- **In your language.** English, Arabic, German, Spanish or French, chosen in **Settings**.
+  Every page, button and message changes straight away, and Arabic turns the whole app to read
+  from right to left. The examples and the unsubscribe line in your emails follow your choice.
 - **Updates itself.** When you open the app it checks for a new version. If there is one, a
   popup offers **Update now** or **Update later**. Update now downloads it, checks it is genuine,
   installs it and opens the app again, and your contacts, templates and settings are kept.
@@ -42,8 +45,12 @@ and your contacts never leave it.
   so hundreds of identical emails never go out. Already have them in a spreadsheet? Import the
   subjects and messages in one go.
 - **Spam score before you send.** A live preview shows exactly what one contact will receive,
-  with a score out of 100 and plain-English advice on wording, links and attachments that
-  trigger filters.
+  and the score reads that finished email: subject, message, link, signature and footer
+  together. You get a score out of 100, an estimate of whether it lands in the main inbox,
+  Gmail's Promotions tab or spam, and plain-English advice on what to change.
+- **Examples that reach the main inbox.** Press "Show me an example" for subjects and messages
+  written the way personal emails are, and read the guide on keeping out of spam and
+  Promotions.
 - **A warm-up ramp.** Starts at about 20 emails a day and increases over several weeks. A
   brand-new sender suddenly sending hundreds looks like a hacked account.
 - **Human pacing.** A random delay between emails (you set the minimum and maximum), office

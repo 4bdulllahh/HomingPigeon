@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel
                              QMenu, QProgressBar, QPushButton, QScrollArea, QSizePolicy,
                              QVBoxLayout, QWidget)
 
+from app.i18n import t
 from app.ui import theme
 from app.ui.widgets.flow import FlowLayout
 
@@ -45,7 +46,7 @@ def set_tone(widget: QWidget, tone: str | None) -> QWidget:
 
 # --- text -------------------------------------------------------------------
 def _label(text: str, role: str, wrap: bool, parent=None) -> QLabel:
-    label = QLabel(text, parent)
+    label = QLabel(t(text), parent)
     label.setProperty("role", role)
     label.setWordWrap(wrap)
     if wrap:
@@ -177,7 +178,7 @@ class Section(Card):
 
     def __init__(self, title: str, description: str = "", parent=None, kind: str = "section"):
         super().__init__(parent, kind=kind, padding=18)
-        title_label = QLabel(title)
+        title_label = QLabel(t(title))
         title_label.setProperty("role", "section-title")
         self.layout_.addWidget(title_label)
         if description:
@@ -230,7 +231,7 @@ class StatTile(Card):
                  parent=None):
         super().__init__(parent, kind="card", padding=14)
         self.layout_.setSpacing(1)
-        self.value_label = QLabel(value)
+        self.value_label = QLabel(t(value))
         self.value_label.setProperty("role", "value")
         if tone:
             self.value_label.setProperty("tone", tone)
@@ -241,10 +242,10 @@ class StatTile(Card):
         self.layout_.addWidget(self.note_label)
 
     def update_value(self, value: str, note: str = "", tone: str | None = None) -> None:
-        self.value_label.setText(str(value))
+        self.value_label.setText(t(str(value)))
         if tone is not None:
             set_tone(self.value_label, tone)
-        self.note_label.setText(note)
+        self.note_label.setText(t(note))
 
 
 class ProgressRow(QWidget):
@@ -289,7 +290,7 @@ class ProgressRow(QWidget):
         if self.bar.maximum() != total:
             self.bar.setRange(0, total)
         self.bar.setValue(min(done, total))
-        self.percent.setText(f"{round(done / total * 100)}%")
+        self.percent.setText(t(f"{round(done / total * 100)}%"))
 
     def reset(self) -> None:
         self.bar.setRange(0, 100)
@@ -299,7 +300,7 @@ class ProgressRow(QWidget):
 
 def status_glyph(status: str, parent=None) -> QLabel:
     """A pass/warn/fail symbol sized to sit on a heading's line."""
-    label = QLabel(theme.STATUS_ICONS.get(str(status).lower(), "○"), parent)
+    label = QLabel(t(theme.STATUS_ICONS.get(str(status).lower(), "○")), parent)
     label.setStyleSheet(f"color: {theme.status_color(status)}; font-weight: 700;")
     label.setFixedWidth(round(22 * theme.text_scale()))
     label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
@@ -314,6 +315,9 @@ class StatusRow(QWidget):
         super().__init__(parent)
         self.setProperty("role", "plain")
         self.record = record
+        # Never squeezed below its natural height: on a short window the page
+        # scrolls instead, rather than drawing the title over the summary.
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -325,7 +329,7 @@ class StatusRow(QWidget):
 
         text = QVBoxLayout()
         text.setSpacing(1)
-        title_label = QLabel(title)
+        title_label = QLabel(t(title))
         title_label.setProperty("role", "subheading")
         text.addWidget(title_label)
         if summary:
@@ -351,7 +355,7 @@ class StatusRow(QWidget):
         if detail:
             card.add(body(detail))
         for extra in extras:
-            card.add(muted(f"•  {extra}"))
+            card.add(muted("•  " + t(extra)))
         if record:
             box = read_only_box(record, role="code", lines=min(6, 1 + record.count("\n")))
             card.add(box)
@@ -371,7 +375,7 @@ class StatusRow(QWidget):
     def _toggle(self) -> None:
         showing = not self.detail_panel.isVisible()
         self.detail_panel.setVisible(showing)
-        self.toggle.setText("Hide" if showing else "Details")
+        self.toggle.setText(t(t("Hide") if showing else t("Details")))
 
 
 # --- buttons ----------------------------------------------------------------
@@ -381,7 +385,7 @@ def button_text(text: str) -> str:
 
 
 def _button(text: str, on_click: Callable | None, kind: str, width: int | None) -> QPushButton:
-    button = QPushButton(button_text(text))
+    button = QPushButton(button_text(t(text)))
     button.setProperty("kind", kind)
     button.setCursor(Qt.CursorShape.PointingHandCursor)
     if on_click:
@@ -454,7 +458,7 @@ class MenuButton(QPushButton):
                 self._menu.addSeparator()
                 continue
             key, label = entry
-            action = QAction(label, self._menu)
+            action = QAction(t(label), self._menu)
             action.setCheckable(True)
             action.setChecked(key == self.value)
             action.triggered.connect(lambda _checked=False, k=key: self.set(k, notify=True))
@@ -466,8 +470,9 @@ class MenuButton(QPushButton):
         self._paint()
 
     def _paint(self) -> None:
-        label = self._short.get(self.value) or self._labels.get(self.value, "")
-        self.setText(button_text(f"{self._prefix}{label}" if self._prefix else label))
+        label = t(self._short.get(self.value) or self._labels.get(self.value, ""))
+        prefix = t(self._prefix) if self._prefix else ""
+        self.setText(button_text(f"{prefix}{label}" if prefix else label))
         for key, action in self._actions.items():
             action.setChecked(key == self.value)
 
@@ -501,7 +506,7 @@ class ChoiceButtons(QWidget):
         if on_change:
             self.changed.connect(on_change)
         for key, label in options:
-            button = QPushButton(button_text(label))
+            button = QPushButton(button_text(t(label)))
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.clicked.connect(lambda _checked=False, k=key: self.set(k, notify=True))
             self._layout.addWidget(button)
@@ -559,7 +564,8 @@ class TabBar(QWidget):
         self._current: str | None = None
 
     def add(self, name: str, builder: Callable[[], QWidget]) -> None:
-        button = QPushButton(button_text(name))
+        # ``name`` stays the English key the page code uses; only the button is translated
+        button = QPushButton(button_text(t(name)))
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         button.setProperty("choice", "off")
         button.clicked.connect(lambda _checked=False, n=name: self.set(n))
@@ -694,7 +700,7 @@ class Toast(QFrame):
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 10, 14, 10)
-        label = QLabel(message)
+        label = QLabel(t(message))
         label.setWordWrap(True)
         label.setMaximumWidth(round(360 * theme.text_scale()))
         layout.addWidget(label)
@@ -721,8 +727,9 @@ class Toast(QFrame):
         if parent is None:
             return
         margin = 20
-        self.move(max(margin, parent.width() - self.width() - margin),
-                  max(margin, parent.height() - self.height() - margin - 26))
+        # Bottom right, or bottom left when the app reads right to left
+        x = margin if parent.isRightToLeft() else parent.width() - self.width() - margin
+        self.move(max(margin, x), max(margin, parent.height() - self.height() - margin - 26))
 
     def _dismiss(self) -> None:
         if not self.isVisible():

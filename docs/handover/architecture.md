@@ -26,14 +26,18 @@ The direction of imports is one way: `ui` uses `models`, `workers` and `core`;
 | `importer.py` | Reads Excel/CSV, guesses the email/company/person columns, validates and dedupes, stores contacts. Also remembers every imported column heading and reads subjects/messages from a spreadsheet (`read_templates`) |
 | `merge.py` | `{{Tag}}` merge tags and `{a\|b}` spintax, first-name cleanup |
 | `composer.py` | Builds the MIME message: typed text to HTML, signature, brochure link, optional unsubscribe line and header |
-| `scorer.py` | The spam score shown on My message |
+| `scorer.py` | The spam score: renders the finished email for one contact and checks it, plus checks across every version; estimates Primary / Promotions / Spam |
 | `sender.py` | The send worker thread: pacing, office hours, daily cap, circuit breakers, writes status after every email |
 | `warmup.py` | The daily cap that rises over the first weeks |
 | `imap_sync.py` | Reads the inbox: bounces, unsubscribe replies, genuine replies |
 | `dns_tools.py` | MX, SPF, DKIM, DMARC checks and generators |
 | `exporter.py` | Writes results back to Excel |
 | `credentials.py` | Password storage (DPAPI on Windows) |
-| `prefs.py` | User preferences and date/time formatting |
+| `prefs.py` | User preferences (including the language) and date/time formatting |
+| `examples.py` | The "Show me an example" subjects, messages and signature, per language |
+
+`app/i18n/` holds `t()` and the translations (`locales/<code>.json`); see
+[languages.md](languages.md). It is plain Python, so core modules use it too.
 
 ## Threads
 

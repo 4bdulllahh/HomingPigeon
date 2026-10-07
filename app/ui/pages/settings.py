@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import QFileDialog, QPushButton, QVBoxLayout, QWidget
 
 from app import config
 from app.core import credentials, db, prefs, shortcut
+from app.i18n import t
 from app.services import maintenance
 from app.ui import theme
 from app.ui.pages.base import Page
@@ -36,6 +37,7 @@ class SettingsPage(Page):
             "Make HomingPigeon comfortable to use. Changes apply straight away and are "
             "remembered next time.")
         area = self.scroll_body()
+        area.add(self._language_section())
         area.add(self._appearance_section())
         area.add(self._datetime_section())
         area.add(self._startup_section())
@@ -71,6 +73,22 @@ class SettingsPage(Page):
         else:
             control.layout().addWidget(widget)
         return widget
+
+    # --- language -----------------------------------------------------------
+    def _language_section(self) -> Section:
+        """Each language is shown in its own words, so anyone can find theirs."""
+        from app import i18n
+
+        section = Section("Language")
+        control = self._setting(
+            section, "Language of the app",
+            "Changes every page, button and message straight away. Arabic also turns the "
+            "layout to read from right to left. The examples on My message and the unsubscribe "
+            "line in your emails follow this choice too.", first=True)
+        options = [(code, native) for code, native, _english in i18n.LANGUAGES]
+        self._put(control, ChoiceButtons(options, i18n.language(),
+                                         on_change=self.window_.change_language))
+        return section
 
     # --- appearance ---------------------------------------------------------
     def _appearance_section(self) -> Section:
@@ -140,7 +158,7 @@ class SettingsPage(Page):
     def _update_clock_preview(self) -> None:
         now = datetime.now()
         self.clock_preview.setText(
-            f"Right now it's {now:%A}, {prefs.format_datetime(now)}")
+            t("Right now it's {now:%A}, {datetime}", now=now, datetime=prefs.format_datetime(now)))
 
     def _change_format(self, key: str, value: str) -> None:
         db.set_setting(key, value)
@@ -167,8 +185,8 @@ class SettingsPage(Page):
 
         control = self._setting(
             section, "Where it's kept",
-            f"Contacts, templates, settings and campaign history are stored only on this "
-            f"computer, in {config.DATA_DIR}", first=True)
+            t("Contacts, templates, settings and campaign history are stored only on this "
+              "computer, in {data_dir}", data_dir=config.DATA_DIR), first=True)
         self._put(control, secondary_button(
             "Open that folder", lambda: shortcut.open_folder(config.DATA_DIR), 180))
 
@@ -183,29 +201,31 @@ class SettingsPage(Page):
 
         control = self._setting(
             section, "Saved passwords",
-            f"Your email passwords are stored encrypted ({credentials.backend_name()}). Remove "
-            f"them if you're giving this computer to someone else.")
+            t("Your email passwords are stored encrypted ({backend_name}). Remove them if "
+              "you're giving this computer to someone else.",
+              backend_name=credentials.backend_name()))
         self._put(control, danger_button("Forget saved passwords", self._forget_passwords, 220))
         return section
 
     def _backup(self) -> None:
         target, _filter = QFileDialog.getSaveFileName(
-            self, "Save a backup of HomingPigeon", maintenance.default_backup_name(),
-            "HomingPigeon backup (*.hpbackup)")
+            self, t("Save a backup of HomingPigeon"), maintenance.default_backup_name(),
+            t("HomingPigeon backup (*.hpbackup)"))
         if not target:
             return
         Task(maintenance.write_backup, target).start(
-            on_result=lambda path: self.notify(f"Backup saved: {Path(path).name}", "success", 6000),
+            on_result=lambda path: self.notify(t("Backup saved: {name}",
+                                                 name=Path(path).name), "success", 6000),
             on_error=lambda message: self.notify(
-                f"The backup couldn't be saved: {message}", "error", 7000))
+                t("The backup couldn't be saved: {message}", message=message), "error", 7000))
 
     def _restore(self) -> None:
         if self.window_.is_sending():
             self.notify("Stop sending before restoring a backup.", "warn")
             return
         source, _filter = QFileDialog.getOpenFileName(
-            self, "Choose a HomingPigeon backup", "",
-            "HomingPigeon backup (*.hpbackup);;All files (*.*)")
+            self, t("Choose a HomingPigeon backup"), "",
+            t("HomingPigeon backup (*.hpbackup);;All files (*.*)"))
         if not source:
             return
         if not maintenance.is_backup(source):
@@ -221,7 +241,7 @@ class SettingsPage(Page):
         try:
             maintenance.restore_backup(source)
         except Exception as error:  # noqa: BLE001 - always tell the user
-            self.notify(f"The backup couldn't be restored: {error}", "error", 7000)
+            self.notify(t("The backup couldn't be restored: {error}", error=error), "error", 7000)
             return
         maintenance.restart()
         self.window_.quit_app()
@@ -240,7 +260,8 @@ class SettingsPage(Page):
         section = Section("Updates and help")
 
         control = self._setting(section, "Version",
-                                f"You're using HomingPigeon {config.APP_VERSION}.", first=True)
+                                t("You're using HomingPigeon {app_version}.",
+                                  app_version=config.APP_VERSION), first=True)
         self.update_button = primary_button("Check for updates", self._check_updates, 190)
         self.update_status = muted("", wrap=False)
         self._put(control, row(self.update_button, self.update_status, None))
@@ -257,7 +278,7 @@ class SettingsPage(Page):
 
     def _check_updates(self) -> None:
         self.update_button.setEnabled(False)
-        self.update_button.setText("Checking...")
+        self.update_button.setText(t("Checking..."))
         self.update_status.setText("")
         self.download_button.setVisible(False)
 
@@ -265,14 +286,14 @@ class SettingsPage(Page):
 
     def _show_update(self, result) -> None:
         self.update_button.setEnabled(True)
-        self.update_button.setText("Check for updates")
+        self.update_button.setText(t("Check for updates"))
         if result is None:
             self.update_status.setText(
-                "Couldn't check right now. Are you connected to the internet?")
+                t("Couldn't check right now. Are you connected to the internet?"))
             set_tone(self.update_status, "warning")
             return
         if maintenance.is_newer(result.tag, config.APP_VERSION):
-            self.update_status.setText(f"Version {result.tag} is available!")
+            self.update_status.setText(t("Version {tag} is available!", tag=result.tag))
             set_tone(self.update_status, "success")
             try:
                 self.download_button.clicked.disconnect()
@@ -282,7 +303,7 @@ class SettingsPage(Page):
                 lambda _checked=False: self.window_.offer_update(result))
             self.download_button.setVisible(True)
         else:
-            self.update_status.setText("You have the latest version.")
+            self.update_status.setText(t("You have the latest version."))
             set_tone(self.update_status, "success")
 
     # --- uninstall ----------------------------------------------------------
@@ -336,8 +357,8 @@ class SettingsPage(Page):
         try:
             maintenance.start_uninstaller(delete_data=choice == "delete")
         except OSError as error:
-            self.notify(f"The uninstaller couldn't start: {error}. Use Settings > Apps in "
-                        f"Windows instead.", "error", 8000)
+            self.notify(t("The uninstaller couldn't start: {error}. Use Settings > Apps in Windows "
+                          "instead.", error=error), "error", 8000)
             return
         self.window_.quit_app()  # the uninstaller waits for the app to close
 

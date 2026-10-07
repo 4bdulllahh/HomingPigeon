@@ -6,6 +6,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QTextBrowser, QVBoxLayout, QWidget
 
 from app import config
+from app.i18n import t
 from app.services import updater
 from app.ui import theme
 from app.ui.widgets.common import (ProgressRow, confirm_button, open_url, secondary_button,
@@ -26,7 +27,7 @@ class UpdateDialog(QDialog):
         self.worker: jobs.UpdateDownloadWorker | None = None
 
         scale = theme.text_scale()
-        self.setWindowTitle("Update available")
+        self.setWindowTitle(t("Update available"))
         self.setModal(True)
         self.setMinimumWidth(round(520 * scale))
 
@@ -35,7 +36,7 @@ class UpdateDialog(QDialog):
         layout.setContentsMargins(pad, pad, pad, pad)
         layout.setSpacing(round(12 * scale))
 
-        heading = QLabel("A new version of HomingPigeon is available")
+        heading = QLabel(t("A new version of HomingPigeon is available"))
         heading.setProperty("role", "subheading")
         heading.setWordWrap(True)
         layout.addWidget(heading)
@@ -47,13 +48,13 @@ class UpdateDialog(QDialog):
         else:
             how = ("Update now opens the download page. Your contacts, templates and settings "
                    "are kept when you install the new version.")
-        self.message = QLabel(f"Version {release.tag} is ready. You have {config.APP_VERSION}."
-                              f"\n\n{how}")
+        self.message = QLabel(t("Version {tag} is ready. You have {app_version}.\n\n{how}",
+                                tag=release.tag, app_version=config.APP_VERSION, how=how))
         self.message.setWordWrap(True)
         layout.addWidget(self.message)
 
         if release.notes.strip():
-            label = QLabel("What's new")
+            label = QLabel(t("What's new"))
             label.setProperty("role", "field")
             layout.addWidget(label)
             notes = QTextBrowser()
@@ -102,7 +103,7 @@ class UpdateDialog(QDialog):
             return
 
         self.now_button.setEnabled(False)
-        self.later_button.setText("Cancel")
+        self.later_button.setText(t("Cancel"))
         self.progress.setVisible(True)
         self.progress.set_busy()
         self._say("Downloading the update...")
@@ -117,7 +118,7 @@ class UpdateDialog(QDialog):
     def _on_progress(self, received: int, total: int, _detail: str) -> None:
         self.progress.set_progress(received, total)
         if total:
-            self._say(f"Downloading the update: {_mb(received)} of {_mb(total)}")
+            self._say(t("Downloading the update: {mb} of {mb2}", mb=_mb(received), mb2=_mb(total)))
 
     def _on_downloaded(self, staged: Path) -> None:
         if self.worker is None:
@@ -136,13 +137,13 @@ class UpdateDialog(QDialog):
         self.worker = None
         self.progress.setVisible(False)
         self.now_button.setEnabled(True)
-        self.now_button.setText("Try again")
-        self.later_button.setText("Update later")
-        self._say(f"The update didn't download: {message}. Check your internet connection "
-                  f"and try again, or choose Update later.", "error")
+        self.now_button.setText(t("Try again"))
+        self.later_button.setText(t("Update later"))
+        self._say(t("The update didn't download: {message}. Check your internet connection and "
+                    "try again, or choose Update later.", message=message), "error")
 
     def _say(self, text: str, tone: str | None = None) -> None:
-        self.status.setText(text)
+        self.status.setText(t(text))
         self.status.setVisible(True)
         set_tone(self.status, tone)
 

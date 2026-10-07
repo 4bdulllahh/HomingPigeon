@@ -18,6 +18,7 @@ from typing import Mapping
 
 from app import config
 from app.core import merge
+from app.i18n import t
 
 
 @dataclass
@@ -158,13 +159,32 @@ def brochure_block(content: Content) -> str:
 
 
 def unsubscribe_footer(sender: SenderIdentity) -> str:
+    """The opt-out line, in the app's language.
+
+    The word to reply with is one the inbox check recognises in every language
+    (see ``imap_sync.UNSUBSCRIBE_PHRASES``).
+    """
+    word = "<strong>" + t("Unsubscribe") + "</strong>"
+    sentence = t("You received this message because we believe it is relevant to your "
+                 "business. If it is not, reply with {word} and we will remove you "
+                 "immediately.", word=word)
     return (
         '<hr style="border:none;border-top:1px solid #cccccc;margin-top:24px;">'
         '<p style="font-size:11px;color:#777777;line-height:1.5;">'
-        f'You received this message because we believe it is relevant to your business. '
-        f'If it is not, reply with <strong>Unsubscribe</strong> and we will remove you immediately.'
+        f'{sentence}'
         '</p>'
     )
+
+
+_ARABIC = re.compile("[\u0600-\u06ff]")
+
+
+def is_right_to_left(text: str) -> bool:
+    """True when a message is mostly Arabic, so the email should read right to left."""
+    letters = [c for c in text if c.isalpha()]
+    if not letters:
+        return False
+    return sum(1 for c in letters if _ARABIC.match(c)) / len(letters) > 0.4
 
 
 def assemble_html(body_html: str, content: Content, sender: SenderIdentity) -> str:
@@ -185,12 +205,16 @@ def assemble_html(body_html: str, content: Content, sender: SenderIdentity) -> s
     if re.search(r"<html[\s>]", inner, re.IGNORECASE):
         return inner  # the template already provides a full document
 
+    # An Arabic message is laid out right to left in the recipient's email program.
+    # The message decides, not the signature or link, which may be in English.
+    direction = ' dir="rtl"' if is_right_to_left(html_to_text(body_html)) else ""
+    align = "text-align:right;" if direction else ""
     return (
         '<!DOCTYPE html><html><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1"></head>'
-        '<body style="margin:0;padding:0;background:#ffffff;">'
-        '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#333333;'
-        'line-height:1.6;max-width:640px;">'
+        f'<body{direction} style="margin:0;padding:0;background:#ffffff;">'
+        f'<div{direction} style="font-family:Arial,Helvetica,sans-serif;font-size:14px;'
+        f'color:#333333;line-height:1.6;max-width:640px;{align}">'
         f'{inner}'
         '</div></body></html>'
     )

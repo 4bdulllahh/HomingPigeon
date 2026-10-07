@@ -19,6 +19,7 @@ import dns.resolver
 import dns.reversename
 
 from app import config
+from app.i18n import t
 
 Status = Literal["pass", "warn", "fail", "info"]
 
@@ -97,14 +98,16 @@ def check_mx(domain: str) -> CheckResult:
         return CheckResult(
             "MX (mail routing)", "fail",
             "No MX records found",
-            f"{domain} has no mail servers listed, so mail sent to this domain cannot be delivered.",
+            t("{domain} has no mail servers listed, so mail sent to this domain cannot be "
+              "delivered.", domain=domain),
             fix="Add MX records at your DNS host, pointing at your email provider.",
         )
     lines = [f"{pref}  {host}" for pref, host in records]
     provider = identify_provider(records)
     return CheckResult(
         "MX (mail routing)", "pass",
-        f"{len(records)} mail server(s) found" + (f" ({provider})" if provider else ""),
+        t("{count} mail server(s) found",
+          count=len(records)) + (f" ({provider})" if provider else ""),
         "Mail for this domain is routed correctly.",
         record="\n".join(lines),
     )
@@ -178,7 +181,7 @@ def check_spf(domain: str) -> CheckResult:
     if len(records) > 1:
         return CheckResult(
             "SPF", "fail",
-            f"{len(records)} SPF records, but there must be exactly one",
+            t("{count} SPF records, but there must be exactly one", count=len(records)),
             "Publishing more than one SPF record is a permanent error (permerror): receivers "
             "treat SPF as broken and ignore it entirely. This is a common and silent mistake.",
             record="\n\n".join(records),
@@ -187,7 +190,7 @@ def check_spf(domain: str) -> CheckResult:
 
     record = records[0]
     lookups = _count_spf_lookups(record)
-    extras = [f"DNS lookups used: {lookups} of 10 allowed"]
+    extras = [t("DNS lookups used: {lookups} of 10 allowed", lookups=lookups)]
 
     all_match = re.search(r"([-~?+])all\b", record.lower())
     qualifier = all_match.group(1) if all_match else None
@@ -195,7 +198,7 @@ def check_spf(domain: str) -> CheckResult:
     if lookups > 10:
         return CheckResult(
             "SPF", "fail",
-            f"Too many DNS lookups ({lookups} of 10)",
+            t("Too many DNS lookups ({lookups} of 10)", lookups=lookups),
             "SPF allows a maximum of 10 DNS lookups. Over the limit, SPF returns permerror and "
             "receivers treat the message as unauthenticated.",
             record=record, extras=extras,
@@ -233,16 +236,16 @@ def check_spf(domain: str) -> CheckResult:
 
     strength = "strict (-all)" if qualifier == "-" else "soft fail (~all)"
     status: Status = "pass"
-    detail = f"SPF is published and valid, using {strength}."
+    detail = t("SPF is published and valid, using {strength}.", strength=strength)
     fix = ""
     if qualifier == "~" and lookups <= 8:
         detail += " Once you are sure every sending service is listed, tightening this to -all is stronger."
         fix = "Optional: change ~all to -all after confirming all senders are included."
     if lookups >= 9:
         status = "warn"
-        detail += f" You are close to the 10-lookup limit ({lookups} used)."
+        detail += t(" You are close to the 10-lookup limit ({lookups} used).", lookups=lookups)
 
-    return CheckResult("SPF", status, f"Valid SPF record, {strength}", detail,
+    return CheckResult("SPF", status, t("Valid SPF record, {strength}", strength=strength), detail,
                        record=record, extras=extras, fix=fix)
 
 
@@ -291,7 +294,8 @@ def generate_spf(providers: list[str], ipv4: list[str] | None = None,
         try:
             ipaddress.ip_network(address, strict=False)
         except ValueError:
-            warnings.append(f"'{address}' is not a valid IPv4 address or range, so it was skipped")
+            warnings.append(t("'{address}' is not a valid IPv4 address or range, so it was skipped",
+                              address=address))
             continue
         terms.append(f"ip4:{address}")
 
@@ -302,7 +306,8 @@ def generate_spf(providers: list[str], ipv4: list[str] | None = None,
         try:
             ipaddress.ip_network(address, strict=False)
         except ValueError:
-            warnings.append(f"'{address}' is not a valid IPv6 address or range, so it was skipped")
+            warnings.append(t("'{address}' is not a valid IPv6 address or range, so it was skipped",
+                              address=address))
             continue
         terms.append(f"ip6:{address}")
 
@@ -312,7 +317,8 @@ def generate_spf(providers: list[str], ipv4: list[str] | None = None,
     lookups = sum(1 for t in terms if t.lower().startswith(("include:", "a:", "mx:", "exists:"))
                   or t.lower() in ("a", "mx"))
     if lookups > 10:
-        warnings.append(f"This record uses about {lookups} DNS lookups; the limit is 10.")
+        warnings.append(t("This record uses about {lookups} DNS lookups; the limit is 10.",
+                          lookups=lookups))
     if len(record) > 255:
         warnings.append("Record is longer than 255 characters, so your DNS host must split it into "
                         "multiple strings within the same TXT record.")
@@ -382,16 +388,16 @@ def check_dkim(domain: str, selectors: list[str] | None = None) -> CheckResult:
         label = f"{selector}._domainkey.{domain}"
         lines.append(f"{label}\n{record}")
         if re.search(r"\bp=\s*(;|$)", record):
-            problems.append(f"Selector '{selector}' has an empty public key (p=), which means the "
-                            f"key has been revoked.")
+            problems.append(t("Selector '{selector}' has an empty public key (p=), which means the key has "
+                              "been revoked.", selector=selector))
         elif bits and bits < 1024:
-            problems.append(f"Selector '{selector}' uses a {bits}-bit key; 1024 is the minimum and "
-                            f"2048 is recommended.")
+            problems.append(t("Selector '{selector}' uses a {bits}-bit key; 1024 is the minimum and 2048 "
+                              "is recommended.", selector=selector, bits=bits))
 
     if problems:
         return CheckResult(
             "DKIM", "warn",
-            f"DKIM found on {len(found)} selector(s), with issues",
+            t("DKIM found on {count} selector(s), with issues", count=len(found)),
             "\n".join(problems), record="\n\n".join(lines),
             fix="Regenerate the key at 2048 bits in your provider's console and republish it.",
         )
@@ -399,7 +405,7 @@ def check_dkim(domain: str, selectors: list[str] | None = None) -> CheckResult:
     selectors_found = ", ".join(s for s, _ in found)
     return CheckResult(
         "DKIM", "pass",
-        f"DKIM published on selector(s): {selectors_found}",
+        t("DKIM published on selector(s): {selectors_found}", selectors_found=selectors_found),
         "Your outgoing mail can be cryptographically signed, which receivers check on arrival.",
         record="\n\n".join(lines),
     )
@@ -488,7 +494,8 @@ def check_dmarc(domain: str) -> CheckResult:
 
     if len(records) > 1:
         return CheckResult(
-            "DMARC", "fail", f"{len(records)} DMARC records, but there must be exactly one",
+            "DMARC", "fail", t("{count} DMARC records, but there must be exactly one",
+                               count=len(records)),
             "Multiple DMARC records make the policy invalid and it is ignored.",
             record="\n\n".join(records), fix="Delete all but one record.",
         )
@@ -503,15 +510,17 @@ def check_dmarc(domain: str) -> CheckResult:
     policy = tags.get("p", "").lower()
     pct = tags.get("pct", "100")
     rua = tags.get("rua", "")
-    extras = [f"Policy (p): {policy or 'missing'}"]
+    extras = [t("Policy (p): {value}", value=policy or 'missing')]
     if tags.get("sp"):
-        extras.append(f"Subdomain policy (sp): {tags['sp']}")
-    extras.append(f"Applied to: {pct}% of mail")
-    extras.append(f"Aggregate reports (rua): {rua or 'not configured'}")
+        extras.append(t("Subdomain policy (sp): {sp}", sp=tags['sp']))
+    extras.append(t("Applied to: {pct}% of mail", pct=pct))
+    extras.append(t("Aggregate reports (rua): {value}", value=rua or 'not configured'))
     if tags.get("adkim"):
-        extras.append(f"DKIM alignment: {'strict' if tags['adkim'] == 's' else 'relaxed'}")
+        extras.append(t("DKIM alignment: {value}",
+                        value='strict' if tags['adkim'] == 's' else 'relaxed'))
     if tags.get("aspf"):
-        extras.append(f"SPF alignment: {'strict' if tags['aspf'] == 's' else 'relaxed'}")
+        extras.append(t("SPF alignment: {value}",
+                        value='strict' if tags['aspf'] == 's' else 'relaxed'))
 
     if not policy:
         return CheckResult(
@@ -533,13 +542,14 @@ def check_dmarc(domain: str) -> CheckResult:
 
     if pct and pct.isdigit() and int(pct) < 100:
         return CheckResult(
-            "DMARC", "warn", f"DMARC p={policy} but only applied to {pct}% of mail",
+            "DMARC", "warn", t("DMARC p={policy} but only applied to {pct}% of mail",
+                               policy=policy, pct=pct),
             "The policy is only enforced on a sample of your mail.",
             record=record, extras=extras, fix="Raise pct to 100 once you are confident.",
         )
 
     return CheckResult(
-        "DMARC", "pass", f"DMARC is enforcing (p={policy})",
+        "DMARC", "pass", t("DMARC is enforcing (p={policy})", policy=policy),
         "Your domain tells receivers what to do with mail that fails authentication.",
         record=record, extras=extras,
         fix="" if rua else "Consider adding rua= to receive aggregate reports.",
@@ -614,7 +624,8 @@ def check_blacklists(ip: str) -> CheckResult:
 
     if listed:
         return CheckResult(
-            "Blacklists", "fail", f"{ip} is listed on {len(listed)} blacklist(s)",
+            "Blacklists", "fail", t("{ip} is listed on {count} blacklist(s)",
+                                    ip=ip, count=len(listed)),
             "Listed on: " + ", ".join(listed) + ".\n\nWhile your sending IP is blacklisted, a large "
             "share of your mail will be rejected outright. If this is a shared hosting IP, the "
             "listing may be caused by another customer.",
@@ -624,7 +635,8 @@ def check_blacklists(ip: str) -> CheckResult:
 
     checked = len(DNSBL_ZONES) - errors
     return CheckResult(
-        "Blacklists", "pass", f"{ip} is not listed on {checked} major blacklist(s)",
+        "Blacklists", "pass", t("{ip} is not listed on {checked} major blacklist(s)",
+                                ip=ip, checked=checked),
         "Checked: " + ", ".join(label for label, _ in DNSBL_ZONES) + ".",
     )
 
@@ -646,7 +658,8 @@ def full_report(domain: str, smtp_host: str = "", dkim_selectors: list[str] | No
         if ip:
             results.append(check_blacklists(ip))
         else:
-            results.append(CheckResult("Blacklists", "warn", f"Could not resolve {smtp_host}",
+            results.append(CheckResult("Blacklists", "warn", t("Could not resolve {smtp_host}",
+                                                               smtp_host=smtp_host),
                                        "The SMTP host name did not resolve to an IP address."))
     return results
 

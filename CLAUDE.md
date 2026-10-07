@@ -3,7 +3,8 @@
 A Windows-first PyQt6 desktop app that sends personalised business email safely
 (warm-up, pacing, spam scoring, bounce and unsubscribe handling). It is a product
 for non-technical users: free beta now, sold later. Everything the user sees must
-be plain English.
+be plain English, and is shown in the user's language: English, Arabic (right to
+left), German, Spanish or French.
 
 **Read [docs/handover/README.md](docs/handover/README.md) before changing anything.**
 It links to the architecture, the database, a map of every feature and the
@@ -24,6 +25,14 @@ release history.
   `SCHEMA_VERSION`, because users upgrade in place and keep their data.
 - Deleting from the Sent emails history must never touch `campaign_recipients`;
   that table is what stops a person being emailed twice.
+- **Every new or changed piece of on-screen text needs translating** into ar, de,
+  es and fr, or `tests/test_i18n.py` fails. Write the English, then run
+  `python tools/i18n.py missing de` (and ar, es, fr), translate the numbered
+  lines into a file and `python tools/i18n.py merge de FILE`. See
+  [docs/handover/languages.md](docs/handover/languages.md).
+- Text with a value in it is a template: `t("{count} contacts imported",
+  count=n)`. Never an f-string or English fragments glued together, which
+  cannot be translated. Never call `t()` at import time.
 
 ## Everyday commands
 

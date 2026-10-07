@@ -11,6 +11,7 @@ from PyQt6.QtCore import QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QPainter, QPen
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 
+from app.i18n import t
 from app.ui import theme
 
 
@@ -29,9 +30,10 @@ STEPS = build_steps()
 def format_seconds(seconds: int) -> str:
     seconds = int(round(seconds))
     if seconds < 60:
-        return f"{seconds}s"
+        return t("{seconds}s", seconds=seconds)
     minutes, rest = divmod(seconds, 60)
-    return f"{minutes}m" if rest == 0 else f"{minutes}m {rest}s"
+    return t("{minutes}m", minutes=minutes) if rest == 0 \
+        else t("{minutes}m {seconds}s", minutes=minutes, seconds=rest)
 
 
 def nearest_index(seconds: int) -> int:
@@ -55,6 +57,9 @@ class RangeSlider(QWidget):
     def __init__(self, low: int = 75, high: int = 150, parent=None):
         super().__init__(parent)
         self.setProperty("role", "plain")
+        # Drawn by hand with the shortest delay on the left. It stays that way
+        # in Arabic too, like a ruler, so the painting and the mouse agree.
+        self.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         self._low = nearest_index(low)
         self._high = nearest_index(high)
         if self._low > self._high:
@@ -121,10 +126,11 @@ class RangeSlider(QWidget):
 
     def readout(self) -> str:
         if self.low == self.high:
-            return f"Exactly {format_seconds(self.low)} between each email"
+            return t("Exactly {seconds} between each email", seconds=format_seconds(self.low))
         per_hour = int(3600 / ((self.low + self.high) / 2))
-        return (f"{format_seconds(self.low)} to {format_seconds(self.high)} between each email"
-                f"   ·   roughly {per_hour} per hour")
+        return (t("{seconds} to {seconds2} between each email   ·   roughly {per_hour} per hour",
+                  seconds=format_seconds(self.low), seconds2=format_seconds(self.high),
+                  per_hour=per_hour))
 
     # --- painting -----------------------------------------------------------
     def paintEvent(self, _event) -> None:  # noqa: N802 - Qt naming

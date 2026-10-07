@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import QGridLayout, QWidget
 
 from app.core import credentials, db, imap_sync, sender
 from app.core.warmup import PROVIDER_LIMITS
+from app.i18n import t
 from app.ui.pages.base import Page
 from app.ui.widgets.common import (FormRow, Section, muted, primary_button, row, secondary_button,
                                    set_tone)
@@ -70,8 +71,8 @@ class AccountPage(Page):
     def _build(self) -> None:
         self.add_header(
             "Email account",
-            f"Your password is encrypted on this computer using {credentials.backend_name()} "
-            f"and never leaves it.")
+            t("Your password is encrypted on this computer using {backend_name} and never "
+              "leaves it.", backend_name=credentials.backend_name()))
         area = self.scroll_body()
 
         # --- identity -------------------------------------------------------
@@ -212,7 +213,7 @@ class AccountPage(Page):
         hidden = self.password_box.echoMode() == QLineEdit.EchoMode.Password
         self.password_box.setEchoMode(
             QLineEdit.EchoMode.Normal if hidden else QLineEdit.EchoMode.Password)
-        self.show_password.setText("Hide" if hidden else "Show")
+        self.show_password.setText(t("Hide" if hidden else "Show"))
 
     def _apply_preset(self, name: str) -> None:
         preset = PRESETS.get(name, {})
@@ -225,13 +226,13 @@ class AccountPage(Page):
         self.imap_port_box.setText(str(preset["imap_port"]))
         security = preset.get("security", "starttls")
         self.security_picker.setCurrentText(SECURITY_LABELS.get(security, "Automatic"))
-        self.preset_note.setText(preset.get("note", ""))
+        self.preset_note.setText(t(preset.get("note", "")))
 
     def _change_limit(self, name: str) -> None:
         limit = PROVIDER_LIMITS.get(name, 500)
         db.set_setting("provider_limit_name", name)
         db.set_setting("provider_limit", limit)
-        self.limit_note.setText(f"Daily ceiling: {limit:,} recipients per day.")
+        self.limit_note.setText(t("Daily ceiling: {limit:,} recipients per day.", limit=limit))
 
     def _security_value(self) -> str:
         return SECURITY_VALUES.get(self.security_picker.currentText(), "auto")
@@ -269,13 +270,13 @@ class AccountPage(Page):
     def _test_smtp(self) -> None:
         settings = self._smtp_settings()
         if not settings.host:
-            self.smtp_result.setText("Enter the SMTP server first.")
+            self.smtp_result.setText(t("Enter the SMTP server first."))
             set_tone(self.smtp_result, "error")
             return
 
         self.test_button.setEnabled(False)
-        self.test_button.setText("Testing...")
-        self.smtp_result.setText("Connecting...")
+        self.test_button.setText(t("Testing..."))
+        self.smtp_result.setText(t("Connecting..."))
         set_tone(self.smtp_result, "muted")
 
         Task(jobs.test_smtp, settings).start(
@@ -284,8 +285,8 @@ class AccountPage(Page):
 
     def _show_smtp_result(self, ok: bool, message: str) -> None:
         self.test_button.setEnabled(True)
-        self.test_button.setText("Test connection")
-        self.smtp_result.setText(("✓ " if ok else "✕ ") + message)
+        self.test_button.setText(t("Test connection"))
+        self.smtp_result.setText(("✓ " if ok else "✕ ") + t(message))
         set_tone(self.smtp_result, "success" if ok else "error")
         if ok:
             self.save(silent=True)
@@ -294,13 +295,13 @@ class AccountPage(Page):
     def _test_imap(self) -> None:
         settings = self._imap_settings()
         if not settings.host:
-            self.imap_result.setText("Enter the IMAP server first.")
+            self.imap_result.setText(t("Enter the IMAP server first."))
             set_tone(self.imap_result, "error")
             return
 
         self.imap_test_button.setEnabled(False)
-        self.imap_test_button.setText("Testing...")
-        self.imap_result.setText("Connecting...")
+        self.imap_test_button.setText(t("Testing..."))
+        self.imap_result.setText(t("Connecting..."))
         set_tone(self.imap_result, "muted")
 
         Task(jobs.test_imap, settings).start(
@@ -309,8 +310,8 @@ class AccountPage(Page):
 
     def _show_imap_result(self, ok: bool, message: str) -> None:
         self.imap_test_button.setEnabled(True)
-        self.imap_test_button.setText("Test IMAP")
-        self.imap_result.setText(("✓ " if ok else "✕ ") + message)
+        self.imap_test_button.setText(t("Test IMAP"))
+        self.imap_result.setText(("✓ " if ok else "✕ ") + t(message))
         set_tone(self.imap_result, "success" if ok else "error")
         if ok:
             self.save(silent=True)
@@ -354,7 +355,7 @@ class AccountPage(Page):
             blocked = self.preset_picker.blockSignals(True)
             self.preset_picker.setCurrentText(preset)
             self.preset_picker.blockSignals(blocked)
-            self.preset_note.setText(PRESETS[preset].get("note", ""))
+            self.preset_note.setText(t(PRESETS[preset].get("note", "")))
 
         security = db.get_setting("smtp_security", "auto")
         self.security_picker.setCurrentText(SECURITY_LABELS.get(security, "Automatic"))

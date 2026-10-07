@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 from app.core import db
+from app.i18n import t
 
 # Day index -> messages allowed that day. Held at the last value afterwards.
 DEFAULT_RAMP = [20, 20, 30, 30, 40, 50, 60, 70, 85, 100, 115, 130, 150, 175, 200]
@@ -45,8 +46,9 @@ class WarmupStatus:
 
     def describe(self) -> str:
         if not self.enabled:
-            return f"Warm-up off, daily cap {self.cap}"
-        return f"Warm-up day {self.day_index}: {self.sent_today}/{self.cap} sent today"
+            return t("Warm-up off, daily cap {cap}", cap=self.cap)
+        return t("Warm-up day {day_index}: {sent_today}/{cap} sent today",
+                 day_index=self.day_index, sent_today=self.sent_today, cap=self.cap)
 
 
 def _ramp() -> list[int]:

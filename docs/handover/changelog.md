@@ -2,6 +2,26 @@
 
 Newest first. Add to the top when you change something.
 
+## v0.7.0 beta
+
+- **Five languages.** English, Arabic, German, Spanish and French, chosen in
+  Settings → Language (first run follows the computer's language). Every page,
+  button, message, dialog and help text is translated; Arabic switches the whole
+  app to right to left. The unsubscribe line, name fallbacks, examples and the
+  blank spreadsheet follow the language; unsubscribe replies are recognised in
+  all five. New `app/i18n/`, `tools/i18n.py`, `tests/test_i18n.py`,
+  [languages.md](languages.md).
+- **The spam score reads the finished email** for the contact on screen, with
+  signature, link and footer, instead of each part on its own, and estimates
+  where it lands: main inbox, Promotions or spam, with what to change.
+- **Examples rewritten to reach the main inbox**, in every language, and a new
+  "Reaching the main inbox, not spam or Promotions" section in the My message
+  guide.
+- A spreadsheet column that is empty for one contact is now left blank instead
+  of being sent as a literal {{Column}}; the score points out blank tags.
+- Drop-downs keep English values in code while showing translations (`Combo`).
+- Status rows never squash on a short window; the page scrolls instead.
+
 ## v0.6.3 beta
 
 - Fixed the GitHub build, which failed one test on v0.6.2. GitHub installs the
