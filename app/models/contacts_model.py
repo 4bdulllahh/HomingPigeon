@@ -15,7 +15,7 @@ import json
 
 from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt, pyqtSignal
 
-from app.core import db, merge
+from app.core import db
 from app.ui import theme
 
 PAGE_SIZE = 300
@@ -31,8 +31,9 @@ BASE_COLUMNS = [
     ("Imported", "imported_at"),
 ]
 
-# Extra spreadsheet columns are shown after those, so nothing imported is hidden
-MAX_EXTRA_COLUMNS = 14
+# Extra spreadsheet columns are shown after those, so nothing imported is hidden.
+# The cap only guards against a sheet with hundreds of junk columns.
+MAX_EXTRA_COLUMNS = 200
 
 
 def _alphabetical(column: str, descending: bool) -> str:
@@ -246,20 +247,9 @@ class ContactsModel(QAbstractTableModel):
         self._emit_counts()
 
     def _refresh_columns(self) -> None:
-        extras: list[str] = []
-        builtin = {name.lower() for name in merge.BUILTIN_TAGS}
-        for row in db.query("SELECT extra_json FROM contacts "
-                            "WHERE extra_json IS NOT NULL AND extra_json != '' LIMIT 40"):
-            try:
-                keys = json.loads(row["extra_json"])
-            except (json.JSONDecodeError, TypeError):
-                continue
-            for key in keys:
-                if key.lower() not in builtin and key not in extras:
-                    extras.append(key)
-            if len(extras) >= MAX_EXTRA_COLUMNS:
-                break
-        self._extras = extras[:MAX_EXTRA_COLUMNS]
+        from app.core import importer
+
+        self._extras = importer.extra_columns()[:MAX_EXTRA_COLUMNS]
         self._columns = list(BASE_COLUMNS) + [(name, name) for name in self._extras]
 
     def _where(self) -> tuple[str, list]:
@@ -373,6 +363,10 @@ class ContactsModel(QAbstractTableModel):
             connection.execute("DELETE FROM campaign_recipients")
             connection.execute("DELETE FROM contacts")
             connection.execute("DELETE FROM campaigns WHERE status IN ('draft', 'paused')")
+        # The next spreadsheet brings its own headings
+        from app.core import importer
+
+        importer.forget_columns()
         return count
 
 

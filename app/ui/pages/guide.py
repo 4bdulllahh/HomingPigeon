@@ -229,11 +229,12 @@ class GuidePage(Page):
                 "why": "Complaints hurt far more than bounces, and in most jurisdictions ignoring "
                        "an opt-out is illegal. One complaint per thousand messages is enough to "
                        "cause real filtering problems.",
-                "how": "The app adds an unsubscribe footer and the standard header that puts an "
-                       "Unsubscribe button in Gmail and Outlook, and suppresses anyone who asks. "
-                       "Leave those on, and never re-import a suppressed address.",
+                "how": "The app can add an unsubscribe line and the standard header that puts an "
+                       "Unsubscribe button in Gmail and Outlook (My message, Signature tab). "
+                       "Either way it suppresses anyone who replies asking to be removed. "
+                       "Never re-import a suppressed address.",
                 "done": bool(db.get_setting("unsubscribe_note", True)),
-                "action": lambda: self.go("campaign"),
+                "action": lambda: self.go("templates"),
             },
         ]
 

@@ -799,3 +799,184 @@ def test_a_subject_typed_over_several_lines_is_sent_as_one():
     message, subject, _ = composer.build_message(identity, "x@y.com", {"Company": "Acme"}, content)
     assert subject == "Hello Acme team"
     assert "Line one<br>" in message.get_body(("html",)).get_content()
+
+
+# --- v0.6.2: unsubscribe switch ---------------------------------------------
+def test_switching_the_unsubscribe_line_off_drops_the_footer_and_the_header():
+    identity = composer.SenderIdentity("Sam Taylor", "sam@example.com")
+    context = merge.build_context({"email": "x@y.com", "person": "Ahmed", "company": "Acme"})
+    message, _subject, _ = composer.build_message(
+        identity, "x@y.com", context, _content(unsubscribe_note=False))
+    body = message.get_body(preferencelist=("html",)).get_content()
+    assert "Unsubscribe" not in body
+    assert "List-Unsubscribe" not in message
+    assert "List-Unsubscribe-Post" not in message
+
+
+def test_a_missing_unsubscribe_line_is_only_a_small_deduction():
+    report = scorer.score(_content(unsubscribe_note=False), sender_email="sam@example.com")
+    found = [f for f in report.findings if "unsubscribe" in f.message.lower()]
+    assert found and all(f.severity == "low" for f in found)
+
+
+# --- v0.6.2: every spreadsheet column becomes a tag -------------------------
+def test_every_column_is_a_tag_even_when_blank_in_the_first_rows():
+    columns = {f"Column {n}": [""] * 30 + [f"value {n}"] for n in range(12)}
+    df = pd.DataFrame({"EMAIL": [f"wide{n}@example.com" for n in range(31)], **columns,
+                       "Phone No.": ["555"] * 31, "Website / URL": ["x.com"] * 31})
+    importer.import_dataframe(df, importer.detect_columns(df), check_mx=False)
+    names = importer.merge_tag_names()
+    for n in range(12):
+        assert f"Column {n}" in names
+    assert "Phone No." in names and "Website / URL" in names
+
+
+def test_headings_with_punctuation_work_as_tags():
+    context = {"Phone No.": "555", "Website / URL": "x.com", "FirstName": "Sam"}
+    assert merge.render("{{Phone No.}} {{ Website / URL }} {{FirstName}}", context) == \
+        "555 x.com Sam"
+    assert merge.unresolved_tags("{{Phone No.}}", list(context)) == []
+
+
+# --- v0.6.2: subjects and messages from a spreadsheet -----------------------
+def test_subjects_and_messages_are_read_by_heading(tmp_path):
+    path = tmp_path / "message.xlsx"
+    pd.DataFrame({
+        "Subject line": ["Hello {{Company}}", "A question", "Hello {{Company}}"],
+        "Email body": ["Hi {{FirstName}},\r\nLine two", "", "Second message"],
+        "Signature": ["Sam\nAcme", "", ""],
+        "Notes": ["ignored", "", ""],
+    }).to_excel(path, index=False)
+    sheet = importer.read_templates(path)
+    assert sheet.subjects == ["Hello {{Company}}", "A question"]
+    assert sheet.bodies == ["Hi {{FirstName}},\nLine two", "Second message"]
+    assert sheet.signature == "Sam\nAcme"
+
+
+def test_a_sheet_without_headings_is_subjects_then_messages(tmp_path):
+    path = tmp_path / "plain.csv"
+    pd.DataFrame({"A": ["Subject one"], "B": ["Message one"]}).to_csv(path, index=False)
+    sheet = importer.read_templates(path)
+    assert sheet.subjects == ["Subject one"] and sheet.bodies == ["Message one"]
+
+
+def test_the_blank_sheet_reads_back_in(tmp_path):
+    path = importer.write_template_sample(tmp_path / "blank.xlsx", ["S1", "S2"], ["B1"], "Sig")
+    sheet = importer.read_templates(path)
+    assert sheet.subjects == ["S1", "S2"] and sheet.bodies == ["B1"] and sheet.signature == "Sig"
+
+
+# --- v0.6.2: the permanent sent history -------------------------------------
+def _sent_contact(email: str) -> int:
+    return db.execute("INSERT INTO contacts(email, company, person, valid, imported_at) "
+                      "VALUES (?, 'Co', 'Someone', 1, ?)", (email, db.now()))
+
+
+def _campaign() -> int:
+    return db.execute("INSERT INTO campaigns(name, created_at) VALUES ('t', ?)", (db.now(),))
+
+
+def test_sent_history_keeps_the_message_and_survives_the_contact_being_deleted():
+    contact_id = _sent_contact("kept@example.com")
+    contact = db.query_one("SELECT * FROM contacts WHERE id = ?", (contact_id,))
+    db.log_sent(campaign_id=_campaign(), contact=contact, status="sent", subject="Hello",
+                body_html="<p>The whole message</p>", sent_at=db.now())
+    db.execute("DELETE FROM contacts WHERE id = ?", (contact_id,))
+
+    row = db.query_one("SELECT id FROM sent_log WHERE email = 'kept@example.com'")
+    message = db.sent_message(row["id"])
+    assert message["body_html"] == "<p>The whole message</p>"
+    assert message["subject"] == "Hello" and message["company"] == "Co"
+
+
+def test_a_retry_updates_the_one_history_row():
+    contact_id = _sent_contact("retry@example.com")
+    campaign_id = _campaign()
+    contact = db.query_one("SELECT * FROM contacts WHERE id = ?", (contact_id,))
+    db.log_sent(campaign_id=campaign_id, contact=contact, status="failed", last_error="x")
+    db.log_sent(campaign_id=campaign_id, contact=contact, status="sent", subject="S",
+                body_html="<p>b</p>", sent_at=db.now())
+    rows = db.query("SELECT * FROM sent_log WHERE email = 'retry@example.com'")
+    assert len(rows) == 1
+    assert rows[0]["status"] == "sent" and rows[0]["attempts"] == 2
+    assert rows[0]["last_error"] is None
+
+
+def test_deleting_history_never_lets_the_same_person_be_emailed_again():
+    contact_id = _sent_contact("once@example.com")
+    campaign_id = _campaign()
+    db.execute("INSERT INTO campaign_recipients(campaign_id, contact_id, status, sent_at) "
+               "VALUES (?, ?, 'sent', ?)", (campaign_id, contact_id, db.now()))
+    contact = db.query_one("SELECT * FROM contacts WHERE id = ?", (contact_id,))
+    db.log_sent(campaign_id=campaign_id, contact=contact, status="sent", sent_at=db.now())
+
+    db.clear_sent()
+    assert db.query_one("SELECT COUNT(*) AS n FROM sent_log")["n"] == 0
+    still = db.query_one("SELECT status FROM campaign_recipients WHERE contact_id = ?",
+                         (contact_id,))
+    assert still["status"] == "sent"
+
+
+def test_upgrading_copies_the_old_history_across(tmp_path):
+    """A v0.6.1 database has its sends in campaign_recipients only."""
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.executescript(db._SCHEMA.split("-- The permanent record")[0])
+    old.execute("INSERT INTO schema_info(version) VALUES (1)")
+    old.execute("INSERT INTO contacts(id, email, company) VALUES (1, 'old@example.com', 'Old')")
+    old.execute("INSERT INTO campaigns(id, name) VALUES (1, 'c')")
+    old.execute("INSERT INTO campaign_recipients(campaign_id, contact_id, status, subject_used, "
+                "sent_at) VALUES (1, 1, 'sent', 'Before', '2026-09-01T10:00:00')")
+    old.commit()
+    old.close()
+
+    db.close()
+    try:
+        db.init(path)
+        row = db.query_one("SELECT * FROM sent_log")
+        assert row["email"] == "old@example.com" and row["subject"] == "Before"
+        assert db.query_one("SELECT version FROM schema_info")["version"] == db.SCHEMA_VERSION
+    finally:
+        db.close()
+        db.init(os.path.join(tempfile.mkdtemp(), "test.db"))
+
+
+def test_the_send_worker_saves_a_copy_of_every_email_it_sends(monkeypatch):
+    """End to end through the real worker, with the mail server faked."""
+    import queue
+
+    from app.core import sender, warmup
+
+    class FakeServer:
+        def send_message(self, message):
+            self.last = message
+
+        def quit(self):
+            pass
+
+    monkeypatch.setattr(sender, "open_smtp", lambda _settings: FakeServer())
+    monkeypatch.setattr(sender, "in_send_window", lambda *_a, **_k: (True, ""))
+    monkeypatch.setattr(warmup, "remaining_today", lambda *_a: 100)
+    monkeypatch.setattr(warmup, "record_sent", lambda *_a: None)
+
+    contact_id = _sent_contact("worker@example.com")
+    campaign_id = _campaign()
+    db.execute("INSERT INTO campaign_recipients(campaign_id, contact_id, status) "
+               "VALUES (?, ?, 'pending')", (campaign_id, contact_id))
+    plan = sender.SendPlan(
+        campaign_id=campaign_id,
+        sender=composer.SenderIdentity("Sam", "sam@example.com"),
+        content=_content(unsubscribe_note=False),
+        smtp=sender.SmtpSettings("smtp.example.com", 587, "u", "p"),
+        delay_min_s=0, delay_max_s=0)
+    worker = sender.SendWorker(plan, queue.Queue())
+    worker.run()
+
+    row = db.query_one("SELECT id, status, subject, from_addr FROM sent_log "
+                       "WHERE email = 'worker@example.com'")
+    assert row["status"] == "sent" and row["subject"] == "Office furniture for Co"
+    assert row["from_addr"] == "Sam <sam@example.com>"
+    body = db.sent_message(row["id"])["body_html"]
+    assert "We make office furniture" in body and "Unsubscribe" not in body

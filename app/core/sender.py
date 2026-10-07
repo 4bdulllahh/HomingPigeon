@@ -21,7 +21,9 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, time as dtime, timedelta
+from email.utils import formataddr
 from enum import Enum
+from pathlib import Path
 
 from app import config
 from app.core import composer, db, merge, prefs, tls, warmup
@@ -311,6 +313,30 @@ class SendWorker(threading.Thread):
             (self.plan.campaign_id,),
         )
 
+    def _record(self, contact, status: str, message=None, subject: str = "",
+                error: str | None = None, sent_at: str | None = None) -> None:
+        """Copy this attempt into the permanent sent history, body and all."""
+        if status not in ("sent", "failed", "bounced"):
+            return
+        body_html = ""
+        if message is not None:
+            part = message.get_body(("html",))
+            body_html = part.get_content() if part is not None else ""
+        content = self.plan.content
+        attachment = (Path(content.attachment_path).name
+                      if content.attach_mode == "attach" and content.attachment_path else "")
+        sender = self.plan.sender
+        try:
+            db.log_sent(
+                campaign_id=self.plan.campaign_id, contact=contact, status=status,
+                subject=subject, body_html=body_html,
+                from_addr=formataddr((sender.name, sender.email)) if sender.name else sender.email,
+                attachment=attachment,
+                message_id=str(message["Message-ID"] or "") if message is not None else "",
+                sent_at=sent_at, last_error=error)
+        except Exception as problem:  # noqa: BLE001 - the history must never stop a send
+            self._log(f"Could not save a copy of the email to {contact['email']}: {problem}", "warn")
+
     def _mark(self, contact_id: int, status: str, **fields) -> None:
         sets = ["status = ?", "attempts = attempts + 1"]
         params: list = [status]
@@ -429,6 +455,7 @@ class SendWorker(threading.Thread):
                 )
             except Exception as error:  # noqa: BLE001
                 self._mark(contact["id"], "failed", last_error=f"Compose error: {error}")
+                self._record(contact, "failed", error=f"Compose error: {error}")
                 self.failed += 1
                 self._log(f"Could not build the message for {email}: {error}", "error")
                 continue
@@ -440,6 +467,8 @@ class SendWorker(threading.Thread):
                 detail = str(error)[:400]
                 permanent = 500 <= code < 600
                 self._mark(contact["id"], "bounced" if permanent else "retry", last_error=detail)
+                self._record(contact, "bounced" if permanent else "retry", message, subject,
+                             error=detail)
                 self.failed += 1
                 self._consecutive_failures += 1
                 if permanent:
@@ -454,6 +483,8 @@ class SendWorker(threading.Thread):
                 self._log(f"Connection lost on {email}; will reconnect. ({error})", "warn")
             except Exception as error:  # noqa: BLE001
                 self._mark(contact["id"], "failed", last_error=f"{type(error).__name__}: {error}"[:400])
+                self._record(contact, "failed", message, subject,
+                             error=f"{type(error).__name__}: {error}"[:400])
                 self.failed += 1
                 self._consecutive_failures += 1
                 self._log(f"Failed to send to {email}: {error}", "error")
@@ -461,8 +492,10 @@ class SendWorker(threading.Thread):
                 self.sent += 1
                 self._since_reconnect += 1
                 self._consecutive_failures = 0
-                self._mark(contact["id"], "sent", sent_at=db.now(), subject_used=subject,
+                sent_at = db.now()
+                self._mark(contact["id"], "sent", sent_at=sent_at, subject_used=subject,
                            body_variant=variant, message_id=message["Message-ID"], last_error=None)
+                self._record(contact, "sent", message, subject, sent_at=sent_at)
                 warmup.record_sent(1)
                 self._emit(Event(EventType.SENT, f"{email}: {subject}", "success",
                                  data={"email": email, "subject": subject}))

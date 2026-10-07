@@ -416,6 +416,11 @@ def _classify(message: Message, result: SyncResult) -> tuple[str, bool]:
                 "WHERE contact_id = (SELECT id FROM contacts WHERE email = ?) AND status = 'sent'",
                 (detail[:400], address),
             )
+            db.execute(
+                "UPDATE sent_log SET status = 'bounced', bounced_at = ?, last_error = ? "
+                "WHERE email = ? AND status = 'sent'",
+                (db.now(), detail[:400], address.lower()),
+            )
         else:
             result.soft_bounces.append((address, detail))
             db.execute("UPDATE contacts SET bounced_at = ? WHERE email = ?", (db.now(), address))
@@ -440,6 +445,8 @@ def _classify(message: Message, result: SyncResult) -> tuple[str, bool]:
     subject = _decode_header(message.get("Subject", ""))
     result.replies.append((address, subject))
     db.execute("UPDATE contacts SET replied_at = ? WHERE email = ?", (db.now(), address))
+    db.execute("UPDATE sent_log SET replied_at = COALESCE(replied_at, ?) WHERE email = ?",
+               (db.now(), address.lower()))
     return "reply", True
 
 

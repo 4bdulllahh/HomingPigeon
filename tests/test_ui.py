@@ -270,10 +270,15 @@ def _record_send(email: str, status: str = "sent", replied: bool = False) -> Non
             (db.now(),))
     else:
         campaign_id = campaign["id"]
+    sent_at = db.now() if status == "sent" else None
     db.execute(
         "INSERT INTO campaign_recipients(campaign_id, contact_id, status, attempts, "
         "subject_used, sent_at) VALUES (?, ?, ?, 1, 'Hello', ?)",
-        (campaign_id, contact_id, status, db.now() if status == "sent" else None))
+        (campaign_id, contact_id, status, sent_at))
+    # What the send worker does alongside: the permanent copy for Sent emails
+    contact = db.query_one("SELECT * FROM contacts WHERE id = ?", (contact_id,))
+    db.log_sent(campaign_id=campaign_id, contact=contact, status=status, subject="Hello",
+                body_html="<p>Hi there</p>", sent_at=sent_at)
 
 
 def test_sent_log_lists_only_attempted_emails(qt_app, store):
@@ -330,6 +335,9 @@ def test_sent_log_keeps_the_spreadsheet_columns(qt_app, store):
     db.execute(
         "INSERT INTO campaign_recipients(campaign_id, contact_id, status, sent_at) "
         "VALUES (?, ?, 'sent', ?)", (campaign_id, contact_id, db.now()))
+    db.log_sent(campaign_id=campaign_id,
+                contact=db.query_one("SELECT * FROM contacts WHERE id = ?", (contact_id,)),
+                status="sent", sent_at=db.now())
 
     model = SentModel()
     model.reload()
@@ -775,3 +783,88 @@ def test_toolbar_buttons_act_on_the_box_last_typed_in(qt_app, store):
     finally:
         window.close()
         window.deleteLater()
+
+
+# --- v0.6.2 -----------------------------------------------------------------
+def test_the_contact_list_shows_every_imported_column(qt_app, store):
+    import pandas as pd
+
+    from app.core import importer
+    from app.models.contacts_model import ContactsModel
+
+    columns = {f"Detail {n}": [f"v{n}"] for n in range(25)}
+    df = pd.DataFrame({"Email": ["many@example.com"], **columns})
+    importer.import_dataframe(df, importer.detect_columns(df), check_mx=False)
+
+    model = ContactsModel()
+    model.reload()
+    headers = [model.headerData(i, Qt.Orientation.Horizontal) for i in range(model.columnCount())]
+    assert all(f"Detail {n}" in headers for n in range(25))
+
+
+def test_new_columns_reach_the_personal_touch_buttons_without_a_restart(qt_app, store):
+    import pandas as pd
+
+    from app.core import importer
+    from app.ui.main_window import MainWindow
+
+    window = MainWindow()
+    try:
+        window.show_page("templates")
+        page = window.page("templates")
+        df = pd.DataFrame({"Email": ["tags@example.com"],
+                           **{f"Field {n}": ["x"] for n in range(10)}})
+        importer.import_dataframe(df, importer.detect_columns(df), check_mx=False)
+
+        page.on_show()
+        assert all(f"Field {n}" in page._tag_names for n in range(10))
+        layout = page._tag_layouts[True]
+        texts = [layout.itemAt(i).widget().text() for i in range(layout.count())]
+        assert "{{Field 9}}" in texts
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_the_unsubscribe_switch_is_saved_straight_away(qt_app, store):
+    from app.ui.main_window import MainWindow
+
+    window = MainWindow()
+    try:
+        window.show_page("templates")
+        page = window.page("templates")
+        assert page.unsubscribe_box.isChecked()
+        page.unsubscribe_box.setChecked(False)
+        assert db.get_setting("unsubscribe_note", True) is False
+        assert page.current_content().unsubscribe_note is False
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_a_sent_email_opens_in_its_own_window(qt_app, store):
+    from app.ui.pages.sent import SentEmailDialog
+
+    _record_send("viewer@example.com", "sent")
+    row = db.query_one("SELECT id FROM sent_log WHERE email = 'viewer@example.com'")
+    dialog = SentEmailDialog(None, db.sent_message(row["id"]))
+    assert dialog._html == "<p>Hi there</p>"
+    dialog.deleteLater()
+
+    # One recorded before v0.6.2 has no body: it still opens, with a note instead
+    old = db.sent_message(row["id"])
+    old["body_html"] = ""
+    SentEmailDialog(None, old).deleteLater()
+
+
+def test_deleting_from_the_sent_page_keeps_the_rest(qt_app, store):
+    from app.models.sent_model import SentModel
+
+    for name in ("a", "b", "c"):
+        _record_send(f"{name}@delete.test", "sent")
+    model = SentModel()
+    model.reload()
+    assert model.delete_rows([0]) == 1
+    assert model.rowCount() == 2
+    # Who was contacted is still known, so nobody is emailed twice
+    assert db.query_one("SELECT COUNT(*) AS n FROM campaign_recipients")["n"] == 3

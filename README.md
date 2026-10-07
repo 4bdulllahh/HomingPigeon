@@ -35,10 +35,12 @@ and your contacts never leave it.
 - **Contact list cleaning on import.** Open an Excel or CSV file and the app finds the email,
   company and contact columns by itself, then removes duplicates, invalid addresses and domains
   with no mail server before anything is sent. Dead addresses bounce, and bounces are the
-  fastest way to get blacklisted.
+  fastest way to get blacklisted. Every other column in your sheet is kept, shown in
+  **My contacts** and usable in your message as a tag, such as `{{Phone No.}}`.
 - **Several subjects and messages.** Write a few versions of each, use tags like
   `{{FirstName}}` and `{{Company}}`, and the app picks a different combination for each person,
-  so hundreds of identical emails never go out.
+  so hundreds of identical emails never go out. Already have them in a spreadsheet? Import the
+  subjects and messages in one go.
 - **Spam score before you send.** A live preview shows exactly what one contact will receive,
   with a score out of 100 and plain-English advice on wording, links and attachments that
   trigger filters.
@@ -50,13 +52,16 @@ and your contacts never leave it.
 - **An automatic stop.** Sending halts by itself if too many emails start failing, before real
   damage is done to your domain.
 - **Bounce and unsubscribe handling.** The app reads your inbox and permanently removes anyone
-  who bounced or asked to be removed. Every email also carries the standard one-click
-  unsubscribe header, which puts an Unsubscribe button in Gmail and Outlook.
+  who bounced or asked to be removed. You choose whether emails carry an unsubscribe line and
+  the one-click unsubscribe header (which puts an Unsubscribe button in Gmail and Outlook).
+  Switching them off keeps mail out of Gmail's Promotions tab; replies asking to unsubscribe
+  are still handled either way.
 - **An inbox you can read.** The **My inbox** page keeps every message the check read, so
   replies, bounces and opt-outs can be opened inside the app instead of only being counted.
-- **A record of everything sent.** The **Sent emails** page lists every message with the time,
-  the subject used and whether it was answered, bounced or failed, and exports it back to Excel
-  so your master list stays current.
+- **A record of everything sent.** The **Sent emails** page keeps every message with the time,
+  the subject used and whether it was answered, bounced or failed. Double-click one to see the
+  email exactly as it went out. The history stays even if you delete the contact; you choose
+  what to delete. It also exports back to Excel so your master list stays current.
 - **Work while it works.** Importing a large spreadsheet checks every domain in the background,
   so you can set up your account or write your message at the same time.
 - **Easy to read.** Dark, light or match-your-computer themes, five text sizes, high contrast
@@ -274,6 +279,10 @@ Three rules keep the window responsive:
 
 Pages are constructed the first time they are opened, not at startup, so the
 window appears with a single page in it.
+
+**Picking the project up again (or handing it to Claude)?** Start with
+[`docs/handover/README.md`](docs/handover/README.md). It explains how the pieces fit together,
+the rules that must not be broken, where each feature lives and what changed in each release.
 
 `requirements.txt` is what the app needs to run. `requirements-dev.txt` adds the build and test
 tools:

@@ -8,13 +8,14 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import zlib
 from datetime import datetime, date
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 from app import config
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _local = threading.local()
 _db_path: Path | None = None
@@ -206,6 +207,35 @@ CREATE TABLE IF NOT EXISTS inbox_messages (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_uid ON inbox_messages(folder, uid);
 CREATE INDEX IF NOT EXISTS idx_inbox_when ON inbox_messages(received_at DESC, id DESC);
+
+-- The permanent record of every email that went out, as it was sent. Copies the
+-- contact's details rather than pointing at them, so deleting a contact or
+-- clearing the list never wipes the history. Only the user deletes from here.
+-- The body is the finished HTML, zlib-compressed: a year of sending is then a
+-- few megabytes rather than a few hundred.
+CREATE TABLE IF NOT EXISTS sent_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER,
+    contact_id  INTEGER,
+    email       TEXT COLLATE NOCASE,
+    company     TEXT,
+    person      TEXT,
+    extra_json  TEXT,
+    status      TEXT,
+    attempts    INTEGER DEFAULT 1,
+    subject     TEXT,
+    body_z      BLOB,
+    from_addr   TEXT,
+    attachment  TEXT,
+    message_id  TEXT,
+    sent_at     TEXT,
+    last_error  TEXT,
+    replied_at  TEXT,
+    bounced_at  TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sent_log_recipient ON sent_log(campaign_id, contact_id);
+CREATE INDEX IF NOT EXISTS idx_sent_log_when ON sent_log(sent_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sent_log_email ON sent_log(email);
 """
 
 
@@ -214,9 +244,26 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if row is None:
         conn.execute("INSERT INTO schema_info(version) VALUES (?)", (SCHEMA_VERSION,))
         return
-    # Future schema upgrades are applied here, stepping version by version.
+    # Upgrades are applied here, stepping version by version.
+    if row["version"] < 2:
+        # v0.6.2: the sent history moved into its own table. Copy over what the
+        # campaigns already recorded so nothing sent before the update is lost.
+        backfill_sent_log(conn)
     if row["version"] < SCHEMA_VERSION:
         conn.execute("UPDATE schema_info SET version = ?", (SCHEMA_VERSION,))
+
+
+def backfill_sent_log(conn: sqlite3.Connection) -> None:
+    """Fill sent_log from campaign_recipients. Messages sent before v0.6.2 have no body."""
+    conn.execute(
+        "INSERT OR IGNORE INTO sent_log(campaign_id, contact_id, email, company, person, "
+        "extra_json, status, attempts, subject, message_id, sent_at, last_error, replied_at, "
+        "bounced_at) "
+        "SELECT r.campaign_id, r.contact_id, c.email, c.company, c.person, c.extra_json, "
+        "r.status, r.attempts, r.subject_used, r.message_id, r.sent_at, r.last_error, "
+        "c.replied_at, c.bounced_at "
+        "FROM campaign_recipients r JOIN contacts c ON c.id = r.contact_id "
+        "WHERE r.status IN ('sent', 'failed', 'bounced')")
 
 
 # --- Generic helpers --------------------------------------------------------
@@ -368,6 +415,91 @@ def trim_inbox(keep: int = INBOX_KEEP) -> None:
 
 def clear_inbox() -> None:
     execute("DELETE FROM inbox_messages")
+
+
+# --- Sent emails ------------------------------------------------------------
+def pack_text(text: str | None) -> bytes | None:
+    return zlib.compress(text.encode("utf-8"), 6) if text else None
+
+
+def unpack_text(blob: bytes | None) -> str:
+    if not blob:
+        return ""
+    try:
+        return zlib.decompress(blob).decode("utf-8", errors="replace")
+    except zlib.error:
+        return ""
+
+
+def log_sent(*, campaign_id: int | None, contact: Any, status: str, subject: str = "",
+             body_html: str = "", from_addr: str = "", attachment: str = "",
+             message_id: str = "", sent_at: str | None = None, last_error: str | None = None,
+             conn: sqlite3.Connection | None = None) -> None:
+    """Record one attempt in the permanent sent history.
+
+    ``contact`` is a contacts row (or dict). Its details are copied, not
+    referenced. A second attempt at the same person in the same campaign
+    updates the one row, so a retry that finally succeeds is not listed twice.
+    """
+    record = contact if isinstance(contact, dict) else {k: contact[k] for k in contact.keys()}
+    conn = conn or connect()
+    conn.execute(
+        "INSERT INTO sent_log(campaign_id, contact_id, email, company, person, extra_json, "
+        "status, attempts, subject, body_z, from_addr, attachment, message_id, sent_at, "
+        "last_error) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(campaign_id, contact_id) DO UPDATE SET "
+        "status = excluded.status, attempts = sent_log.attempts + 1, "
+        "subject = COALESCE(NULLIF(excluded.subject, ''), sent_log.subject), "
+        "body_z = COALESCE(excluded.body_z, sent_log.body_z), "
+        "from_addr = COALESCE(NULLIF(excluded.from_addr, ''), sent_log.from_addr), "
+        "attachment = COALESCE(NULLIF(excluded.attachment, ''), sent_log.attachment), "
+        "message_id = COALESCE(NULLIF(excluded.message_id, ''), sent_log.message_id), "
+        "sent_at = COALESCE(excluded.sent_at, sent_log.sent_at), "
+        "last_error = excluded.last_error",
+        (campaign_id, record.get("id"), (record.get("email") or "").strip().lower(),
+         record.get("company"), record.get("person"), record.get("extra_json"), status,
+         subject, pack_text(body_html), from_addr, attachment, message_id, sent_at, last_error),
+    )
+    conn.commit()
+
+
+def sent_message(log_id: int) -> dict | None:
+    """One sent email with its body unpacked, for the 'see what was sent' window."""
+    row = query_one(
+        "SELECT s.id, s.campaign_id, s.email, s.company, s.person, s.status, s.attempts, "
+        "s.subject, s.body_z, s.from_addr, s.attachment, s.message_id, s.sent_at, "
+        "s.last_error, COALESCE(s.replied_at, c.replied_at) AS replied_at, "
+        "COALESCE(s.bounced_at, c.bounced_at) AS bounced_at "
+        "FROM sent_log s LEFT JOIN contacts c ON c.email = s.email WHERE s.id = ?", (log_id,))
+    if row is None:
+        return None
+    record = {key: row[key] for key in row.keys() if key != "body_z"}
+    record["body_html"] = unpack_text(row["body_z"])
+    return record
+
+
+def delete_sent(ids: Iterable[int]) -> int:
+    """Remove entries from the sent history only.
+
+    The campaign's own record of who was contacted is left alone on purpose:
+    that is what stops the same person being emailed twice, and tidying the
+    history must never undo it.
+    """
+    ids = list(ids)
+    if not ids:
+        return 0
+    conn = connect()
+    with conn:
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            conn.execute(f"DELETE FROM sent_log WHERE id IN ({','.join('?' * len(chunk))})", chunk)
+    return len(ids)
+
+
+def clear_sent() -> int:
+    row = query_one("SELECT COUNT(*) AS n FROM sent_log")
+    execute("DELETE FROM sent_log")
+    return row["n"] if row else 0
 
 
 # --- Campaign stats ---------------------------------------------------------

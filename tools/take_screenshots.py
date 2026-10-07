@@ -93,6 +93,10 @@ def fill_demo_data() -> None:
                     bodies[index % 2][0], sent_at))
     db.execute("UPDATE contacts SET replied_at = ? WHERE id IN (?, ?)",
                (db.now(), contacts[1]["id"], contacts[4]["id"]))
+    # The Sent emails page reads the permanent history, filled the same way an upgrade does
+    connection = db.connect()
+    db.backfill_sent_log(connection)
+    connection.commit()
     db.suppress(contacts[10]["email"], "Hard bounce: mailbox does not exist", "imap")
 
     replies = [

@@ -1,9 +1,9 @@
 """A table model for the record of every email the app has actually sent.
 
-The data already existed. ``campaign_recipients`` has carried the status, the
-timestamp, the subject used and the error text since the first version, but
-there was nowhere to read it. This turns it into a list the user can scan,
-filter and export back into the spreadsheet their leads live in.
+Reads ``sent_log``, the permanent history written by the send worker. It keeps
+its own copy of each recipient's details and of the message itself, so it
+survives the contact being deleted or the whole list being cleared. Replies and
+bounces are read from both the history and the live contact, whichever knows.
 
 Paged from SQLite exactly like the contact list, for the same reason: a finished
 campaign is as long as the list it was sent to.
@@ -18,7 +18,7 @@ from app.core import db, merge
 from app.ui import theme
 
 PAGE_SIZE = 300
-MAX_EXTRA_COLUMNS = 12
+MAX_EXTRA_COLUMNS = 40
 
 # Only rows the app actually attempted. 'pending' has not been tried yet and
 # 'skipped' was never sent at all, so neither belongs in a record of what went out.
@@ -44,12 +44,18 @@ FILTERS = [
     ("failed", "Failed"),
 ]
 
+# The live contact may know about a reply or bounce the history has not been
+# told about (and the other way round once the contact is deleted).
+_REPLIED = "COALESCE(s.replied_at, c.replied_at)"
+_BOUNCED = "COALESCE(s.bounced_at, c.bounced_at)"
+_FROM = "FROM sent_log s LEFT JOIN contacts c ON c.email = s.email"
+
 _FILTER_CLAUSE = {
     "all": "",
-    "sent": "AND r.status = 'sent' AND c.replied_at IS NULL",
-    "replied": "AND c.replied_at IS NOT NULL",
-    "bounced": "AND (r.status = 'bounced' OR c.bounced_at IS NOT NULL)",
-    "failed": "AND r.status = 'failed'",
+    "sent": f"AND s.status = 'sent' AND {_REPLIED} IS NULL",
+    "replied": f"AND {_REPLIED} IS NOT NULL",
+    "bounced": f"AND (s.status = 'bounced' OR {_BOUNCED} IS NOT NULL)",
+    "failed": "AND s.status = 'failed'",
 }
 
 
@@ -169,12 +175,8 @@ class SentModel(QAbstractTableModel):
         extras: list[str] = []
         builtin = {name.lower() for name in merge.BUILTIN_TAGS}
         for row in db.query(
-            "SELECT c.extra_json FROM campaign_recipients r "
-            "JOIN contacts c ON c.id = r.contact_id "
-            f"WHERE r.status IN ({','.join('?' * len(ATTEMPTED))}) "
-            "AND c.extra_json IS NOT NULL AND c.extra_json != '' LIMIT 40",
-            list(ATTEMPTED),
-        ):
+            "SELECT DISTINCT extra_json FROM sent_log "
+            "WHERE extra_json IS NOT NULL AND extra_json != '' LIMIT 400"):
             try:
                 keys = json.loads(row["extra_json"])
             except (json.JSONDecodeError, TypeError):
@@ -190,12 +192,12 @@ class SentModel(QAbstractTableModel):
     # --- queries ------------------------------------------------------------
     def _where(self) -> tuple[str, list]:
         params: list = list(ATTEMPTED)
-        clause = f"WHERE r.status IN ({','.join('?' * len(ATTEMPTED))})"
+        clause = f"WHERE s.status IN ({','.join('?' * len(ATTEMPTED))})"
         clause += " " + _FILTER_CLAUSE[self._filter]
         if self._search:
             like = f"%{self._search}%"
-            clause += (" AND (c.email LIKE ? OR c.company LIKE ? OR c.person LIKE ? "
-                       "OR r.subject_used LIKE ?)")
+            clause += (" AND (s.email LIKE ? OR s.company LIKE ? OR s.person LIKE ? "
+                       "OR s.subject LIKE ?)")
             params += [like, like, like, like]
         return clause, params
 
@@ -204,10 +206,10 @@ class SentModel(QAbstractTableModel):
 
         clause, params = self._where()
         rows = db.query(
-            "SELECT c.email, c.company, c.person, c.extra_json, c.replied_at, c.bounced_at, "
-            "r.status, r.attempts, r.subject_used, r.sent_at, r.last_error "
-            "FROM campaign_recipients r JOIN contacts c ON c.id = r.contact_id "
-            f"{clause} ORDER BY r.sent_at IS NULL, r.sent_at DESC, r.rowid DESC "
+            "SELECT s.id, s.email, s.company, s.person, s.extra_json, s.status, s.attempts, "
+            "s.subject, s.sent_at, s.last_error, s.body_z IS NOT NULL AS has_body, "
+            f"{_REPLIED} AS replied_at, {_BOUNCED} AS bounced_at "
+            f"{_FROM} {clause} ORDER BY s.sent_at IS NULL, s.sent_at DESC, s.id DESC "
             "LIMIT ? OFFSET ?",
             [*params, limit, offset],
         )
@@ -216,13 +218,15 @@ class SentModel(QAbstractTableModel):
         for row in rows:
             label, tone = outcome_of(row)
             item = {
+                "_id": row["id"],
+                "_has_body": bool(row["has_body"]),
                 "email": row["email"] or "",
                 "company": row["company"] or "",
                 "person": row["person"] or "",
                 "_outcome": label,
                 "_tone": tone,
                 "_when": prefs.format_datetime(row["sent_at"]) if row["sent_at"] else "-",
-                "subject_used": row["subject_used"] or "",
+                "subject_used": row["subject"] or "",
                 "attempts": str(row["attempts"] or 0),
                 "last_error": row["last_error"] or "",
             }
@@ -243,6 +247,15 @@ class SentModel(QAbstractTableModel):
     def row_at(self, row: int) -> dict:
         return self._rows[row] if 0 <= row < len(self._rows) else {}
 
+    def ids_for_rows(self, rows: list[int]) -> list[int]:
+        return [self._rows[r]["_id"] for r in sorted(set(rows)) if 0 <= r < len(self._rows)]
+
+    def delete_rows(self, rows: list[int]) -> int:
+        """Remove these entries from the history. Nobody is emailed again because of it."""
+        removed = db.delete_sent(self.ids_for_rows(rows))
+        self.reload()
+        return removed
+
     # --- totals -------------------------------------------------------------
     @staticmethod
     def counts() -> dict:
@@ -250,13 +263,12 @@ class SentModel(QAbstractTableModel):
         row = db.query_one(
             "SELECT "
             "  COUNT(*) AS attempted, "
-            "  SUM(CASE WHEN r.status = 'sent' THEN 1 ELSE 0 END) AS sent, "
-            "  SUM(CASE WHEN c.replied_at IS NOT NULL THEN 1 ELSE 0 END) AS replied, "
-            "  SUM(CASE WHEN r.status = 'bounced' OR c.bounced_at IS NOT NULL "
+            "  SUM(CASE WHEN s.status = 'sent' THEN 1 ELSE 0 END) AS sent, "
+            f"  SUM(CASE WHEN {_REPLIED} IS NOT NULL THEN 1 ELSE 0 END) AS replied, "
+            f"  SUM(CASE WHEN s.status = 'bounced' OR {_BOUNCED} IS NOT NULL "
             "           THEN 1 ELSE 0 END) AS bounced, "
-            "  SUM(CASE WHEN r.status = 'failed' THEN 1 ELSE 0 END) AS failed "
-            "FROM campaign_recipients r JOIN contacts c ON c.id = r.contact_id "
-            f"WHERE r.status IN ({','.join('?' * len(ATTEMPTED))})",
+            "  SUM(CASE WHEN s.status = 'failed' THEN 1 ELSE 0 END) AS failed "
+            f"{_FROM} WHERE s.status IN ({','.join('?' * len(ATTEMPTED))})",
             list(ATTEMPTED),
         )
         if row is None:

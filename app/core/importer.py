@@ -334,6 +334,7 @@ def import_dataframe(
             pending += 1
 
     conn.commit()
+    remember_columns(mapping.extras)
     if progress:
         progress(len(df), len(df))
     db.log_event("info", "import", f"{source_file}: {result.summary()}")
@@ -374,16 +375,146 @@ def list_contacts(limit: int = 500, offset: int = 0, search: str = "") -> list:
     return db.query("SELECT * FROM contacts ORDER BY id LIMIT ? OFFSET ?", (limit, offset))
 
 
-def merge_tag_names() -> list[str]:
-    """Built-in tags plus every extra column seen in imported contacts."""
+# Every extra column heading ever imported, in sheet order. Kept as a setting
+# because a column that is blank in the first rows would otherwise never be
+# seen when the headings are worked out from the stored contacts.
+COLUMNS_SETTING = "contact_columns"
+
+
+def remember_columns(columns: list[str]) -> None:
+    known = list(db.get_setting(COLUMNS_SETTING, []) or [])
+    added = [str(c) for c in columns if str(c).strip() and str(c) not in known]
+    if added:
+        db.set_setting_soft(COLUMNS_SETTING, known + added)
+
+
+def forget_columns() -> None:
+    db.set_setting_soft(COLUMNS_SETTING, [])
+
+
+def extra_columns() -> list[str]:
+    """Every spreadsheet column beyond email, company and person, in import order.
+
+    Names that clash with a built-in tag ({{Email}}, {{Company}}...) are left
+    out: the built-in one always wins, so listing both would only confuse.
+    """
     from app.core.merge import BUILTIN_TAGS
 
-    names = list(BUILTIN_TAGS)
-    for row in db.query("SELECT DISTINCT extra_json FROM contacts WHERE extra_json IS NOT NULL LIMIT 200"):
+    builtin = {name.lower().replace(" ", "") for name in BUILTIN_TAGS}
+    names: list[str] = []
+    seen: set[str] = set()
+
+    def add(name: str) -> None:
+        key = name.lower().replace(" ", "")
+        if name.strip() and key not in builtin and key not in seen:
+            seen.add(key)
+            names.append(name)
+
+    for name in db.get_setting(COLUMNS_SETTING, []) or []:
+        add(str(name))
+    # Lists imported before v0.6.2 have no saved headings; read them off the rows
+    for row in db.query("SELECT DISTINCT extra_json FROM contacts "
+                        "WHERE extra_json IS NOT NULL AND extra_json != '' LIMIT 2000"):
         try:
             for key in json.loads(row["extra_json"]):
-                if key not in names:
-                    names.append(key)
-        except (json.JSONDecodeError, TypeError):
+                add(str(key))
+        except (json.JSONDecodeError, TypeError, AttributeError):
             continue
     return names
+
+
+def merge_tag_names() -> list[str]:
+    """Built-in tags plus every extra column from the imported spreadsheets."""
+    from app.core.merge import BUILTIN_TAGS
+
+    return list(BUILTIN_TAGS) + extra_columns()
+
+
+# --- Subjects and messages from a spreadsheet -------------------------------
+# A quick start for My message: one column of subject lines, one of messages,
+# and optionally a signature. Every sheet in the file is read, so subjects and
+# messages can also sit on separate sheets.
+@dataclass
+class TemplateSheet:
+    subjects: list[str] = field(default_factory=list)
+    bodies: list[str] = field(default_factory=list)
+    signature: str = ""
+
+
+def _template_role(header: str) -> str | None:
+    name = re.sub(r"[^a-z ]", " ", str(header).lower())
+    if "subject" in name:
+        return "subject"
+    if "signature" in name or "sign off" in name:
+        return "signature"
+    if any(word in name for word in ("message", "body", "bodies", "email", "content", "text",
+                                     "template")):
+        return "body"
+    return None
+
+
+def _cell_text(value: Any) -> str:
+    if value is None:
+        return ""
+    text = str(value).replace("_x000D_", "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    return "" if text.lower() in {"nan", "none"} else text
+
+
+def read_templates(path: str | Path) -> TemplateSheet:
+    """Subjects, messages and a signature from a spreadsheet, by column heading.
+
+    Headings containing "subject" are subjects; "message", "body" or "email"
+    are messages; "signature" is the signature. A sheet with none of those
+    headings is read as subjects in the first column and messages in the second.
+    """
+    result = TemplateSheet()
+    for sheet in list_sheets(path):
+        df = read_sheet(path, None if sheet == "CSV" else sheet)
+        if df.empty and not len(df.columns):
+            continue
+        roles = {column: _template_role(column) for column in df.columns}
+        if not any(roles.values()):
+            columns = list(df.columns)
+            roles = {column: None for column in columns}
+            if columns:
+                roles[columns[0]] = "subject"
+            if len(columns) > 1:
+                roles[columns[1]] = "body"
+        for column, role in roles.items():
+            if role is None:
+                continue
+            for value in df[column]:
+                text = _cell_text(value)
+                if not text:
+                    continue
+                if role == "subject" and text not in result.subjects:
+                    result.subjects.append(text)
+                elif role == "body" and text not in result.bodies:
+                    result.bodies.append(text)
+                elif role == "signature" and not result.signature:
+                    result.signature = text
+    return result
+
+
+def write_template_sample(path: str | Path, subjects: list[str], bodies: list[str],
+                          signature: str = "") -> Path:
+    """A ready-to-fill spreadsheet in the layout read_templates() expects."""
+    path = Path(path)
+    rows = max(len(subjects), len(bodies), 1)
+    df = pd.DataFrame({
+        "Subject": subjects + [""] * (rows - len(subjects)),
+        "Message": bodies + [""] * (rows - len(bodies)),
+        "Signature": [signature] + [""] * (rows - 1),
+    })
+    from openpyxl.styles import Alignment
+
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="My message")
+        sheet = writer.sheets["My message"]
+        for letter, width in (("A", 50), ("B", 90), ("C", 40)):
+            sheet.column_dimensions[letter].width = width
+        for row in sheet.iter_rows(min_row=2):
+            for cell in row:
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+        sheet.freeze_panes = "A2"
+    return path

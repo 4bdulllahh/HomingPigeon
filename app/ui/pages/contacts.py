@@ -176,6 +176,8 @@ class ContactsPage(Page):
         self.mapping_section.add(muted(
             f"{len(self._dataframe):,} rows · {len(self._dataframe.columns)} columns · "
             f"{found} of 3 mapped automatically"))
+        self.extras_label = hint("")
+        self.mapping_section.add(self.extras_label)
 
         self.preview_model = SimpleTableModel(PREVIEW_HEADERS)
         self.preview_table = DataTable(self.preview_model, "No rows to preview.")
@@ -202,6 +204,13 @@ class ContactsPage(Page):
         if self._dataframe is None:
             return
         mapping = self._current_mapping()
+        if mapping.extras:
+            names = ", ".join("{{" + str(c) + "}}" for c in mapping.extras)
+            self.extras_label.setText(
+                f"Also kept, all {len(mapping.extras)} of them: {names}. Each one shows as a "
+                f"column in My contacts and can be used in your message.")
+        else:
+            self.extras_label.setText("")
         rows, tones = [], []
         for _index, record in self._dataframe.head(6).iterrows():
             email = str(record.get(mapping.email, "") or "") if mapping.email else ""

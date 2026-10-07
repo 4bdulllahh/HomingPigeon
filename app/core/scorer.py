@@ -204,12 +204,16 @@ def _check_body(html: str, findings: list[Finding], name: str = "Body",
                                     "Add alt text. Images are blocked by default in most clients."))
             break
 
-    # The unsubscribe footer is appended at send time, so only complain when it is switched off
+    # The unsubscribe footer is appended at send time, so only mention it when it
+    # is switched off. Turning it off is a legitimate choice for small, personal
+    # outreach (it keeps mail out of Gmail's Promotions tab), so this is advice,
+    # not a heavy penalty.
     if not footer_added and "unsubscribe" not in lowered:
-        findings.append(Finding("high", name, "No unsubscribe wording anywhere in the message.",
-                                "Re-enable the automatic footer on the 'Sending options' page, or add your "
-                                "own opt-out line. Mail without one is treated as spam and, for "
-                                "many jurisdictions, is not legal to send."))
+        findings.append(Finding("low", name, "No unsubscribe wording anywhere in the message.",
+                                "Fine for a small number of personal emails. For larger sends, "
+                                "switch the unsubscribe line back on (My message, Signature tab) "
+                                "or offer a polite way to opt out in your own words. Some "
+                                "countries require one."))
 
 
 def _check_tags(text: str, known_tags: list[str], findings: list[Finding], where: str) -> None:

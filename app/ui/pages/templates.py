@@ -10,7 +10,7 @@ from pathlib import Path
 from PyQt6 import sip
 from PyQt6.QtCore import QEvent, Qt, QTimer
 from PyQt6.QtGui import QKeySequence, QShortcut
-from PyQt6.QtWidgets import QInputDialog, QSplitter, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QFileDialog, QInputDialog, QSplitter, QVBoxLayout, QWidget
 
 from app.core import composer, db, importer, merge, scorer
 from app.ui import theme
@@ -18,7 +18,7 @@ from app.ui.pages.base import Page
 from app.ui.widgets.common import (Card, ScrollPage, TabBar, clear_layout, danger_button, heading,
                                    hint, muted, primary_button, row, secondary_button, separator,
                                    set_tone, small_button, subheading)
-from app.ui.widgets.dialogs import InfoDialog
+from app.ui.widgets.dialogs import ChoiceDialog, InfoDialog
 from app.ui.widgets.inputs import Debouncer, checkbox, get_text, read_only_box, set_text, text_box
 from app.workers import jobs
 from app.workers.base import Task
@@ -172,6 +172,22 @@ PAGE_HELP_SECTIONS = [
         "The straight line | is Shift and the backslash key, usually just above Enter.",
         "Every { needs a matching }. A warning appears next to the version's name if one "
         "is missing.",
+    ]),
+    ("Set it all up from a spreadsheet", [
+        "Press \"Import from a spreadsheet\" at the top of the page to bring in subjects and "
+        "messages in one go.",
+        "Put subject lines in a column headed Subject and messages in a column headed Message, "
+        "one per row. A column headed Signature is optional.",
+        "In Excel, press Alt+Enter inside a cell to start a new line in a message.",
+        "Not sure of the layout? \"Get a blank sheet\" saves one ready to fill in.",
+    ]),
+    ("The unsubscribe line", [
+        "The Signature tab has a switch for the small unsubscribe line at the bottom of every "
+        "email.",
+        "Gmail tends to put emails with that line in the Promotions tab. Switch it off and "
+        "your email reads like an ordinary one-to-one message.",
+        "Either way, anyone who replies with \"unsubscribe\" is taken off your list "
+        "automatically when the inbox is checked.",
     ]),
     ("Already know HTML?", [
         "You can still use it. Once a message contains <p> or <br>, the app sends it exactly as "
@@ -371,6 +387,8 @@ class TemplatesPage(Page):
         self._subject_pick = 0
         self._body_pick = 0
         self._preview_html = ""
+        self._tag_layouts: dict[bool, object] = {}
+        self._tag_names: list[str] = []
 
         # Everything above the Save button scrolls as one page. It used to be a
         # fixed frame with a small scrolling list squeezed inside it, and once a
@@ -381,7 +399,12 @@ class TemplatesPage(Page):
 
         help_button = secondary_button("?  How to write your email", self._explain_page)
         help_button.setToolTip("A short guide to this page, in plain English")
-        self.scroll.add(row(heading("My message"), None, help_button))
+        import_button = secondary_button("Import from a spreadsheet...", self._import_sheet)
+        import_button.setToolTip("Bring in subject lines and messages from an Excel or CSV file")
+        sample_button = secondary_button("Get a blank sheet...", self._save_sample_sheet)
+        sample_button.setToolTip("Save a spreadsheet laid out ready for you to fill in")
+        self.scroll.add(row(heading("My message"), None, import_button, sample_button,
+                            help_button))
         self.scroll.add(muted(
             "Write what you want to say. Give the app a few versions of your subject and "
             "message and it mixes them, so every person gets a slightly different email. "
@@ -435,10 +458,19 @@ class TemplatesPage(Page):
         from app.ui.widgets.common import flow_row
 
         container, layout = flow_row(4)
+        self._tag_layouts[multiline] = layout
+        self._fill_tag_bar(multiline, importer.merge_tag_names())
+        return container
+
+    def _fill_tag_bar(self, multiline: bool, names: list[str]) -> None:
+        """One button per tag: the built-in ones, then every column of the spreadsheet."""
+        layout = self._tag_layouts[multiline]
+        clear_layout(layout)
+        self._tag_names = list(names)
         label = hint("Personal touch:", wrap=False)
         label.setToolTip("Filled in for each person from your contact list")
         layout.addWidget(label)
-        for tag in importer.merge_tag_names()[:8]:
+        for tag in names:
             snippet = "{{" + tag + "}}"
             button = small_button(snippet, lambda s=snippet: self._insert(multiline, s))
             button.setToolTip(TAG_HELP.get(tag, f"The {tag} column from your contact list"))
@@ -447,7 +479,14 @@ class TemplatesPage(Page):
         mix.setToolTip("Mix words: each person gets one of the choices at random. "
                        "Change them to your own, separated by |")
         layout.addWidget(mix)
-        return container
+
+    def _refresh_tag_bars(self) -> None:
+        """A new import adds columns; show them without needing a restart."""
+        names = importer.merge_tag_names()
+        if names == self._tag_names:
+            return
+        for multiline in list(self._tag_layouts):
+            self._fill_tag_bar(multiline, names)
 
     def _format_bar(self) -> QWidget:
         """Bold, link and bullet points for people who have never written HTML."""
@@ -566,8 +605,9 @@ class TemplatesPage(Page):
 
         layout.addWidget(muted(
             "Type your message just like a normal email: press Enter for a new line and leave "
-            "an empty line between paragraphs. Write 2 or 3 versions. Your signature and an "
-            "unsubscribe line are added at the bottom for you."))
+            "an empty line between paragraphs. Write 2 or 3 versions. Your signature (and the "
+            "unsubscribe line, if it is switched on in the Signature tab) is added at the bottom "
+            "for you."))
         layout.addWidget(self._tag_bar(True))
         layout.addWidget(self._format_bar())
 
@@ -636,7 +676,30 @@ class TemplatesPage(Page):
         layout.addWidget(self.signature_box, 1)
         layout.addWidget(row(secondary_button("Show me an example",
                                               self._insert_example_signature, 210), None))
+
+        layout.addWidget(separator())
+        self.unsubscribe_box = checkbox(
+            "Add an unsubscribe line at the bottom of every email",
+            bool(db.get_setting("unsubscribe_note", True)), on_change=self._unsubscribe_changed)
+        layout.addWidget(self.unsubscribe_box)
+        layout.addWidget(hint(
+            "The line reads: \"You received this message because we believe it is relevant to "
+            "your business. If it is not, reply with Unsubscribe and we will remove you "
+            "immediately.\" It also adds the Unsubscribe button Gmail and Outlook show at the "
+            "top of an email.\n\n"
+            "Gmail often files emails like that under Promotions. Switch it off and your email "
+            "looks like an ordinary one-to-one message. Anyone who replies asking to be removed "
+            "is still taken off your list automatically, whichever you choose. The setting is "
+            "saved as soon as you change it."))
         return holder
+
+    def _unsubscribe_changed(self, on: bool) -> None:
+        db.set_setting("unsubscribe_note", bool(on))
+        self.notify("Unsubscribe line switched on" if on else
+                    "Unsubscribe line switched off. Replies asking to unsubscribe are still "
+                    "handled automatically", "success", 5000)
+        if self.tabs.current() == "Preview & score":
+            self._score_debounce.poke()
 
     def _signature_text(self) -> str:
         box = getattr(self, "signature_box", None)
@@ -668,6 +731,91 @@ class TemplatesPage(Page):
         self._content_changed()
         self.notify(f"{len(EXAMPLE_BODIES)} example messages added. Replace the "
                     f"[square brackets] with your own words", "info", 6000)
+
+    # --- import from a spreadsheet ------------------------------------------
+    def _import_sheet(self) -> None:
+        path, _filter = QFileDialog.getOpenFileName(
+            self, "Choose a spreadsheet of subjects and messages", "",
+            "Spreadsheets (*.xlsx *.xls *.csv);;All files (*.*)")
+        if not path:
+            return
+        self.notify("Reading the spreadsheet...", "info", 2000)
+        Task(importer.read_templates, Path(path)).start(
+            on_result=self.guard(self._sheet_ready),
+            on_error=self.guard(
+                lambda message: self.notify(f"Could not read that file: {message}", "error", 8000)))
+
+    def _sheet_ready(self, sheet: importer.TemplateSheet) -> None:
+        if not sheet.subjects and not sheet.bodies:
+            InfoDialog.show_for(
+                self, "Nothing found to import",
+                "No subject lines or messages were found in that file.",
+                [("How to lay out the sheet", [
+                    "Put subject lines in a column headed Subject, one per row.",
+                    "Put messages in a column headed Message, one per row.",
+                    "A column headed Signature is optional.",
+                    "Press \"Get a blank sheet\" for a file that is ready to fill in.",
+                ])])
+            return
+
+        found = []
+        if sheet.subjects:
+            found.append(f"{len(sheet.subjects)} subject line(s)")
+        if sheet.bodies:
+            found.append(f"{len(sheet.bodies)} message(s)")
+        if sheet.signature:
+            found.append("a signature")
+        summary = "Found " + ", ".join(found) + "."
+
+        mode = "add"
+        if any(e.get_text().strip() for e in self.subject_editors + self.body_editors):
+            mode = ChoiceDialog.ask(
+                self, "Import subjects and messages", summary + "\n\nYou already have some "
+                "written. What should happen to them?",
+                [("add", "Keep mine and add these", "primary"),
+                 ("replace", "Replace mine with these", "danger"),
+                 (None, "Cancel", "secondary")])
+            if mode is None:
+                return
+
+        if mode == "replace":
+            if sheet.subjects:
+                for editor in list(self.subject_editors):
+                    self._remove_subject(editor)
+            if sheet.bodies:
+                for editor in list(self.body_editors):
+                    self._remove_body(editor)
+
+        for text in sheet.subjects:
+            self._add_subject(text)
+        for text in sheet.bodies:
+            self._add_body(text)
+        if sheet.signature and (mode == "replace" or not self._signature_text().strip()):
+            set_text(self.signature_box, sheet.signature)
+        self._content_changed()
+
+        unknown = sorted({tag for text in sheet.subjects + sheet.bodies
+                          for tag in merge.unresolved_tags(text, importer.merge_tag_names())})
+        message = summary + " Check them over, then press Save."
+        if unknown:
+            message += (" Some {{tags}} do not match a column in your contacts: "
+                        + ", ".join(unknown))
+        self.notify(message, "warn" if unknown else "success", 9000)
+        self.tabs.set("Subjects" if sheet.subjects else "Message")
+
+    def _save_sample_sheet(self) -> None:
+        path, _filter = QFileDialog.getSaveFileName(
+            self, "Save a blank sheet for your subjects and messages", "my message.xlsx",
+            "Excel (*.xlsx)")
+        if not path:
+            return
+        Task(importer.write_template_sample, path, EXAMPLE_SUBJECTS, EXAMPLE_BODIES,
+             EXAMPLE_SIGNATURE).start(
+            on_result=self.guard(lambda saved: self.notify(
+                f"Saved {Path(saved).name}. It has examples in it: change them, save the file "
+                f"and import it here", "success", 8000)),
+            on_error=self.guard(lambda message: self.notify(
+                f"Could not save the sheet: {message}", "error", 8000)))
 
     # --- preview ------------------------------------------------------------
     def _build_preview(self) -> QWidget:
@@ -942,5 +1090,11 @@ class TemplatesPage(Page):
         self.save_status.setText("")
 
     def on_show(self) -> None:
+        self._refresh_tag_bars()
+        box = getattr(self, "unsubscribe_box", None)
+        if box is not None:
+            box.blockSignals(True)
+            box.setChecked(bool(db.get_setting("unsubscribe_note", True)))
+            box.blockSignals(False)
         if self.tabs.current() == "Preview & score":
             self.refresh_preview()

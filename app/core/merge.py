@@ -19,7 +19,9 @@ _TITLES = re.compile(
 )
 _SUFFIXES = re.compile(r"[,;]\s*(ceo|cfo|coo|md|gm|manager|director|llc|l\.l\.c).*$", re.IGNORECASE)
 
-TAG_PATTERN = re.compile(r"\{\{\s*([A-Za-z0-9 _\-]+?)\s*\}\}")
+# Anything between double braces is a tag name, so a spreadsheet heading such as
+# "Phone No." or "Website / URL" works as {{Phone No.}} exactly as it reads.
+TAG_PATTERN = re.compile(r"\{\{\s*([^{}\n]+?)\s*\}\}")
 _SPIN_INNERMOST = re.compile(r"\{([^{}]*)\}")
 
 BUILTIN_TAGS = ["FirstName", "FullName", "Company", "Email", "Domain"]

@@ -93,11 +93,13 @@ def sent_dataframe() -> pd.DataFrame:
     pasted back into the master file.
     """
     rows = db.query(
-        "SELECT c.email, c.company, c.person, c.extra_json, c.replied_at, c.bounced_at, "
-        "r.status, r.attempts, r.subject_used, r.sent_at, r.last_error "
-        "FROM campaign_recipients r JOIN contacts c ON c.id = r.contact_id "
-        "WHERE r.status IN ('sent', 'failed', 'bounced') "
-        "ORDER BY r.sent_at IS NULL, r.sent_at DESC, r.rowid DESC"
+        "SELECT s.email, s.company, s.person, s.extra_json, s.status, s.attempts, "
+        "s.subject AS subject_used, s.sent_at, s.last_error, "
+        "COALESCE(s.replied_at, c.replied_at) AS replied_at, "
+        "COALESCE(s.bounced_at, c.bounced_at) AS bounced_at "
+        "FROM sent_log s LEFT JOIN contacts c ON c.email = s.email "
+        "WHERE s.status IN ('sent', 'failed', 'bounced') "
+        "ORDER BY s.sent_at IS NULL, s.sent_at DESC, s.id DESC"
     )
 
     records = []

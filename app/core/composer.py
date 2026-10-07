@@ -1,8 +1,8 @@
 """Builds the outgoing message.
 
 Every message is multipart/alternative (HTML + a generated plain-text part),
-carries proper List-Unsubscribe headers, and deliberately omits any X-Mailer
-header. Bulk tools that advertise themselves in the headers get filtered.
+carries proper List-Unsubscribe headers unless the user switched the unsubscribe
+line off, and deliberately omits any X-Mailer header. Bulk tools that advertise themselves in the headers get filtered.
 """
 from __future__ import annotations
 
@@ -243,9 +243,14 @@ def build_message(
     if sender.reply_to.strip():
         message["Reply-To"] = sender.reply_to.strip()
 
-    # Native unsubscribe button in Gmail / Outlook, no website required
-    message["List-Unsubscribe"] = f"<mailto:{sender.reply_to.strip() or sender.email}?subject=Unsubscribe>"
-    message["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+    # Native unsubscribe button in Gmail / Outlook, no website required. It goes
+    # with the footer: both mark the message as bulk mail, which is what Gmail
+    # files under Promotions, so switching the line off drops the header too and
+    # the email reads as an ordinary one-to-one message. Anyone who replies
+    # "unsubscribe" is still taken off the list by the inbox check either way.
+    if content.unsubscribe_note:
+        message["List-Unsubscribe"] = f"<mailto:{sender.reply_to.strip() or sender.email}?subject=Unsubscribe>"
+        message["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
 
     message.set_content(text_body)
     message.add_alternative(full_html, subtype="html")
