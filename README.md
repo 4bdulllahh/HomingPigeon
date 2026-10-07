@@ -14,8 +14,13 @@ correctly, cleans your contact list before you send, makes every message slightl
 sends at a human pace, and quietly removes addresses that bounce. It runs on your own computer,
 and your contacts never leave it.
 
-**Download:** [latest release](../../releases/latest) · **Version:** 0.6.0 (free beta) ·
-**Works on:** Windows, Mac and Linux
+**New in 0.7.0:** the app in five languages (Arabic reads right to left), a spam score that
+reads the finished email and tells you whether it will land in the main inbox, Gmail's
+Promotions tab or spam, and example messages written to reach the main inbox.
+
+**Download:** [latest release](../../releases/latest) · **Version:** 0.7.0 (free beta) ·
+**Works on:** Windows, Mac and Linux · **Languages:** English, العربية, Deutsch, Español,
+Français
 
 ![The HomingPigeon dashboard: emails sent today, sendable contacts, replies and bounce rate, sending health checks, the current campaign and recent activity](docs/screenshots/home-dark.png)
 
@@ -79,14 +84,16 @@ and your contacts never leave it.
 
 | | |
 |---|---|
-| ![The Contacts page listing imported contacts with company, contact person, status, source file and extra spreadsheet columns](docs/screenshots/contacts-dark.png) | ![The Templates page previewing one personalised email next to its spam score of 82 and advice for improving it](docs/screenshots/templates-dark.png) |
-| **My contacts.** Your imported list, searchable and sortable, with every column from your spreadsheet. | **My message.** A live preview for a real contact, next to the spam score and what to fix. |
+| ![The Contacts page listing imported contacts with company, contact person, status, source file and extra spreadsheet columns](docs/screenshots/contacts-dark.png) | ![The My message page previewing one personalised email next to its spam score of 97, the estimate that it will land in the main inbox, and advice](docs/screenshots/templates-dark.png) |
+| **My contacts.** Your imported list, searchable and sortable, with every column from your spreadsheet. | **My message.** The finished email for a real contact, its spam score, where it will land (main inbox, Promotions or spam) and what to change. |
 | ![The Sent emails page with a table of every email sent, its outcome and the subject used](docs/screenshots/sent-dark.png) | ![The My inbox page with two replies and one bounce, each labelled](docs/screenshots/inbox-dark.png) |
 | **Sent emails.** Every message that went out, and what came back. Exports to Excel. | **My inbox.** Replies, bounces and opt-outs, readable inside the app. |
 | ![The Deliverability page building an SPF record from a list of email services](docs/screenshots/deliverability-dark.png) | ![The Send page with its before-you-send checklist, counters and the Start Emailing button](docs/screenshots/send-dark.png) |
 | **Domain check.** Checks your domain and writes SPF, DMARC and DKIM records for you. | **Send emails.** A checklist first, then sending at a human pace that you can pause any time. |
 | ![The update popup saying a new version is available, with Update later and Update now buttons](docs/screenshots/update-popup.png) | ![The dashboard in the light theme](docs/screenshots/home-light.png) |
 | **Automatic updates.** One click to update; the app reopens by itself. | **Light theme.** Or dark, or match your computer, at five text sizes. |
+| ![The dashboard in Arabic, with the whole layout mirrored to read from right to left](docs/screenshots/home-arabic.png) | ![The Settings page in German, with the language choice at the top: English, Arabic, German, Spanish and French](docs/screenshots/settings-german.png) |
+| **Arabic, right to left.** The whole app mirrors to read naturally in Arabic. | **Five languages.** Pick yours in Settings; every page changes straight away. |
 
 ---
 
@@ -94,7 +101,7 @@ and your contacts never leave it.
 
 You don't need to know anything about coding.
 
-1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.6.0.zip`**.
+1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.7.0.zip`**.
 2. Right-click the downloaded file → **Extract All...** → **Extract**.
 3. In the folder that opens, double-click **`HomingPigeon Setup.exe`**.
 4. Click **Install**. Setup shows you every step while it works: it downloads what the app needs
@@ -165,6 +172,14 @@ installs it (Linux). From then on, the Start file opens the app straight away.
 
 The very first time it opens, everything is empty. Go to the **Start here** page inside the app
 and follow it from the top. It walks you through every step and ticks them off as you go.
+
+**Your language.** The app starts in your computer's language if it is English, Arabic, German,
+Spanish or French. Change it any time in **Settings → Language**.
+
+**Getting into the main inbox.** On **My message**, press **? How to write your email** for the
+short guide to staying out of spam and Gmail's Promotions tab, or **Show me an example** to start
+from a message already written that way. **Preview & score** tells you where each email is likely
+to land.
 
 **Everything you type is saved automatically.** Close the app and open it again, and your email
 settings, templates and contacts are all still there. You only set it up once.
@@ -311,10 +326,10 @@ Then in the app set the server to `localhost`, port `1025`, security **None (tes
 
 ### Making a release
 
-1. Change `APP_VERSION` in `app/config.py` (for example to `"v0.6.0 beta"`), commit and push.
+1. Change `APP_VERSION` in `app/config.py` (for example to `"v0.7.0 beta"`), commit and push.
 2. On GitHub: **Releases → Draft a new release**. Under **Choose a tag**, type the version
-   (`v0.6.0`) and pick **Create new tag on publish**. Give it a title and notes, then **Publish**.
-3. GitHub Actions builds `HomingPigeon-v0.6.0.zip` and attaches it to the release by itself
+   (`v0.7.0`) and pick **Create new tag on publish**. Give it a title and notes, then **Publish**.
+3. GitHub Actions builds `HomingPigeon-v0.7.0.zip` and attaches it to the release by itself
    (about 5 minutes, watch progress in the **Actions** tab).
 
 Installed copies notice the new release the next time they open. Until the zip is attached,
@@ -322,7 +337,7 @@ their popup's **Update now** opens the release page instead of updating, so noth
 the build is still running.
 
 To build it on your own PC instead: `python tools/build_installer.py`, then drag
-`dist\HomingPigeon-v0.6.0.zip` into the release's **Attach binaries** box.
+`dist\HomingPigeon-v0.7.0.zip` into the release's **Attach binaries** box.
 
 ## A note on DKIM
 

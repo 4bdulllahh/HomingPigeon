@@ -58,21 +58,38 @@ def fill_demo_data() -> None:
     db.execute_many("INSERT INTO contacts (email, company, person, extra_json, source_file, "
                     "imported_at, valid, risk_flags) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
 
+    # Written the way the built-in examples are: short, personal, no links, one
+    # question, unsubscribe line off. That is what scores well and reaches the
+    # main inbox, so it is what the My message screenshot shows.
+    db.set_setting("unsubscribe_note", False)
+    db.set_setting("attach_mode", "none")
     set_id = db.execute("INSERT INTO template_sets (name, signature_html, created_at) VALUES (?, ?, ?)",
-                        ("Autumn outreach", "<p>Jamie Reed<br>Sparrow Supplies</p>", db.now()))
+                        ("Autumn outreach",
+                         "Jamie Reed\nFounder, Sparrow Supplies\nPhone: +44 113 496 0000\n"
+                         "12 Mill Street, Leeds, UK", db.now()))
     db.set_setting("template_set_id", set_id)
-    for position, text in enumerate(["Packaging for {{Company}}?", "A quick idea for {{Company}}",
-                                     "{{FirstName}}, eco packaging samples"]):
+    for position, text in enumerate(["{Quick question|A question} about {{Company}}",
+                                     "{{FirstName}}, {a quick question|one question} for you",
+                                     "Packaging for the team at {{Company}}"]):
         db.execute("INSERT INTO subjects (set_id, text, position) VALUES (?, ?, ?)", (set_id, text, position))
     bodies = [
-        ("Short and friendly",
-         "<p>Hi {{FirstName}},</p><p>I run Sparrow Supplies, a small team making compostable "
-         "packaging for independent shops like {{Company}}. Would a free box of samples be "
-         "useful?</p><p>Happy to send some over this week.</p>"),
-        ("With a question",
-         "<p>Hello {{FirstName}},</p><p>Do you still wrap orders at {{Company}} in plastic? We "
-         "make plastic-free packaging that costs about the same, and I'd love to send you a few "
-         "samples to try.</p>"),
+        ("Short and friendly", "\n\n".join([
+            "{Hi|Hello} {{FirstName}},",
+            "I came across {{Company}} while looking at independent businesses in {{City}}, and "
+            "I wanted to get in touch personally.",
+            "I run Sparrow Supplies, a small team making compostable packaging for shops like "
+            "yours. Most of the people we work with came to us because plastic wrapping was "
+            "costing them more than it should, in money and in customer goodwill.",
+            "Would it be useful if I posted a few samples over to you next week?",
+            "{Thanks|Many thanks},"])),
+        ("With a question", "\n\n".join([
+            "{Hi|Hello} {{FirstName}},",
+            "I hope you do not mind me writing to you directly. I work at Sparrow Supplies, "
+            "where we make plastic-free packaging for businesses like {{Company}}.",
+            "A cafe similar to yours told us recently that switching away from plastic took far "
+            "more of their time than it should. We sorted that out for them within a few weeks.",
+            "Is that something you are thinking about at {{Company}} as well?",
+            "{Best wishes|Kind regards},"])),
     ]
     for position, (name, html) in enumerate(bodies):
         db.execute("INSERT INTO bodies (set_id, name, html, position) VALUES (?, ?, ?, ?)",
@@ -182,7 +199,7 @@ def main() -> int:
             from app.ui.widgets.update_dialog import UpdateDialog
 
             release = updater.Release(
-                tag="v0.7.0", page_url=f"{config.REPO_URL}/releases",
+                tag="v0.7.1", page_url=f"{config.REPO_URL}/releases",
                 notes="* Faster imports\n* A new template for follow-ups\n* Fixes for the inbox")
             updater.can_update_itself = lambda _release=None: True   # show the installed wording
             dialog = UpdateDialog(window, release)
@@ -194,6 +211,30 @@ def main() -> int:
             dialog.close()
         window.close()
         settle(200)
+
+    # The same app in other languages: Arabic reads right to left
+    from app import i18n
+
+    db.set_setting("appearance", "Dark")
+    theme.apply_preferences()
+    app.setStyleSheet(theme.stylesheet())
+    for code, key, name in (("ar", "dashboard", "home-arabic"), ("de", "settings", "settings-german")):
+        i18n.set_language(code)
+        app.setLayoutDirection(Qt.LayoutDirection.RightToLeft if i18n.is_rtl()
+                               else Qt.LayoutDirection.LeftToRight)
+        window = MainWindow()
+        window.resize(*SIZE)
+        window.show()
+        settle(1200)
+        window.show_page(key)
+        settle(800)
+        path = OUT / f"{name}.png"
+        window.grab().save(str(path))
+        print(f"saved {path.relative_to(ROOT)}")
+        window.close()
+        settle(200)
+    i18n.set_language("en")
+    app.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
 
     db.close()
     return 0
