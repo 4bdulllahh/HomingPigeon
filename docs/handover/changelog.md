@@ -2,6 +2,19 @@
 
 Newest first. Add to the top when you change something.
 
+## v0.6.3 beta
+
+- Fixed the GitHub build, which failed one test on v0.6.2. GitHub installs the
+  newest pandas (3.x), which writes a Windows line break into an .xlsx as two
+  line breaks; the test fed one in and got an extra blank line back. The test
+  now uses a plain line break, as Excel does, and a separate test checks every
+  carriage-return variant directly. Reading line breaks from a spreadsheet
+  (`importer._cell_text`) is also more forgiving of how different library
+  versions unpack Excel's escaped `_x000D_`.
+- Lesson: CI uses the newest versions allowed by `requirements.txt`, which can
+  be newer than the ones on the development PC. When a test passes locally but
+  fails on GitHub, compare `pandas`/`openpyxl` versions first.
+
 ## v0.6.2 beta
 
 - **Unsubscribe line is optional.** New switch on My message, Signature tab

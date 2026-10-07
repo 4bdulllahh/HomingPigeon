@@ -843,7 +843,10 @@ def test_subjects_and_messages_are_read_by_heading(tmp_path):
     path = tmp_path / "message.xlsx"
     pd.DataFrame({
         "Subject line": ["Hello {{Company}}", "A question", "Hello {{Company}}"],
-        "Email body": ["Hi {{FirstName}},\r\nLine two", "", "Second message"],
+        # A plain line break, as Excel's Alt+Enter makes. Carriage returns are
+        # tested on their own below: pandas 3 writes "\r\n" into a file as two
+        # line breaks, so it cannot be round-tripped through to_excel here.
+        "Email body": ["Hi {{FirstName}},\nLine two", "", "Second message"],
         "Signature": ["Sam\nAcme", "", ""],
         "Notes": ["ignored", "", ""],
     }).to_excel(path, index=False)
@@ -851,6 +854,12 @@ def test_subjects_and_messages_are_read_by_heading(tmp_path):
     assert sheet.subjects == ["Hello {{Company}}", "A question"]
     assert sheet.bodies == ["Hi {{FirstName}},\nLine two", "Second message"]
     assert sheet.signature == "Sam\nAcme"
+
+
+@pytest.mark.parametrize("raw", ["a_x000D_\nb", "a\r\r\nb", "a_x000D_\r\nb", "a\r\nb", "a\rb"])
+def test_every_form_of_an_excel_line_break_becomes_one_new_line(raw):
+    """Library versions unpack Excel's escaped carriage return differently."""
+    assert importer._cell_text(raw) == "a\nb"
 
 
 def test_a_sheet_without_headings_is_subjects_then_messages(tmp_path):

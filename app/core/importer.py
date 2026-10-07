@@ -456,7 +456,11 @@ def _template_role(header: str) -> str | None:
 def _cell_text(value: Any) -> str:
     if value is None:
         return ""
-    text = str(value).replace("_x000D_", "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    # Excel writes a Windows line break as an escaped "_x000D_" followed by the
+    # real break, and library versions unpack that differently: one line break,
+    # or a stray carriage return as well. Every form becomes a single new line.
+    text = str(value).replace("_x000D_", "\r")
+    text = re.sub(r"\r+\n", "\n", text).replace("\r", "\n").strip()
     return "" if text.lower() in {"nan", "none"} else text
 
 
