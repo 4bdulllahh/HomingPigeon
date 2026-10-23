@@ -28,7 +28,8 @@ The direction of imports is one way: `ui` uses `models`, `workers` and `core`;
 | `composer.py` | Builds the MIME message: typed text to HTML, signature, brochure link, optional unsubscribe line and header |
 | `scorer.py` | The spam score: renders the finished email for one contact and checks it, plus checks across every version; estimates Primary / Promotions / Spam |
 | `sender.py` | The send worker thread: pacing, office hours, daily cap, circuit breakers, writes status after every email |
-| `warmup.py` | The daily cap that rises over the first weeks |
+| `warmup.py` | The daily cap that rises over the first weeks: presets and the user's own plan |
+| `design.py` | Email designs: blocks, starting designs, pictures, the email HTML, storage |
 | `imap_sync.py` | Reads the inbox: bounces, unsubscribe replies, genuine replies |
 | `dns_tools.py` | MX, SPF, DKIM, DMARC checks and generators |
 | `exporter.py` | Writes results back to Excel |
@@ -69,6 +70,7 @@ first time it is opened. Page keys:
 | deliverability | pages/deliverability.py | Domain check |
 | contacts | pages/contacts.py | My contacts |
 | templates | pages/templates.py | My message |
+| design | pages/design.py | Email design |
 | campaign | pages/campaign.py | Sending options |
 | send | pages/send.py | Send emails |
 | sent | pages/sent.py | Sent emails |

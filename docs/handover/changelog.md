@@ -2,6 +2,31 @@
 
 Newest first. Add to the top when you change something.
 
+## v0.7.1 beta
+
+- **Email design page** (new, between My message and Sending options). A
+  Canva-style editor: blocks on the left (heading, text, quote, links row, logo,
+  banner, picture, video, button, social icons, two columns, card, line, empty
+  space, footer, your own HTML), a live clickable picture of the email in the
+  middle, settings for the selected block or the whole email on the right.
+  Eight starting designs, undo/redo, computer and phone views, a brand kit
+  (logo, colours, font), several saved designs, save to and open from a
+  `.hpdesign` file, open in browser and send me a test. The design is a frame:
+  the "Your message" block is where each person's mixed message goes, so the
+  anti-spam variety still works. Pictures are shrunk and sent inside the email
+  as inline parts (cid:). New `app/core/design.py`, `app/ui/pages/design.py`,
+  `app/ui/widgets/email_canvas.py`, table `designs` (schema 3).
+- **Warm-up plans.** Very safe, Safe (recommended, the new default), Faster (the
+  old ramp) and My own plan, with a box per day that three numbers can fill in
+  and a warning when a plan grows faster than is safe. Existing users move to
+  Safe; pick Faster on Sending options to keep the old speed.
+- **My message:** a new subject or message is added at the top, and the
+  personal-touch buttons, style buttons and Add button stay pinned at the top
+  while the list scrolls (`StickyBar` in `widgets/common.py`).
+- Tests: a fixture now deletes each UI test's windows when it ends. Without it
+  they piled up and the next test that waited on the event loop crashed Qt
+  (this was already true in v0.7.0, just never triggered).
+
 ## v0.7.0 beta
 
 - **Five languages.** English, Arabic, German, Spanish and French, chosen in

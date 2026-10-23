@@ -28,6 +28,7 @@ user ticks "delete my data" in Settings.
 | `events` | Activity log | |
 | `warmup_state` | Daily cap ramp | |
 | `scores` | Spam score history | |
+| `designs` | Email designs (v0.7.1) | `data` is the design as JSON, pictures included. See `app/core/design.py` |
 | `imap_state`, `inbox_messages` | Inbox check position and the readable inbox | Trimmed to 800 messages |
 
 ### sent_log in detail
@@ -56,6 +57,8 @@ user ticks "delete my data" in Settings.
 | `attach_mode`, `attachment_path`, `link_url`, `link_text` | Brochure: link, attachment or none |
 | `delay_min_s`, `delay_max_s`, `window_start`, `window_end`, `weekdays_only`, `skip_holidays`, `holidays` | Pacing and office hours |
 | `warmup_enabled`, `manual_daily_cap`, `provider_limit*` | Daily cap |
+| `warmup_preset`, `warmup_ramp` | Warm-up plan: `very_safe`, `safe` (default), `faster` or `custom`, and the custom list of daily caps (v0.7.1) |
+| `design_id`, `brand_kit` | The design emails are sent with (0 = plain) and the brand kit (v0.7.1) |
 | `appearance`, `text_size`, `high_contrast`, `bold_text`, `date_format`, `time_format`, `start_page`, `last_page` | Look and feel (`app/core/prefs.py`) |
 | `contacts_sort` | Remembered sort on My contacts |
 | `language` | `en`, `ar`, `de`, `es` or `fr`. Empty until chosen in Settings: then the computer's language is used if supported, else English |
@@ -75,4 +78,5 @@ Users upgrade in place and keep their database, so every schema change needs:
 or rename freely on old versions, so prefer adding.
 
 History: version 1 was every release up to v0.6.1. Version 2 (v0.6.2) added
-`sent_log` and copies existing sends into it (`backfill_sent_log`).
+`sent_log` and copies existing sends into it (`backfill_sent_log`). Version 3
+(v0.7.1) added the `designs` table; nothing to copy.

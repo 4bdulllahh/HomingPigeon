@@ -12,13 +12,14 @@ from PyQt6.QtCore import QEvent, Qt, QTimer
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import QFileDialog, QInputDialog, QSplitter, QVBoxLayout, QWidget
 
-from app.core import composer, db, examples, importer, merge, scorer
+from app.core import composer, db, design, examples, importer, merge, scorer
 from app.i18n import t
 from app.ui import theme
 from app.ui.pages.base import Page
-from app.ui.widgets.common import (Card, ScrollPage, TabBar, body, clear_layout, danger_button,
-                                   heading, hint, muted, primary_button, row, secondary_button,
-                                   separator, set_tone, small_button, subheading)
+from app.ui.widgets.common import (Card, ScrollPage, StickyBar, TabBar, body, clear_layout,
+                                   column, danger_button, heading, hint, muted, primary_button,
+                                   row, secondary_button, separator, set_tone, small_button,
+                                   subheading)
 from app.ui.widgets.dialogs import ChoiceDialog, InfoDialog
 from app.ui.widgets.inputs import Debouncer, checkbox, get_text, read_only_box, set_text, text_box
 from app.workers import jobs
@@ -38,7 +39,7 @@ SEVERITY_NAMES = {"critical": "Critical", "high": "High", "medium": "Medium", "l
 
 EMPTY_HINT = ("Nothing here yet.\n\n"
               "Press \"Show me an example\" to start from a ready-made one you can change, "
-              "or the Add button to write your own from scratch.")
+              "or the Add button above to write your own from scratch.")
 
 # What each "personal touch" button puts in, in words a first-time user follows
 TAG_HELP = {
@@ -351,7 +352,7 @@ class TemplatesPage(Page):
         self._subject_pick = 0
         self._body_pick = 0
         self._preview_html = ""
-        self._tag_layouts: dict[bool, object] = {}
+        self._tag_layouts: dict[bool, list] = {}    # multiline -> every bar showing the tags
         self._tag_names: list[str] = []
 
         # Everything above the Save button scrolls as one page. It used to be a
@@ -408,12 +409,12 @@ class TemplatesPage(Page):
 
     # --- merge tags ---------------------------------------------------------
     def _target(self, multiline: bool) -> VariantEditor | None:
-        """The box the toolbar buttons act on: the last one typed in, else the last one."""
+        """The box the toolbar buttons act on: the last one typed in, else the top one."""
         editors = self.body_editors if multiline else self.subject_editors
         focused = self._focused.get(multiline)
         if focused in editors:
             return focused
-        return editors[-1] if editors else None
+        return editors[0] if editors else None
 
     def _remember_focus(self, editor: VariantEditor) -> None:
         self._focused[editor.multiline] = editor
@@ -422,13 +423,16 @@ class TemplatesPage(Page):
         from app.ui.widgets.common import flow_row
 
         container, layout = flow_row(4)
-        self._tag_layouts[multiline] = layout
-        self._fill_tag_bar(multiline, importer.merge_tag_names())
+        self._tag_layouts.setdefault(multiline, []).append(layout)
+        self._fill_layout(layout, multiline, importer.merge_tag_names())
         return container
 
     def _fill_tag_bar(self, multiline: bool, names: list[str]) -> None:
+        for layout in self._tag_layouts.get(multiline, []):
+            self._fill_layout(layout, multiline, names)
+
+    def _fill_layout(self, layout, multiline: bool, names: list[str]) -> None:
         """One button per tag: the built-in ones, then every column of the spreadsheet."""
-        layout = self._tag_layouts[multiline]
         clear_layout(layout)
         self._tag_names = list(names)
         label = hint("Personal touch:", wrap=False)
@@ -503,12 +507,13 @@ class TemplatesPage(Page):
         layout.setSpacing(6)
         return holder, layout
 
-    def _reveal(self, editor: VariantEditor) -> None:
-        """Scroll a newly added box into view and put the cursor in it."""
+    def _reveal(self, editor: VariantEditor, sticky: StickyBar | None = None) -> None:
+        """Scroll a newly added box into view, clear of the toolbar, and put the cursor in it."""
         def show() -> None:
             if sip.isdeleted(self) or sip.isdeleted(editor):
                 return
-            self.scroll.ensureWidgetVisible(editor, 0, round(40 * theme.text_scale()))
+            covered = sticky.bar.sizeHint().height() if sticky is not None else 0
+            self.scroll.ensureWidgetVisible(editor, 0, covered + round(16 * theme.text_scale()))
             editor.editor.setFocus()
 
         # Once the layout has made room for it
@@ -525,32 +530,43 @@ class TemplatesPage(Page):
         layout.addWidget(muted(
             "The subject is the line people see in their inbox before they open your email. "
             "Write 3 or more and each person gets one of them."))
-        layout.addWidget(self._tag_bar(False))
+        # The tags and the Add button stay in view while the list scrolls
+        self._subjects_sticky = StickyBar(self.scroll, lambda: column(
+            self._tag_bar(False),
+            row(primary_button("+ Add a subject line", self._new_subject, 190),
+                secondary_button("Show me an example", self._example_subjects, 190), None)))
+        layout.addWidget(self._subjects_sticky)
 
         self.subjects_list, self.subjects_layout = self._list_holder()
         layout.addWidget(self.subjects_list)
         self._subjects_hint = muted(EMPTY_HINT)
         self.subjects_layout.addWidget(self._subjects_hint)
-
-        layout.addWidget(row(
-            primary_button("+ Add a subject line", self._new_subject, 190),
-            secondary_button("Show me an example", self._example_subjects, 190), None))
         layout.addStretch(1)
         self._refresh_empty_hints()
         return holder
 
     def _new_subject(self) -> None:
-        self._reveal(self._add_subject(""))
+        # A new one goes at the top, right under the toolbar, not below the whole list
+        self._reveal(self._add_subject("", at_top=True), self._subjects_sticky)
 
-    def _add_subject(self, text: str, enabled: bool = True) -> VariantEditor:
+    def _add_subject(self, text: str, enabled: bool = True, at_top: bool = False) -> VariantEditor:
         editor = VariantEditor(text, enabled, multiline=False, on_change=self._content_changed,
                                on_delete=self._remove_subject,
                                index=len(self.subject_editors) + 1,
                                on_focus=self._remember_focus)
-        self.subjects_layout.addWidget(editor)
-        self.subject_editors.append(editor)
-        self._refresh_empty_hints()
+        self._place(editor, self.subjects_layout, self.subject_editors, at_top)
         return editor
+
+    def _place(self, editor: VariantEditor, layout: QVBoxLayout, editors: list[VariantEditor],
+               at_top: bool) -> None:
+        if at_top:
+            layout.insertWidget(0, editor)
+            editors.insert(0, editor)
+            self._renumber(editors)
+        else:
+            layout.addWidget(editor)
+            editors.append(editor)
+        self._refresh_empty_hints()
 
     def _remove_subject(self, editor: VariantEditor) -> None:
         self.subject_editors.remove(editor)
@@ -573,31 +589,29 @@ class TemplatesPage(Page):
             "an empty line between paragraphs. Write 2 or 3 versions. Your signature (and the "
             "unsubscribe line, if it is switched on in the Signature tab) is added at the bottom "
             "for you."))
-        layout.addWidget(self._tag_bar(True))
-        layout.addWidget(self._format_bar())
+        self._bodies_sticky = StickyBar(self.scroll, lambda: column(
+            self._tag_bar(True),
+            self._format_bar(),
+            row(primary_button("+ Add a message", self._new_body, 190),
+                secondary_button("Show me an example", self._example_body, 190), None)))
+        layout.addWidget(self._bodies_sticky)
 
         self.bodies_list, self.bodies_layout = self._list_holder()
         layout.addWidget(self.bodies_list)
         self._bodies_hint = muted(EMPTY_HINT)
         self.bodies_layout.addWidget(self._bodies_hint)
-
-        layout.addWidget(row(
-            primary_button("+ Add a message", self._new_body, 190),
-            secondary_button("Show me an example", self._example_body, 190), None))
         layout.addStretch(1)
         self._refresh_empty_hints()
         return holder
 
     def _new_body(self) -> None:
-        self._reveal(self._add_body(""))
+        self._reveal(self._add_body("", at_top=True), self._bodies_sticky)
 
-    def _add_body(self, text: str, enabled: bool = True) -> VariantEditor:
+    def _add_body(self, text: str, enabled: bool = True, at_top: bool = False) -> VariantEditor:
         editor = VariantEditor(text, enabled, multiline=True, on_change=self._content_changed,
                                on_delete=self._remove_body, index=len(self.body_editors) + 1,
                                on_focus=self._remember_focus)
-        self.bodies_layout.addWidget(editor)
-        self.body_editors.append(editor)
-        self._refresh_empty_hints()
+        self._place(editor, self.bodies_layout, self.body_editors, at_top)
         return editor
 
     def _remove_body(self, editor: VariantEditor) -> None:
@@ -890,6 +904,7 @@ class TemplatesPage(Page):
             link_url=db.get_setting("link_url", ""),
             link_text=db.get_setting("link_text", "View our brochure"),
             unsubscribe_note=bool(db.get_setting("unsubscribe_note", True)),
+            design=design.active(),
         )
 
     def _identity(self) -> composer.SenderIdentity:

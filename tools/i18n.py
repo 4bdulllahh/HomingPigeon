@@ -33,7 +33,8 @@ TEXT_FILES = sorted(
     + list((ROOT / "app" / "models").glob("*.py"))
     + [ROOT / "app" / "core" / name for name in (
         "sender.py", "imap_sync.py", "importer.py", "dns_tools.py", "warmup.py",
-        "credentials.py", "exporter.py", "prefs.py", "shortcut.py", "scorer.py", "db.py")]
+        "credentials.py", "exporter.py", "prefs.py", "shortcut.py", "scorer.py", "db.py",
+        "design.py")]
     + list((ROOT / "app" / "services").glob("*.py"))
     + list((ROOT / "app" / "workers").glob("*.py"))
 )
@@ -45,7 +46,7 @@ SKIP_NAMES = {
     "BOUNCE_BODY_HINTS", "HARD_CODES", "SOFT_CODES", "ROLE_PREFIXES", "TYPO_DOMAINS",
     "EMAIL_HINTS", "COMPANY_HINTS", "PERSON_HINTS", "SEVERITY_WEIGHT", "SQL", "CSS",
     "DATE_FORMATS", "STATUS_ICONS", "ICONS", "BLACKLISTS", "DNSBLS", "COMMON_SELECTORS",
-    "hard_markers", "soft_markers", "SKIP_IN_PYTHON", "__all__",
+    "hard_markers", "soft_markers", "SKIP_IN_PYTHON", "__all__", "FONTS", "QUICK_COLOURS", "LINKS_EXAMPLE",
 }
 
 # Strings that pass every test below but are still not wording: folder names,
@@ -54,7 +55,7 @@ IGNORE = {
     "a mx", "Doc", "Scripts", "Lib", "Message-ID", "Desktop", "sign off",
     "db.init() must be called before db.connect()", "CryptProtectData failed",
     "CryptUnprotectData failed", "Start HomingPigeon - Mac.command",
-    "Start HomingPigeon - Linux.sh",
+    "Start HomingPigeon - Linux.sh", "Arial", "DejaVuSans-Bold.ttf", "DejaVuSans.ttf",
 }
 
 # Calls whose string arguments are identifiers, SQL, styles or file names

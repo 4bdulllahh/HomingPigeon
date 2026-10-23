@@ -9,7 +9,7 @@ from __future__ import annotations
 import webbrowser
 from typing import Callable
 
-from PyQt6.QtCore import (QEasingCurve, QEvent, QPropertyAnimation, Qt, QTimer,
+from PyQt6.QtCore import (QEasingCurve, QEvent, QPoint, QPropertyAnimation, Qt, QTimer,
                           pyqtSignal)
 from PyQt6.QtGui import QAction, QActionGroup, QGuiApplication
 from PyQt6.QtWidgets import (QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLayout,
@@ -672,6 +672,83 @@ class ScrollPage(QScrollArea):
 
     def clear(self) -> None:
         clear_layout(self.body_layout)
+
+
+class StickyBar(QWidget):
+    """A toolbar that stays at the top of a ScrollPage once it is scrolled past.
+
+    The personal-touch buttons sit above a long list of subjects or messages.
+    Without this, someone editing the sixth message had to scroll all the way
+    back up to drop a tag in. The toolbar sits in the page like any other
+    widget, and once it scrolls out of view an identical copy is shown pinned
+    to the top of the view, laid over the list.
+
+    The copy is built once by the same ``build`` function and only ever shown,
+    hidden and moved. Moving the real toolbar between parents while scrolling
+    looked simpler, but Qt crashes if a widget changes parent while a window is
+    closing and hiding its children.
+    """
+
+    def __init__(self, scroll: QScrollArea, build: Callable[[], QWidget], parent=None):
+        super().__init__(parent)
+        self.setProperty("role", "plain")
+        self._scroll = scroll
+        pad = round(8 * theme.text_scale())
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, pad, 0, pad)
+        layout.addWidget(build())
+
+        self.bar = QFrame(scroll)
+        self.bar.setProperty("role", "sticky")
+        self.bar.setProperty("floating", "on")
+        bar_layout = QVBoxLayout(self.bar)
+        bar_layout.setContentsMargins(0, pad, 0, pad)
+        bar_layout.addWidget(build())
+        self.bar.hide()
+
+        scroll.verticalScrollBar().valueChanged.connect(self._place)
+        # The copy belongs to the scroll view; it must go when this does
+        self.destroyed.connect(self.bar.deleteLater)
+
+    @property
+    def floating(self) -> bool:
+        return self.bar.isVisible()
+
+    def covered_height(self) -> int:
+        """How much of the top of the view the copy covers while it is showing."""
+        return self.bar.height() if self.floating else 0
+
+    def resizeEvent(self, event):  # noqa: N802 - Qt naming
+        super().resizeEvent(event)
+        self._place()
+
+    def showEvent(self, event):  # noqa: N802 - Qt naming
+        super().showEvent(event)
+        self._place()
+
+    def hideEvent(self, event):  # noqa: N802 - Qt naming
+        # Another tab is on screen: the copy must not stay over it
+        self.bar.hide()
+        super().hideEvent(event)
+
+    def _place(self, *_args) -> None:
+        if not self.isVisible():
+            self.bar.hide()
+            return
+        viewport = self._scroll.viewport()
+        top_left = self.mapTo(viewport, QPoint(0, 0))
+        if top_left.y() >= 0:
+            self.bar.hide()
+            return
+        width = self.width()
+        layout = self.bar.layout()
+        height = layout.totalHeightForWidth(width) if layout.hasHeightForWidth() \
+            else self.bar.sizeHint().height()
+        origin = viewport.geometry().topLeft()
+        self.bar.setGeometry(origin.x() + top_left.x(), origin.y(), width, height)
+        self.bar.show()
+        self.bar.raise_()
 
 
 def clear_layout(layout: QLayout) -> None:

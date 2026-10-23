@@ -4,8 +4,8 @@ from __future__ import annotations
 from typing import Callable
 
 from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
-from PyQt6.QtWidgets import (QCheckBox, QComboBox, QCompleter, QLineEdit, QPlainTextEdit,
-                             QRadioButton, QWidget)
+from PyQt6.QtWidgets import (QAbstractSpinBox, QCheckBox, QComboBox, QCompleter, QLineEdit,
+                             QPlainTextEdit, QRadioButton, QSpinBox, QWidget)
 
 from app.i18n import t
 from app.ui import theme
@@ -166,6 +166,21 @@ def checkbox(text: str, checked: bool = False, on_change: Callable | None = None
     return widget
 
 
+def spin_box(value: int, low: int, high: int, on_change: Callable | None = None,
+             suffix: str = "", parent=None) -> QSpinBox:
+    """A whole-number box. Like a drop-down, the wheel only changes it once clicked."""
+    widget = QSpinBox(parent)
+    widget.setRange(low, high)
+    widget.setValue(int(value))
+    if suffix:
+        widget.setSuffix(" " + suffix)
+    widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+    widget.installEventFilter(_WheelGuard.instance(widget))
+    if on_change:
+        widget.valueChanged.connect(on_change)
+    return widget
+
+
 def radio(text: str, checked: bool = False, on_change: Callable | None = None,
           parent=None) -> QRadioButton:
     widget = QRadioButton(t(text), parent)
@@ -202,7 +217,7 @@ def update_completer(widget: QLineEdit, options: list[str]) -> None:
 
 
 class _WheelGuard(QObject):
-    """Stops the wheel from changing a combo box that merely has the pointer over it.
+    """Stops the wheel changing a drop-down or number box that merely has the pointer over it.
 
     One guard for the whole application, owned by the application object. It
     used to be parented to whichever widget happened to ask for it first, and
@@ -232,7 +247,7 @@ class _WheelGuard(QObject):
     def eventFilter(self, obj, event):  # noqa: N802 - Qt naming
         from PyQt6.QtCore import QEvent
 
-        if event.type() == QEvent.Type.Wheel and isinstance(obj, QComboBox):
+        if event.type() == QEvent.Type.Wheel and isinstance(obj, (QComboBox, QAbstractSpinBox)):
             if not obj.hasFocus():
                 event.ignore()
                 return True

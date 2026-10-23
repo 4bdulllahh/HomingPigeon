@@ -179,7 +179,8 @@ def _render(content: composer.Content, context: dict, sender: composer.SenderIde
             subject_index: int, body_index: int, seed: int) -> _Email:
     """The same render the Preview tab shows, so the score matches what is on screen."""
     subject, html, text = composer.preview_message(
-        sender, context, content, subject_index=subject_index, body_index=body_index, seed=seed)
+        sender, context, content, subject_index=subject_index, body_index=body_index, seed=seed,
+        embed="cid")
     body_template = content.body_variants[body_index % len(content.body_variants)]
     body_html = merge.render(body_template, context, html=True, rng=random.Random(seed))
     return _Email(

@@ -43,6 +43,7 @@ class Content:
     link_url: str = ""
     link_text: str = "View our brochure"
     unsubscribe_note: bool = True
+    design: dict | None = None         # an email design (app/core/design.py), or None for plain
 
 
 class AttachmentTooLarge(ValueError):
@@ -220,6 +221,23 @@ def assemble_html(body_html: str, content: Content, sender: SenderIdentity) -> s
     )
 
 
+def assemble(body_html: str, content: Content, sender: SenderIdentity,
+             context: Mapping[str, str] | None = None, rng: random.Random | None = None,
+             embed: str = "cid") -> tuple[str, dict[str, tuple[bytes, str]]]:
+    """The finished HTML and its inline pictures, with the design if one is in use."""
+    if not content.design:
+        return assemble_html(body_html, content, sender), {}
+    from app.core import design
+
+    signature = text_to_html(content.signature_html).strip()         if content.signature_html.strip() else ""
+    return design.render(
+        content.design, message_html=text_to_html(body_html).strip(),
+        signature_html=signature, brochure_html=brochure_block(content),
+        unsubscribe_html=unsubscribe_footer(sender) if content.unsubscribe_note else "",
+        context=context, rng=rng, embed=embed,
+        rtl=is_right_to_left(html_to_text(body_html)))
+
+
 def check_attachment(path: str | Path) -> int:
     """Validate an attachment and return its size. Raises if missing or over the cap."""
     file_path = Path(path)
@@ -254,7 +272,7 @@ def build_message(
 
     subject = one_line(merge.render(subject_template, context, html=False, rng=rng))
     body_html = merge.render(body_template, context, html=True, rng=rng)
-    full_html = assemble_html(body_html, content, sender)
+    full_html, images = assemble(body_html, content, sender, context, rng)
     text_body = html_to_text(full_html)
 
     message = EmailMessage()
@@ -278,6 +296,14 @@ def build_message(
 
     message.set_content(text_body)
     message.add_alternative(full_html, subtype="html")
+    if images:
+        # Pictures of a design travel inside the email, referenced as cid:, so
+        # they show without the sender hosting them anywhere.
+        html_part = message.get_payload()[1]
+        for key, (data, mime) in images.items():
+            maintype, subtype = mime.split("/", 1)
+            html_part.add_related(data, maintype=maintype, subtype=subtype,
+                                  cid=f"<{key}@homingpigeon>", disposition="inline")
 
     if content.attach_mode == "attach" and content.attachment_path:
         file_path = Path(content.attachment_path)
@@ -299,8 +325,13 @@ def preview_message(
     subject_index: int = 0,
     body_index: int = 0,
     seed: int | None = 7,
+    embed: str = "data",
 ) -> tuple[str, str, str]:
-    """Deterministic render for the preview pane: (subject, html, text)."""
+    """Deterministic render for the preview pane: (subject, html, text).
+
+    Pictures of a design are written into the HTML itself (``embed="data"``)
+    so the preview opens in a browser; the scorer asks for cid: references.
+    """
     rng = random.Random(seed)
     subject_template = content.subject_variants[subject_index % len(content.subject_variants)] \
         if content.subject_variants else "(no subject variants)"
@@ -309,5 +340,6 @@ def preview_message(
 
     subject = one_line(merge.render(subject_template, context, html=False, rng=rng))
     body_html = merge.render(body_template, context, html=True, rng=random.Random(seed))
-    full_html = assemble_html(body_html, content, sender)
+    full_html, _images = assemble(body_html, content, sender, context, random.Random(seed),
+                                  embed=embed)
     return subject, full_html, html_to_text(full_html)

@@ -7,7 +7,7 @@ from datetime import datetime
 from PyQt6.QtGui import QTextCursor
 from PyQt6.QtWidgets import QHBoxLayout, QProgressBar, QVBoxLayout, QWidget
 
-from app.core import composer, credentials, db, importer, prefs, scorer, sender, warmup
+from app.core import composer, credentials, db, design, importer, prefs, scorer, sender, warmup
 from app.i18n import t
 from app.ui import theme
 from app.ui.pages.base import Page
@@ -218,6 +218,7 @@ class SendPage(Page):
             link_url=db.get_setting("link_url", ""),
             link_text=db.get_setting("link_text", "View our brochure"),
             unsubscribe_note=bool(db.get_setting("unsubscribe_note", True)),
+            design=design.active(),
         )
 
         try:

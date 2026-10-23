@@ -141,6 +141,65 @@ def fill_demo_data() -> None:
         db.log_event(level, category, message)
 
 
+def demo_pictures() -> tuple[dict, dict]:
+    """A logo and a photo-like picture for the Email design screenshot, drawn here."""
+    import io
+
+    from PIL import Image, ImageDraw, ImageFilter
+
+    from app.core import design
+
+    folder = Path(tempfile.mkdtemp(prefix="hp-pictures-"))
+    logo = Image.new("RGBA", (520, 120), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(logo)
+    draw.ellipse((6, 10, 106, 110), fill="#e8793a")
+    draw.polygon([(30, 70), (86, 38), (70, 84)], fill="#ffffff")
+    draw.text((126, 60), "Sparrow Supplies", fill="#1f2530", font=design._font(46), anchor="lm")
+    logo.save(folder / "logo.png")
+
+    photo = Image.new("RGB", (1200, 680), "#f3d9c4")
+    draw = ImageDraw.Draw(photo)
+    for y in range(680):
+        shade = int(232 - y * 0.06)
+        draw.line([(0, y), (1200, y)], fill=(shade, int(shade * 0.86), int(shade * 0.74)))
+    draw.rectangle((0, 470, 1200, 680), fill="#c9a27e")
+    for x, w, h, colour in ((170, 300, 230, "#d8b48c"), (500, 240, 300, "#e9cfa9"),
+                            (770, 280, 190, "#cfa57a")):
+        draw.rounded_rectangle((x, 520 - h, x + w, 540), radius=10, fill=colour)
+        draw.line([(x + w // 2, 520 - h), (x + w // 2, 540)], fill="#b98b5e", width=6)
+    draw.ellipse((940, 70, 1080, 210), fill="#fff4e0")
+    photo = photo.filter(ImageFilter.GaussianBlur(1.2))
+    out = io.BytesIO()
+    photo.save(out, "JPEG", quality=90)
+    (folder / "photo.jpg").write_bytes(out.getvalue())
+    return design.prepare_image(folder / "logo.png"), design.prepare_image(folder / "photo.jpg")
+
+
+def demo_design() -> int:
+    """A finished-looking design for the Email design screenshot. Returns its id."""
+    from app.core import design
+
+    logo, photo = demo_pictures()
+    design.save_brand_kit({"primary": "#e8793a", "text": "#2b2f36", "background": "#f6efe8",
+                           "font": "Helvetica", "logo": logo})
+    data = design.starter("welcome")
+    data["page"].update(bg="#f6efe8", bg2="#e6d9f2")
+    for block in data["blocks"]:
+        if block["type"] == "heading":
+            block["text"] = "A greener way to pack, {{FirstName}}"
+        elif block["type"] == "image":
+            block["image"] = design.add_asset(data, photo)
+        elif block["type"] == "button":
+            block["label"] = "Request free samples"
+        elif block["type"] == "footer":
+            block["text"] = "Sparrow Supplies\n12 Mill Street, Leeds, UK"
+    social = design.new_block("social", design.brand_kit())
+    social.update(linkedin="linkedin.com/company/sparrow", instagram="instagram.com/sparrow",
+                  website="sparrowsupplies.example")
+    data["blocks"].insert(len(data["blocks"]) - 1, social)
+    return design.save(data, "Spring samples")
+
+
 def main() -> int:
     from app import config
 
@@ -151,7 +210,7 @@ def main() -> int:
     config.DATA_DIR = data
 
     from PyQt6.QtCore import Qt
-    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtWidgets import QApplication, QScrollArea
 
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.RoundPreferFloor)
     app = QApplication(sys.argv)
@@ -161,6 +220,7 @@ def main() -> int:
 
     db.init()
     fill_demo_data()
+    design_id = demo_design()
     db.set_setting("text_size", "medium")
 
     from app.ui import theme
@@ -175,6 +235,7 @@ def main() -> int:
 
     shots = [("dashboard", "home", None), ("guide", "start-here", None),
              ("contacts", "contacts", "My contacts"), ("templates", "templates", "Preview & score"),
+             ("design", "design", None), ("campaign", "warmup", None),
              ("send", "send", None), ("sent", "sent", None), ("inbox", "inbox", None),
              ("deliverability", "deliverability", "SPF generator"), ("settings", "settings", None)]
     for appearance in ("Dark", "Light"):
@@ -186,9 +247,23 @@ def main() -> int:
         window.show()
         settle(1200)
         for key, name, tab in shots if appearance == "Dark" else shots[:1]:
+            if key == "design":
+                # Switched on only now, so the My message shot shows the plain email
+                from app.core import design
+
+                design.set_active(design_id)
             window.show_page(key)
             if tab:
                 window.page(key).tabs.set(tab)
+            page = window.page(key)
+            if key == "design":
+                settle(800)
+                heading = next(b for b in page._design["blocks"] if b["type"] == "heading")
+                page._select(heading["id"])
+            elif key == "campaign":
+                settle(400)
+                scroll = page.findChild(QScrollArea)
+                scroll.verticalScrollBar().setValue(scroll.verticalScrollBar().maximum())
             settle(2500 if tab else 600)
             path = OUT / f"{name}-{appearance.lower()}.png"
             window.grab().save(str(path))

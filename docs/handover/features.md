@@ -57,6 +57,54 @@ Where each feature lives and how it works. Paths are from the repository root.
 - Typed text becomes HTML in `composer.text_to_html`; a message already
   containing `<p>`/`<br>` is left alone.
 
+- **New boxes go to the top**: `_new_subject` / `_new_body` insert at index 0
+  and renumber, and the cursor lands in the new box. Loading, examples and
+  imports still append in order.
+- **The toolbar stays in view**: the tags, style buttons and Add button are a
+  `StickyBar`. It is built twice: one copy sits in the page, the other is shown
+  pinned over the top of the scroll view once the first scrolls out of sight.
+  Never reparent a widget while scrolling instead; Qt crashes if that happens
+  while a window is closing.
+
+## Email design (`app/ui/pages/design.py`, `app/core/design.py`)
+
+- A design is JSON: `page` settings, a list of `blocks`, and `assets` (pictures
+  as base64). `design.BLOCKS` lists every block type and its settings
+  (`Field`s); the editor builds every settings form from that, so a new block
+  needs a `BlockSpec`, a `_Renderer` method for the email and a `_draw_` method
+  in `email_canvas.py` for the picture in the editor.
+- Exactly one `message` block, which cannot be removed: it is where each
+  person's message (one of the versions from My message) goes, with the
+  signature and brochure link. The unsubscribe line goes in the footer block,
+  or at the end without one.
+- `design.render()` builds table-based HTML with inline styles and returns the
+  pictures it used. `composer.assemble()` uses it when `Content.design` is set;
+  `build_message` attaches the pictures as `multipart/related` parts (cid:),
+  `preview_message` writes them in as data: URIs so a browser can show them.
+- The canvas (`EmailCanvas`) draws the design with Qt widgets, not a browser
+  engine (too big, and Smart App Control blocks parts of it). It follows the
+  HTML closely; "Open in browser" shows the exact email. Clicking selects,
+  double-click jumps to the first setting, the floating toolbar moves, copies
+  and removes.
+- Pictures go through `design.prepare_image` (Pillow) on a worker: rotated per
+  EXIF, cut to 1200 px wide, recompressed; small animated GIFs kept as they are.
+  Social icons and the video play button are drawn by Pillow at send time.
+- Imported design files and stored designs pass `design.validate()`, which
+  checks every value against its field.
+- Starting designs (`design.STARTERS`, `design.starter`) are only created when
+  the user picks one: first run stays blank.
+- Settings: `design_id` is the design emails are sent with (0 = plain), set by
+  "Send my emails with this design". `brand_kit` holds the logo, colours and
+  font.
+
+## Warm-up (`app/core/warmup.py`, Sending options)
+
+- `PRESETS`: `very_safe`, `safe` (default) and `faster` (the pre-v0.7.1 ramp),
+  plus `custom`, stored in `warmup_preset`. The custom plan is `warmup_ramp`, a
+  list of daily caps; after the last day the last number holds.
+- `build_ramp(start, step, stop)` fills the day boxes; `ramp_warnings()` flags a
+  start above 50 or any day above the Faster plan.
+
 ## The spam score (`app/core/scorer.py`)
 
 - Reads the **finished email**, not the parts: `score()` renders exactly what

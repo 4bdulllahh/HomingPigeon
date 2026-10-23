@@ -3,15 +3,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QButtonGroup, QFileDialog, QGridLayout, QVBoxLayout, QWidget
 
 from app import config
 from app.core import db, prefs, warmup
 from app.i18n import t
 from app.ui.pages.base import Page
-from app.ui.widgets.common import (FormRow, Section, hint, muted, primary_button, row,
-                                   secondary_button, set_tone)
-from app.ui.widgets.inputs import checkbox, combo, get_text, line_edit, radio, set_text, text_box
+from app.ui import theme
+from app.ui.widgets.common import (ChoiceButtons, FormRow, Section, clear_layout, column,
+                                   flow_row, hint, muted, primary_button, row, secondary_button,
+                                   set_tone, small_button)
+from app.ui.widgets.inputs import (checkbox, combo, get_text, line_edit, radio, set_text,
+                                   spin_box, text_box)
 from app.ui.widgets.range_slider import RangeSlider
 
 ATTACH_MODES = [
@@ -21,6 +25,75 @@ ATTACH_MODES = [
 ]
 
 DELAY_PRESETS = [("Very safe", 180, 420), ("Balanced", 75, 150), ("Faster", 45, 90)]
+
+
+class RampEditor(QWidget):
+    """The user's own warm-up plan: a box for every day, which three numbers can fill in."""
+
+    changed = pyqtSignal()
+
+    def __init__(self, ramp: list[int], parent=None):
+        super().__init__(parent)
+        self.setProperty("role", "plain")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self.start = spin_box(ramp[0] if ramp else 20, 1, 5000)
+        self.step = spin_box(5, 1, 1000)
+        self.stop = spin_box(max(ramp) if ramp else 150, 1, 5000)
+        fields = []
+        for label, box in (("Start with", self.start), ("Add each day", self.step),
+                           ("Stop at", self.stop)):
+            form = FormRow(label)
+            form.add(box)
+            fields.append(form)
+        fill = secondary_button("Fill in the days", self._fill, 150)
+        fill.setToolTip(t("Replace the days below with a plan made from these three numbers"))
+        layout.addWidget(row(*fields, column(None, fill), None))
+
+        self.days_holder, self.days_layout = flow_row(6)
+        layout.addWidget(self.days_holder)
+        layout.addWidget(row(small_button("+ Add a day", self._add_day),
+                             small_button("Remove the last day", self._remove_day), None))
+        self.boxes: list = []
+        self.set_ramp(ramp)
+
+    def _cell(self, day: int, count: int) -> QWidget:
+        box = spin_box(count, 1, 5000, on_change=lambda _v: self.changed.emit())
+        box.setFixedWidth(round(78 * theme.text_scale()))
+        self.boxes.append(box)
+        return column(hint(t("Day {day}", day=day), wrap=False), box, spacing=2)
+
+    def set_ramp(self, ramp: list[int]) -> None:
+        clear_layout(self.days_layout)
+        self.boxes = []
+        for day, count in enumerate(ramp, start=1):
+            self.days_layout.addWidget(self._cell(day, count))
+        self.changed.emit()
+
+    def ramp(self) -> list[int]:
+        return [box.value() for box in self.boxes]
+
+    def _fill(self) -> None:
+        self.set_ramp(warmup.build_ramp(self.start.value(), self.step.value(), self.stop.value()))
+
+    def _add_day(self) -> None:
+        if len(self.boxes) >= warmup.MAX_CUSTOM_DAYS:
+            return
+        last = self.boxes[-1].value() if self.boxes else 20
+        self.days_layout.addWidget(self._cell(len(self.boxes) + 1, last))
+        self.changed.emit()
+
+    def _remove_day(self) -> None:
+        if len(self.boxes) <= 1:
+            return
+        self.boxes.pop()
+        item = self.days_layout.takeAt(self.days_layout.count() - 1)
+        if item is not None and item.widget() is not None:
+            item.widget().setParent(None)
+            item.widget().deleteLater()
+        self.changed.emit()
 
 
 class CampaignPage(Page):
@@ -235,6 +308,20 @@ class CampaignPage(Page):
                                        on_change=lambda _c: self._toggle_warmup())
         section.add(self.warmup_enabled)
 
+        self.plan_row = FormRow("Warm-up plan")
+        self.plan_choice = ChoiceButtons(list(warmup.PRESET_NAMES.items()), warmup.DEFAULT_PRESET,
+                                         on_change=self._plan_changed)
+        self.plan_row.add(self.plan_choice)
+        section.add(self.plan_row)
+        self.plan_note = hint("")
+        section.add(self.plan_note)
+        self.ramp_editor = RampEditor(warmup.custom_ramp())
+        self.ramp_editor.changed.connect(self._ramp_edited)
+        section.add(self.ramp_editor)
+        self.ramp_warning = hint("")
+        set_tone(self.ramp_warning, "warning")
+        section.add(self.ramp_warning)
+
         self.warmup_status = muted("")
         section.add(self.warmup_status)
         self.schedule_label = hint("")
@@ -257,8 +344,38 @@ class CampaignPage(Page):
     def _toggle_warmup(self) -> None:
         self.manual_cap_row.setVisible(not self.warmup_enabled.isChecked())
         db.set_setting("warmup_enabled", self.warmup_enabled.isChecked())
+        self._show_plan()
         self._refresh_warmup()
         self._mark_dirty()
+
+    def _plan_changed(self, _key: str) -> None:
+        self._show_plan()
+        self._refresh_warmup()
+        self._mark_dirty()
+
+    def _ramp_edited(self) -> None:
+        if not hasattr(self, "save_status"):
+            return          # still being built
+        self._show_plan()
+        self._refresh_warmup()
+        self._mark_dirty()
+
+    def _current_ramp(self) -> list[int]:
+        key = self.plan_choice.get()
+        return self.ramp_editor.ramp() if key == "custom" else warmup.ramp_for(key)
+
+    def _show_plan(self) -> None:
+        """Show the plan controls that apply: the day boxes only for the user's own plan."""
+        on = self.warmup_enabled.isChecked()
+        key = self.plan_choice.get()
+        custom = key == "custom"
+        self.plan_row.setVisible(on)
+        self.plan_note.setVisible(on)
+        self.plan_note.setText(t(warmup.PRESET_NOTES[key]))
+        self.ramp_editor.setVisible(on and custom)
+        warnings = warmup.ramp_warnings(self.ramp_editor.ramp()) if on and custom else []
+        self.ramp_warning.setText("\n".join("⚠ " + w for w in warnings))
+        self.ramp_warning.setVisible(bool(warnings))
 
     def _reset_warmup(self) -> None:
         warmup.reset()
@@ -276,7 +393,7 @@ class CampaignPage(Page):
             t("{describe} · {remaining} remaining today · provider ceiling {provider_limit:,}/day",
               describe=status.describe(), remaining=status.remaining,
               provider_limit=status.provider_limit))
-        upcoming = warmup.projected_schedule(7)
+        upcoming = warmup.projected_schedule(7, self._current_ramp())
         self.schedule_label.setText(
             t("Next days: {days}", days="  ".join(t("day {day}: {count}", day=d, count=c)
                                                   for d, c in upcoming)))
@@ -309,6 +426,9 @@ class CampaignPage(Page):
         db.set_setting("skip_holidays", self.skip_holidays.isChecked())
         db.set_setting("holidays", self._parse_holidays())
         db.set_setting("warmup_enabled", self.warmup_enabled.isChecked())
+        db.set_setting("warmup_preset", self.plan_choice.get())
+        if self.plan_choice.get() == "custom":
+            db.set_setting("warmup_ramp", self.ramp_editor.ramp())
         try:
             db.set_setting("manual_daily_cap", int(self.manual_cap_box.text().strip() or 100))
         except ValueError:
@@ -355,6 +475,9 @@ class CampaignPage(Page):
         self.warmup_enabled.setChecked(bool(db.get_setting("warmup_enabled", True)))
         self.manual_cap_box.setText(str(db.get_setting("manual_daily_cap", 100)))
         self.manual_cap_row.setVisible(not self.warmup_enabled.isChecked())
+        self.plan_choice.set(warmup.preset())
+        self.ramp_editor.set_ramp(warmup.custom_ramp())
+        self._show_plan()
         self._refresh_warmup()
 
         self.save_status.setText("")

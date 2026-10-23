@@ -1022,6 +1022,32 @@ def test_upgrading_copies_the_old_history_across(tmp_path):
         db.init(os.path.join(tempfile.mkdtemp(), "test.db"))
 
 
+def test_upgrading_from_v070_adds_designs_and_keeps_the_data(tmp_path):
+    """A v0.7.0 database (schema 2) has no designs table and no warm-up plan setting."""
+    import sqlite3
+
+    path = tmp_path / "v070.db"
+    old = sqlite3.connect(path)
+    old.executescript(db._SCHEMA.split("-- Email designs")[0])
+    old.execute("INSERT INTO schema_info(version) VALUES (2)")
+    old.execute("INSERT INTO contacts(id, email, company) VALUES (1, 'kept@example.com', 'Kept')")
+    old.commit()
+    old.close()
+
+    db.close()
+    try:
+        db.init(path)
+        from app.core import design, warmup
+
+        assert db.query_one("SELECT version FROM schema_info")["version"] == db.SCHEMA_VERSION
+        assert db.query_one("SELECT email FROM contacts")["email"] == "kept@example.com"
+        assert design.list_designs() == [] and design.active() is None
+        assert warmup.preset() == "safe"
+    finally:
+        db.close()
+        db.init(os.path.join(tempfile.mkdtemp(), "test.db"))
+
+
 def test_the_send_worker_saves_a_copy_of_every_email_it_sends(monkeypatch):
     """End to end through the real worker, with the mail server faked."""
     import queue
@@ -1059,3 +1085,127 @@ def test_the_send_worker_saves_a_copy_of_every_email_it_sends(monkeypatch):
     assert row["from_addr"] == "Sam <sam@example.com>"
     body = db.sent_message(row["id"])["body_html"]
     assert "We make office furniture" in body and "Unsubscribe" not in body
+
+
+# --- v0.7.1: warm-up plans --------------------------------------------------
+def test_the_recommended_warmup_is_slower_than_the_old_one():
+    from app.core import warmup
+
+    db.set_setting("warmup_preset", None)
+    assert warmup.preset() == "safe"
+    old = warmup.PRESETS["faster"]
+    for day, count in enumerate(warmup.PRESETS["safe"], start=1):
+        assert count <= old[min(day, len(old)) - 1]
+    assert warmup.ramp_warnings(warmup.PRESETS["very_safe"]) == []
+    assert warmup.ramp_warnings(warmup.PRESETS["safe"]) == []
+
+
+def test_a_custom_warmup_plan_is_used_and_checked():
+    from app.core import warmup
+
+    assert warmup.build_ramp(20, 5, 40) == [20, 25, 30, 35, 40]
+    assert warmup.build_ramp(0, 0, -5) == [1]
+    db.set_setting("warmup_enabled", True)
+    db.set_setting("provider_limit", 500)
+    db.set_setting("warmup_preset", "custom")
+    db.set_setting("warmup_ramp", [7, 9, 11])
+    warmup.reset()
+    assert warmup.status().cap == 7
+    assert [cap for _day, cap in warmup.projected_schedule(5)] == [7, 9, 11, 11, 11]
+    db.set_setting("warmup_ramp", ["junk"])
+    assert warmup.custom_ramp() == warmup.DEFAULT_RAMP
+    assert warmup.ramp_warnings([80, 300])
+    db.set_setting("warmup_preset", "safe")
+
+
+# --- v0.7.1: email designs --------------------------------------------------
+def _design_with_picture():
+    from PIL import Image
+
+    from app.core import design
+
+    path = os.path.join(tempfile.mkdtemp(), "photo.png")
+    Image.new("RGB", (2400, 1200), "#88aacc").save(path)
+    asset = design.prepare_image(path)
+    data = design.starter("newsletter")
+    for block in data["blocks"]:
+        if block["type"] == "image":
+            block["image"] = design.add_asset(data, asset)
+    return data, asset
+
+
+def test_pictures_are_shrunk_for_email():
+    _data, asset = _design_with_picture()
+    assert asset["w"] == 1200 and asset["mime"] == "image/jpeg"
+
+
+def test_every_starting_design_renders_and_keeps_the_message():
+    from app.core import design
+
+    context = merge.build_context({"email": "a@b.com", "person": "Ana Ruiz", "company": "Co"})
+    for key, _name, _note in design.STARTERS:
+        data = design.starter(key)
+        assert sum(b["type"] == "message" for b in data["blocks"]) == 1
+        html, _images = design.render(data, message_html="<p>THE MESSAGE</p>", context=context)
+        assert "THE MESSAGE" in html
+        assert "{{" not in html, key
+
+
+def test_a_designed_email_carries_its_pictures_inside():
+    data, _asset = _design_with_picture()
+    content = composer.Content(["Hi {{FirstName}}"], ["Hello {{FirstName}}, a question?"],
+                               design=data)
+    context = merge.build_context({"email": "a@b.com", "person": "Ana Ruiz", "company": "Co"})
+    message, _subject, _preview = composer.build_message(
+        composer.SenderIdentity("Me", "me@x.com"), "a@b.com", context, content)
+    related = [p for p in message.walk() if p.get_content_type() == "multipart/related"]
+    assert related, "pictures must travel inside the email"
+    html = message.get_body(("html",)).get_content()
+    pictures = [p for p in message.walk() if p.get_content_maintype() == "image"]
+    assert pictures and all(f"cid:{p['Content-ID'].strip('<>')}" in html for p in pictures)
+    assert "Hello Ana" in html
+    _subject, preview_html, _text = composer.preview_message(
+        composer.SenderIdentity("Me", "me@x.com"), context, content)
+    assert "data:image/jpeg;base64," in preview_html
+
+
+def test_a_plain_email_is_unchanged_without_a_design():
+    content = composer.Content(["Hi"], ["Hello there"])
+    message, _subject, _preview = composer.build_message(
+        composer.SenderIdentity("Me", "me@x.com"), "a@b.com", {}, content)
+    assert message.get_content_type() == "multipart/alternative"
+    assert not [p for p in message.walk() if p.get_content_maintype() == "image"]
+
+
+def test_a_design_file_is_checked_before_it_is_used():
+    from app.core import design
+
+    with pytest.raises(ValueError):
+        design.import_text("not json")
+    with pytest.raises(ValueError):
+        design.import_text('{"something": 1}')
+    raw = {"page": {"width": 99999, "bg": "red; background:url(x)"},
+           "blocks": [{"type": "heading", "size": "huge", "color": "javascript"},
+                      {"type": "virus"}, "junk"],
+           "assets": {"a": {"data": 5}}}
+    clean = design.validate(raw)
+    assert clean["page"]["width"] == 800
+    assert clean["page"]["bg"] == "#f4f5f7"
+    assert [b["type"] for b in clean["blocks"]] == ["heading", "message"]
+    assert clean["blocks"][0]["size"] == 26 and clean["blocks"][0]["color"] == "#1f2530"
+    assert clean["assets"] == {}
+    name, again = design.import_text(design.export_text(clean, "Mine"))
+    assert name == "Mine" and again == clean
+
+
+def test_saving_a_design_drops_unused_pictures_and_deleting_it_stops_using_it():
+    from app.core import design
+
+    data, asset = _design_with_picture()
+    design.add_asset(data, {**asset, "data": asset["data"][:-8] + "AAAAAAA="})
+    design_id = design.save(data, "Test")
+    assert len(design.load(design_id)["assets"]) == 1
+    design.set_active(design_id)
+    assert design.active() is not None
+    design.delete(design_id)
+    assert design.active_id() == 0 and design.active() is None

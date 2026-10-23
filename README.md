@@ -14,11 +14,13 @@ correctly, cleans your contact list before you send, makes every message slightl
 sends at a human pace, and quietly removes addresses that bounce. It runs on your own computer,
 and your contacts never leave it.
 
-**New in 0.7.0:** the app in five languages (Arabic reads right to left), a spam score that
-reads the finished email and tells you whether it will land in the main inbox, Gmail's
-Promotions tab or spam, and example messages written to reach the main inbox.
+**New in 0.7.1:** an **Email design** editor. Give your emails your logo, colours, pictures,
+buttons and more by clicking and changing them, Canva style, from eight starting designs.
+Also new: a choice of warm-up plans (with a safer one as the default) or your own day by day,
+and on **My message** new boxes appear at the top while the personal-touch buttons stay in view
+as you scroll.
 
-**Download:** [latest release](../../releases/latest) · **Version:** 0.7.0 (free beta) ·
+**Download:** [latest release](../../releases/latest) · **Version:** 0.7.1 (free beta) ·
 **Works on:** Windows, Mac and Linux · **Languages:** English, العربية, Deutsch, Español,
 Français
 
@@ -47,8 +49,18 @@ Français
   **My contacts** and usable in your message as a tag, such as `{{Phone No.}}`.
 - **Several subjects and messages.** Write a few versions of each, use tags like
   `{{FirstName}}` and `{{Company}}`, and the app picks a different combination for each person,
-  so hundreds of identical emails never go out. Already have them in a spreadsheet? Import the
-  subjects and messages in one go.
+  so hundreds of identical emails never go out. A new one appears at the top, and the tag
+  buttons stay at the top of the screen however far you scroll. Already have them in a
+  spreadsheet? Import the subjects and messages in one go.
+- **Email designs, as easy as Canva.** Pick a starting design (simple letter, announcement,
+  welcome card, newsletter, product spotlight, event invitation and more), then click anything
+  in the email to change it. Add logos, banners, pictures, videos, buttons, social icons, quotes,
+  two columns, highlighted cards, lines and footers; set colours, fades, fonts, rounded corners,
+  shadows, widths and alignment; centre your message or keep it to the left. Undo and redo,
+  check the phone view, keep a brand kit with your logo, colours and font, save several designs
+  and share them as files. Pictures travel inside the email, so you need no website, and your
+  messages still vary from person to person. Plain emails remain the default, because they reach
+  the main inbox best on first contact.
 - **Spam score before you send.** A live preview shows exactly what one contact will receive,
   and the score reads that finished email: subject, message, link, signature and footer
   together. You get a score out of 100, an estimate of whether it lands in the main inbox,
@@ -56,8 +68,9 @@ Français
 - **Examples that reach the main inbox.** Press "Show me an example" for subjects and messages
   written the way personal emails are, and read the guide on keeping out of spam and
   Promotions.
-- **A warm-up ramp.** Starts at about 20 emails a day and increases over several weeks. A
-  brand-new sender suddenly sending hundreds looks like a hacked account.
+- **A warm-up ramp you choose.** Very safe, Safe (the recommended default) or Faster, or type
+  your own number for each day; the app warns you if your plan grows too quickly. A brand-new
+  sender suddenly sending hundreds looks like a hacked account.
 - **Human pacing.** A random delay between emails (you set the minimum and maximum), office
   hours only, weekdays only and public holidays skipped. A fixed interval at 3am is an obvious
   sign of automation.
@@ -86,6 +99,8 @@ Français
 |---|---|
 | ![The Contacts page listing imported contacts with company, contact person, status, source file and extra spreadsheet columns](docs/screenshots/contacts-dark.png) | ![The My message page previewing one personalised email next to its spam score of 97, the estimate that it will land in the main inbox, and advice](docs/screenshots/templates-dark.png) |
 | **My contacts.** Your imported list, searchable and sortable, with every column from your spreadsheet. | **My message.** The finished email for a real contact, its spam score, where it will land (main inbox, Promotions or spam) and what to change. |
+| ![The Email design page: blocks to add on the left, a designed email with a logo, heading, photo and button in the middle, and the selected heading's settings on the right](docs/screenshots/design-dark.png) | ![The warm-up section of Sending options with the Very safe, Safe (recommended), Faster and My own plan choices and the next days' limits](docs/screenshots/warmup-dark.png) |
+| **Email design.** Click anything in the email to change it: words, colours, pictures, buttons and more. | **Warm-up plans.** A safe recommended plan, two others, or your own number for each day. |
 | ![The Sent emails page with a table of every email sent, its outcome and the subject used](docs/screenshots/sent-dark.png) | ![The My inbox page with two replies and one bounce, each labelled](docs/screenshots/inbox-dark.png) |
 | **Sent emails.** Every message that went out, and what came back. Exports to Excel. | **My inbox.** Replies, bounces and opt-outs, readable inside the app. |
 | ![The Deliverability page building an SPF record from a list of email services](docs/screenshots/deliverability-dark.png) | ![The Send page with its before-you-send checklist, counters and the Start Emailing button](docs/screenshots/send-dark.png) |
@@ -101,7 +116,7 @@ Français
 
 You don't need to know anything about coding.
 
-1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.7.0.zip`**.
+1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.7.1.zip`**.
 2. Right-click the downloaded file → **Extract All...** → **Extract**.
 3. In the folder that opens, double-click **`HomingPigeon Setup.exe`**.
 4. Click **Install**. Setup shows you every step while it works: it downloads what the app needs

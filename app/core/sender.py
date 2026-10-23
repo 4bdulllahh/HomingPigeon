@@ -171,6 +171,22 @@ def test_connection(settings: SmtpSettings) -> tuple[bool, str]:
         return False, friendly_smtp_error(error, settings)
 
 
+def send_one(settings: SmtpSettings, message) -> tuple[bool, str]:
+    """Send a single message, such as a test of a design to the user's own address."""
+    try:
+        server = open_smtp(settings)
+        try:
+            server.send_message(message)
+        finally:
+            try:
+                server.quit()
+            except Exception:
+                pass
+        return True, t("Test email sent to {email}. Check your inbox.", email=message["To"])
+    except Exception as error:  # noqa: BLE001 - surfaced to the user verbatim
+        return False, friendly_smtp_error(error, settings)
+
+
 # --- Send window ------------------------------------------------------------
 def _parse_time(value: str, fallback: dtime) -> dtime:
     try:
@@ -464,6 +480,7 @@ class SendWorker(threading.Thread):
                 link_url=self.plan.content.link_url,
                 link_text=self.plan.content.link_text,
                 unsubscribe_note=self.plan.content.unsubscribe_note,
+                design=self.plan.content.design,
             )
 
             try:

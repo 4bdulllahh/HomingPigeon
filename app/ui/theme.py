@@ -310,6 +310,7 @@ ICONS = {
     "shield": ("", "◈"),
     "contacts": ("", "☰"),
     "message": ("", "✎"),
+    "design": ("", "◐"),
     "options": ("", "≡"),
     "send": ("", "➤"),
     "history": ("", "↺"),
@@ -430,6 +431,8 @@ QFrame[role="console"] {{
 }}
 QFrame[role="separator"] {{ background-color: {t['border']}; border: none; }}
 QFrame[role="plain"] {{ background-color: transparent; border: none; }}
+QFrame[role="sticky"] {{ background-color: {t['bg_panel']}; border: none; }}
+QFrame[role="sticky"][floating="on"] {{ border-bottom: 1px solid {t['border_strong']}; }}
 
 /* ---------- inputs ---------- */
 QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QComboBox {{

@@ -15,7 +15,7 @@ from typing import Any, Iterable, Sequence
 
 from app import config
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _local = threading.local()
 _db_path: Path | None = None
@@ -236,6 +236,16 @@ CREATE TABLE IF NOT EXISTS sent_log (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sent_log_recipient ON sent_log(campaign_id, contact_id);
 CREATE INDEX IF NOT EXISTS idx_sent_log_when ON sent_log(sent_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sent_log_email ON sent_log(email);
+
+-- Email designs (v0.7.1): page styling and blocks as JSON, pictures included.
+-- The design emails are sent with is the setting design_id; 0 means plain.
+CREATE TABLE IF NOT EXISTS designs (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,
+    data       TEXT NOT NULL,
+    created_at TEXT,
+    updated_at TEXT
+);
 """
 
 
@@ -249,6 +259,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # v0.6.2: the sent history moved into its own table. Copy over what the
         # campaigns already recorded so nothing sent before the update is lost.
         backfill_sent_log(conn)
+    if row["version"] < 3:
+        # v0.7.1: the designs table. The schema above creates it; nothing to copy.
+        pass
     if row["version"] < SCHEMA_VERSION:
         conn.execute("UPDATE schema_info SET version = ?", (SCHEMA_VERSION,))
 

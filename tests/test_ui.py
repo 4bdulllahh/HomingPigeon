@@ -28,6 +28,23 @@ def qt_app():
 
 
 @pytest.fixture(autouse=True)
+def delete_closed_windows():
+    """Destroy each test's windows when it ends, as the running app's event loop would.
+
+    Tests close their windows with deleteLater(), which only happens once events
+    are processed. Without this they piled up, and the next test that waited on
+    the event loop tore a dozen windows down at once, which crashed Qt.
+    """
+    yield
+    from PyQt6.QtCore import QCoreApplication, QEvent
+
+    app = QCoreApplication.instance()
+    if app is not None:
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
+        app.processEvents()
+
+
+@pytest.fixture(autouse=True)
 def restore_theme():
     """Theme state is global, so tests must not leak it into each other."""
     before = (theme._state["appearance"], theme._state["high_contrast"],
@@ -818,9 +835,9 @@ def test_new_columns_reach_the_personal_touch_buttons_without_a_restart(qt_app, 
 
         page.on_show()
         assert all(f"Field {n}" in page._tag_names for n in range(10))
-        layout = page._tag_layouts[True]
-        texts = [layout.itemAt(i).widget().text() for i in range(layout.count())]
-        assert "{{Field 9}}" in texts
+        for layout in page._tag_layouts[True]:   # the toolbar and its pinned copy
+            texts = [layout.itemAt(i).widget().text() for i in range(layout.count())]
+            assert "{{Field 9}}" in texts
     finally:
         window.close()
         window.deleteLater()
@@ -868,3 +885,120 @@ def test_deleting_from_the_sent_page_keeps_the_rest(qt_app, store):
     assert model.rowCount() == 2
     # Who was contacted is still known, so nobody is emailed twice
     assert db.query_one("SELECT COUNT(*) AS n FROM campaign_recipients")["n"] == 3
+
+
+# --- v0.7.1 -----------------------------------------------------------------
+def test_a_new_subject_or_message_goes_to_the_top(qt_app, store):
+    from app.ui.main_window import MainWindow
+
+    window = MainWindow()
+    try:
+        window.show_page("templates")
+        page = window.page("templates")
+        page._add_subject("old one")
+        page._new_subject()
+        assert page.subject_editors[0].get_text() == ""
+        assert page.subject_editors[1].get_text() == "old one"
+        assert page.subject_editors[0].enabled_box.text().endswith("1")
+        assert page.subjects_layout.indexOf(page.subject_editors[0]) == 0
+        page._add_body("old message")
+        page._new_body()
+        assert page.body_editors[0].get_text() == ""
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_the_personal_touch_bar_stays_in_view_when_scrolling(qt_app, store):
+    from PyQt6.QtTest import QTest
+
+    from app.ui.main_window import MainWindow
+
+    qt_app.setStyleSheet(theme.stylesheet())
+    window = MainWindow()
+    window.resize(1000, 650)
+    window.show()
+    try:
+        window.show_page("templates")
+        page = window.page("templates")
+        for index in range(15):
+            page._add_subject(f"Subject {index}")
+        QTest.qWait(100)
+        bar = page.scroll.verticalScrollBar()
+        bar.setValue(bar.maximum())
+        QTest.qWait(50)
+        sticky = page._subjects_sticky
+        assert sticky.floating
+        assert sticky.bar.y() == page.scroll.viewport().y()
+        bar.setValue(0)
+        QTest.qWait(50)
+        assert not sticky.floating
+        bar.setValue(bar.maximum())
+        QTest.qWait(50)
+        page.tabs.set("Message")
+        assert not sticky.floating
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_the_design_page_builds_edits_and_protects_the_message(qt_app, store):
+    from app.core import design
+    from app.ui.main_window import MainWindow
+
+    window = MainWindow()
+    window.resize(1300, 800)
+    window.show()
+    try:
+        window.show_page("design")
+        page = window.page("design")
+        assert page.empty.isVisible() and design.list_designs() == []
+        page._create("announcement", "Announcement")
+        blocks = page._design["blocks"]
+        message = next(b for b in blocks if b["type"] == "message")
+        count = len(blocks)
+        page._block_action(message["id"], "remove")
+        assert len(page._design["blocks"]) == count
+        page._select("")
+        page._add_block("quote")
+        assert len(page._design["blocks"]) == count + 1
+        page._remember.flush()
+        page.undo()
+        assert len(page._design["blocks"]) == count
+        page.redo()
+        assert len(page._design["blocks"]) == count + 1
+        page.save()
+        page.use_box.setChecked(True)
+        assert design.active_id() == page._id
+        assert len(design.active()["blocks"]) == count + 1
+        page.view_choice.set("phone", notify=True)
+        assert page.layers.count() == count + 1
+        quote = next(b for b in page._design["blocks"] if b["type"] == "quote")
+        page._select(quote["id"])
+        page._set(quote, "text", "Changed")
+        assert page._dirty
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_the_custom_warmup_plan_is_saved(qt_app, store):
+    from app.core import warmup
+    from app.ui.main_window import MainWindow
+
+    window = MainWindow()
+    try:
+        window.show_page("campaign")
+        page = window.page("campaign")
+        page.plan_choice.set("custom", notify=True)
+        assert page.ramp_editor.isVisibleTo(page)
+        page.ramp_editor.start.setValue(10)
+        page.ramp_editor.step.setValue(10)
+        page.ramp_editor.stop.setValue(30)
+        page.ramp_editor._fill()
+        assert page.ramp_editor.ramp() == [10, 20, 30]
+        page.save()
+        assert warmup.preset() == "custom" and warmup.custom_ramp() == [10, 20, 30]
+    finally:
+        window.close()
+        window.deleteLater()

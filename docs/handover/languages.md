@@ -86,6 +86,7 @@ Keep page names consistent with the sidebar when a sentence mentions them.
 | English | ar | de | es | fr |
 |---|---|---|---|---|
 | My message | رسالتي | Meine Nachricht | Mi mensaje | Mon message |
+| Email design | تصميم البريد | E-Mail-Design | Diseño del correo | Design de l'e-mail |
 | My contacts | جهات الاتصال | Meine Kontakte | Mis contactos | Mes contacts |
 | Domain check | فحص النطاق | Domain-Prüfung | Revisión del dominio | Vérification du domaine |
 | Sending options | خيارات الإرسال | Versandoptionen | Opciones de envío | Options d'envoi |
@@ -95,3 +96,7 @@ Keep page names consistent with the sidebar when a sentence mentions them.
 | Unsubscribe | إلغاء الاشتراك | Abmelden | Baja | Désabonner |
 
 German uses "Sie", French "vous", Spanish "tú".
+
+In Arabic the window is mirrored, so text that points at a panel says the
+opposite side: the block list on Email design is on the right, its settings on
+the left.

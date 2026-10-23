@@ -13,7 +13,33 @@ from app.core import db
 from app.i18n import t
 
 # Day index -> messages allowed that day. Held at the last value afterwards.
-DEFAULT_RAMP = [20, 20, 30, 30, 40, 50, 60, 70, 85, 100, 115, 130, 150, 175, 200]
+# "Safe" is the recommended one. Until v0.7.1 the only ramp was "faster", which
+# reaches 100 a day on day 10: too quick for a brand-new mailbox.
+PRESETS = {
+    "very_safe": [20, 20, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 43, 46, 50, 53, 56, 60,
+                  64, 68, 72, 76, 80, 85, 90, 95, 100],
+    "safe": [20, 20, 25, 25, 30, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 90, 100, 110, 120,
+             130, 140, 150],
+    "faster": [20, 20, 30, 30, 40, 50, 60, 70, 85, 100, 115, 130, 150, 175, 200],
+}
+PRESET_NAMES = {
+    "very_safe": "Very safe",
+    "safe": "Safe (recommended)",
+    "faster": "Faster",
+    "custom": "My own plan",
+}
+PRESET_NOTES = {
+    "very_safe": "About 4 weeks to reach 100 a day, then stays there. Best for a brand new "
+                 "email address or one that has had trouble before.",
+    "safe": "About 3 weeks to reach 150 a day, then stays there. Right for most new addresses.",
+    "faster": "About 2 weeks to reach 200 a day. Only for an address that already sends "
+              "normal business email every day.",
+    "custom": "Type how many emails to send on each day. After the last day, the last number "
+              "is used every day.",
+}
+DEFAULT_PRESET = "safe"
+DEFAULT_RAMP = PRESETS[DEFAULT_PRESET]
+MAX_CUSTOM_DAYS = 90
 
 # Provider ceilings (recipients per day). The ramp never exceeds these
 PROVIDER_LIMITS = {
@@ -51,11 +77,53 @@ class WarmupStatus:
                  day_index=self.day_index, sent_today=self.sent_today, cap=self.cap)
 
 
+def preset() -> str:
+    chosen = db.get_setting("warmup_preset", DEFAULT_PRESET)
+    return chosen if chosen in PRESET_NAMES else DEFAULT_PRESET
+
+
+def custom_ramp() -> list[int]:
+    """The user's own plan, or the recommended one if they have not written one."""
+    ramp = db.get_setting("warmup_ramp", None)
+    try:
+        cleaned = [max(1, int(v)) for v in ramp][:MAX_CUSTOM_DAYS]
+    except (TypeError, ValueError):
+        return list(DEFAULT_RAMP)
+    return cleaned or list(DEFAULT_RAMP)
+
+
+def ramp_for(name: str) -> list[int]:
+    return custom_ramp() if name == "custom" else list(PRESETS.get(name, DEFAULT_RAMP))
+
+
 def _ramp() -> list[int]:
-    ramp = db.get_setting("warmup_ramp", DEFAULT_RAMP)
-    if not isinstance(ramp, list) or not ramp:
-        return DEFAULT_RAMP
-    return [int(v) for v in ramp]
+    return ramp_for(preset())
+
+
+def build_ramp(start: int, step: int, maximum: int) -> list[int]:
+    """A plan from three numbers: start at ``start``, add ``step`` a day, stop at ``maximum``."""
+    start, step = max(1, int(start)), max(1, int(step))
+    maximum = max(start, int(maximum))
+    return (list(range(start, maximum, step)) + [maximum])[:MAX_CUSTOM_DAYS]
+
+
+def ramp_warnings(ramp: list[int]) -> list[str]:
+    """Plain-English warnings for a plan that grows faster than is safe."""
+    if not ramp:
+        return [t("Add at least one day.")]
+    warnings = []
+    if ramp[0] > 50:
+        warnings.append(t("Starting with more than 50 a day is risky for a new address. "
+                          "Start with 20 to 30."))
+    fastest = PRESETS["faster"]
+    for day, count in enumerate(ramp, start=1):
+        limit = fastest[min(day, len(fastest)) - 1]
+        if count > limit and day > 1:
+            warnings.append(t("Day {day} sends {count}, more than even the Faster plan ({limit}). "
+                              "Grow more slowly to stay out of spam folders.",
+                              day=day, count=count, limit=limit))
+            break
+    return warnings
 
 
 def _state() -> dict:
@@ -151,9 +219,9 @@ def set_day(day_index: int) -> None:
     db.execute("UPDATE warmup_state SET day_index = ? WHERE id = 1", (max(1, int(day_index)),))
 
 
-def projected_schedule(days: int = 14) -> list[tuple[int, int]]:
-    """(day, cap) pairs for the ramp preview in the UI."""
-    ramp = _ramp()
+def projected_schedule(days: int = 14, ramp: list[int] | None = None) -> list[tuple[int, int]]:
+    """(day, cap) pairs for the ramp preview in the UI, for the saved plan or ``ramp``."""
+    ramp = ramp or _ramp()
     current = status()
     out = []
     for offset in range(days):
