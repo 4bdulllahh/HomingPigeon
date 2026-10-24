@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import random
+import sqlite3
 import tempfile
 
 import pandas as pd
@@ -1087,6 +1088,260 @@ def test_the_send_worker_saves_a_copy_of_every_email_it_sends(monkeypatch):
     assert "We make office furniture" in body and "Unsubscribe" not in body
 
 
+# --- v0.7.2: nobody is emailed twice ------------------------------------------
+def _queued(campaign_id: int, email: str) -> sqlite3.Row | None:
+    return db.query_one(
+        "SELECT r.status FROM campaign_recipients r JOIN contacts c ON c.id = r.contact_id "
+        "WHERE r.campaign_id = ? AND c.email = ?", (campaign_id, email))
+
+
+def test_someone_emailed_in_a_campaign_is_not_queued_again_even_after_a_reimport():
+    campaign_id = db.start_new_campaign("Spring")
+    assert db.current_campaign() == campaign_id
+    first = _sent_contact("once@example.com")
+    _sent_contact("never@example.com")
+    _sent_contact("blocked@example.com")
+    db.suppress("blocked@example.com", "test", source="manual")
+    db.queue_contacts(campaign_id)
+    assert _queued(campaign_id, "once@example.com")["status"] == "pending"
+    assert _queued(campaign_id, "blocked@example.com") is None
+
+    # Emailed, then the list is cleared and the same sheet imported again
+    db.record_contacted("Once@Example.com", campaign_id, "sent", db.now())
+    db.execute("DELETE FROM contacts WHERE id = ?", (first,))
+    _sent_contact("once@example.com")
+    db.queue_contacts(campaign_id)
+    assert _queued(campaign_id, "once@example.com") is None
+    assert db.already_contacted("ONCE@example.com", campaign_id)
+
+    # "Send to this person again" lets one through; a blocked address stays out
+    assert db.allow_again(["once@example.com", "blocked@example.com"]) == (1, 1)
+    assert _queued(campaign_id, "once@example.com")["status"] == "pending"
+
+    # A new campaign emails everyone once more, except the blocked address
+    db.record_contacted("never@example.com", campaign_id, "sent", db.now())
+    second = db.start_new_campaign("Summer")
+    assert second != campaign_id and db.current_campaign() == second
+    assert _queued(second, "never@example.com")["status"] == "pending"
+    assert _queued(second, "blocked@example.com") is None
+    assert db.query_one("SELECT status FROM campaigns WHERE id = ?",
+                        (campaign_id,))["status"] == "finished"
+
+
+def test_upgrading_to_v072_remembers_who_was_already_emailed(tmp_path):
+    import sqlite3 as sqlite
+
+    path = tmp_path / "v071.db"
+    old = sqlite.connect(path)
+    old.executescript(db._SCHEMA)
+    old.execute("DROP TABLE contacted")
+    old.execute("INSERT INTO schema_info(version) VALUES (3)")
+    old.execute("INSERT INTO campaigns(id, name) VALUES (1, 'c')")
+    old.execute("INSERT INTO contacts(id, email) VALUES (1, 'live@example.com')")
+    old.execute("INSERT INTO campaign_recipients(campaign_id, contact_id, status, sent_at) "
+                "VALUES (1, 1, 'sent', '2026-10-01T10:00:00')")
+    # Someone whose contact was deleted: only the history remembers them
+    old.execute("INSERT INTO sent_log(campaign_id, contact_id, email, status, sent_at) "
+                "VALUES (1, 9, 'Gone@Example.com', 'sent', '2026-10-02T10:00:00')")
+    old.commit()
+    old.close()
+
+    db.close()
+    try:
+        db.init(path)
+        assert db.already_contacted("live@example.com", 1)
+        assert db.already_contacted("gone@example.com", 1)
+        assert db.query_one("SELECT version FROM schema_info")["version"] == db.SCHEMA_VERSION
+    finally:
+        db.close()
+        db.init(os.path.join(tempfile.mkdtemp(), "test.db"))
+
+
+def test_the_send_worker_retries_three_times_and_never_sends_twice(monkeypatch):
+    import queue
+
+    from app.core import sender, warmup
+
+    class BrokenServer:
+        def send_message(self, message):
+            raise RuntimeError("server hiccup")
+
+        def quit(self):
+            pass
+
+    monkeypatch.setattr(sender, "open_smtp", lambda _settings: BrokenServer())
+    monkeypatch.setattr(sender, "in_send_window", lambda *_a, **_k: (True, ""))
+    monkeypatch.setattr(warmup, "remaining_today", lambda *_a: 100)
+    monkeypatch.setattr(warmup, "record_sent", lambda *_a: None)
+
+    campaign_id = _campaign()
+    flaky = _sent_contact("flaky@example.com")
+    done = _sent_contact("done@example.com")
+    for contact_id in (flaky, done):
+        db.execute("INSERT INTO campaign_recipients(campaign_id, contact_id, status) "
+                   "VALUES (?, ?, 'pending')", (campaign_id, contact_id))
+    db.record_contacted("done@example.com", campaign_id, "sent", db.now())
+    plan = sender.SendPlan(
+        campaign_id=campaign_id, sender=composer.SenderIdentity("Sam", "sam@example.com"),
+        content=_content(unsubscribe_note=False),
+        smtp=sender.SmtpSettings("smtp.example.com", 587, "u", "p"),
+        delay_min_s=0, delay_max_s=0)
+
+    statuses = []
+    for _run in range(3):
+        sender.SendWorker(plan, queue.Queue()).run()
+        statuses.append(_queued(campaign_id, "flaky@example.com")["status"])
+    assert statuses == ["retry", "retry", "failed"]
+    assert _queued(campaign_id, "done@example.com")["status"] == "skipped"
+    assert db.query_one("SELECT status FROM contacted WHERE email = 'flaky@example.com' "
+                        "AND campaign_id = ?", (campaign_id,))["status"] == "failed"
+
+
+# --- v0.7.2: bounces read more accurately -------------------------------------
+GMAIL_BOUNCE = """From: Mail Delivery Subsystem <mailer-daemon@googlemail.com>
+To: me@mine.test
+Subject: Delivery Status Notification (Failure)
+MIME-Version: 1.0
+Content-Type: multipart/report; report-type=delivery-status; boundary="b1"
+
+--b1
+Content-Type: text/plain; charset="utf-8"
+
+Address not found. Your message wasn't delivered because the address couldn't be found.
+
+--b1
+Content-Type: message/delivery-status
+
+Reporting-MTA: dns; googlemail.com
+
+Action: failed
+Status: 5.1.1
+
+--b1
+Content-Type: text/rfc822-headers
+
+From: me@mine.test
+To: someone@else.test
+Message-ID: <abc123@mine.test>
+Subject: Hello
+
+--b1--
+"""
+
+OUTLOOK_BOUNCE = """From: postmaster@outlook.com
+To: me@mine.test
+Subject: Undeliverable: Hello
+Content-Type: text/plain; charset="utf-8"
+
+Your message to gone@nowhere.test couldn't be delivered.
+gone wasn't found at nowhere.test.
+"""
+
+DELAY_NOTICE = """From: Mail Delivery Subsystem <mailer-daemon@googlemail.com>
+Subject: Delivery Status Notification (Delay)
+MIME-Version: 1.0
+Content-Type: multipart/report; report-type=delivery-status; boundary="b2"
+
+--b2
+Content-Type: text/plain
+
+Your message has not been delivered yet. We will retry for 47 more hours.
+
+--b2
+Content-Type: message/delivery-status
+
+Reporting-MTA: dns; googlemail.com
+
+Final-Recipient: rfc822; slow@later.test
+Action: delayed
+Status: 4.4.1
+
+--b2--
+"""
+
+OUT_OF_OFFICE = """From: Busy Person <busy@away.test>
+Subject: Automatic reply: Quick question
+Auto-Submitted: auto-replied
+Content-Type: text/plain
+
+I am out of the office until Monday.
+"""
+
+FULL_MAILBOX = """From: MAILER-DAEMON@full.test
+Subject: Undelivered Mail Returned to Sender
+Content-Type: text/plain
+
+<full@full.test>: host mx.full.test said: 452 4.2.2 Mailbox full, try again later
+"""
+
+
+def test_a_bounce_is_matched_to_the_email_by_its_message_id():
+    from app.core import imap_sync
+
+    contact_id = _sent_contact("matched@byid.test")
+    db.log_sent(campaign_id=_campaign(), contact=db.query_one(
+        "SELECT * FROM contacts WHERE id = ?", (contact_id,)), status="sent",
+        message_id="<abc123@mine.test>", sent_at=db.now())
+    address, hard, _detail = imap_sync.parse_bounce(_sample_message(GMAIL_BOUNCE))
+    assert (address, hard) == ("matched@byid.test", True)
+
+
+def test_outlook_wording_is_a_permanent_bounce():
+    from app.core import imap_sync
+
+    message = _sample_message(OUTLOOK_BOUNCE)
+    assert imap_sync.is_bounce(message)
+    address, hard, _detail = imap_sync.parse_bounce(message)
+    assert hard and address in (None, "gone@nowhere.test")
+
+
+def test_a_delay_notice_and_an_out_of_office_are_not_bounces_or_replies():
+    from app.core import imap_sync
+
+    _sent_contact("slow@later.test")
+    _sent_contact("busy@away.test")
+    result = imap_sync.SyncResult()
+    assert imap_sync._classify(_sample_message(DELAY_NOTICE), result)[0] == "delay"
+    assert imap_sync._classify(_sample_message(OUT_OF_OFFICE), result) == ("autoreply", True)
+    assert result.hard_bounces == [] and result.soft_bounces == [] and result.replies == []
+    assert not db.is_suppressed("slow@later.test")
+    assert db.query_one("SELECT replied_at FROM contacts WHERE email = 'busy@away.test'"
+                        )["replied_at"] is None
+
+
+def test_a_full_mailbox_puts_the_person_back_in_the_queue():
+    from app.core import imap_sync
+
+    campaign_id = _campaign()
+    contact_id = _sent_contact("full@full.test")
+    db.execute("INSERT INTO campaign_recipients(campaign_id, contact_id, status, attempts) "
+               "VALUES (?, ?, 'sent', 1)", (campaign_id, contact_id))
+    db.record_contacted("full@full.test", campaign_id, "sent", db.now())
+    result = imap_sync.SyncResult()
+    imap_sync._classify(_sample_message(FULL_MAILBOX), result)
+    assert result.soft_bounces and not db.is_suppressed("full@full.test")
+    assert _queued(campaign_id, "full@full.test")["status"] == "retry"
+    assert not db.already_contacted("full@full.test", campaign_id)
+
+
+def test_the_junk_folder_is_found_by_its_flag_or_its_name():
+    from app.core import imap_sync
+
+    class Client:
+        def __init__(self, lines):
+            self.lines = lines
+
+        def list(self):
+            return "OK", self.lines
+
+    flagged = Client([b'(\\HasNoChildren) "/" "INBOX"',
+                      b'(\\HasNoChildren \\Junk) "/" "[Gmail]/Spam"'])
+    assert imap_sync.find_junk_folder(flagged) == "[Gmail]/Spam"
+    named = Client([b'(\\HasNoChildren) "/" INBOX', b'(\\HasNoChildren) "/" "Junk Email"'])
+    assert imap_sync.find_junk_folder(named) == "Junk Email"
+    assert imap_sync.find_junk_folder(Client([b'() "/" INBOX'])) is None
+
+
 # --- v0.7.1: warm-up plans --------------------------------------------------
 def test_the_recommended_warmup_is_slower_than_the_old_one():
     from app.core import warmup
@@ -1149,6 +1404,17 @@ def test_every_starting_design_renders_and_keeps_the_message():
         html, _images = design.render(data, message_html="<p>THE MESSAGE</p>", context=context)
         assert "THE MESSAGE" in html
         assert "{{" not in html, key
+
+
+def test_dragging_a_block_lands_it_where_the_line_showed():
+    from app.core import design
+
+    a, b, c = {"id": "a"}, {"id": "b"}, {"id": "c"}
+    blocks = [a, b, c]
+    assert design.move_block(blocks, a, 3) and blocks == [b, c, a]     # to the end
+    assert design.move_block(blocks, a, 0) and blocks == [a, b, c]     # to the top
+    assert design.move_block(blocks, c, 1) and blocks == [a, c, b]     # up one
+    assert not design.move_block(blocks, c, 1) and not design.move_block(blocks, c, 2)
 
 
 def test_a_designed_email_carries_its_pictures_inside():

@@ -14,13 +14,15 @@ correctly, cleans your contact list before you send, makes every message slightl
 sends at a human pace, and quietly removes addresses that bounce. It runs on your own computer,
 and your contacts never leave it.
 
-**New in 0.7.1:** an **Email design** editor. Give your emails your logo, colours, pictures,
-buttons and more by clicking and changing them, Canva style, from eight starting designs.
-Also new: a choice of warm-up plans (with a safer one as the default) or your own day by day,
-and on **My message** new boxes appear at the top while the personal-touch buttons stay in view
-as you scroll.
+**New in 0.7.2:** **nobody is emailed twice.** The app remembers everyone it has emailed, even
+if you stop and start again, clear your list or import the same sheet again, and **My contacts**
+shows each person's status: not sent yet, sent, replied, bounced, failed or unsubscribed.
+**Start a new campaign** when you do want to email everyone again. The **Email design** editor
+is now drag and drop: drag blocks into the email, drag them around, type straight onto the
+email and drag pictures bigger or smaller. Bounces are caught far more reliably, and an old
+installer now installs the newest version by itself.
 
-**Download:** [latest release](../../releases/latest) · **Version:** 0.7.1 (free beta) ·
+**Download:** [latest release](../../releases/latest) · **Version:** 0.7.2 (free beta) ·
 **Works on:** Windows, Mac and Linux · **Languages:** English, العربية, Deutsch, Español,
 Français
 
@@ -36,6 +38,7 @@ Français
 - **Updates itself.** When you open the app it checks for a new version. If there is one, a
   popup offers **Update now** or **Update later**. Update now downloads it, checks it is genuine,
   installs it and opens the app again, and your contacts, templates and settings are kept.
+  Setup does the same: run an old installer and it installs the newest version instead.
 - **A setup guide that ticks itself off.** The **Start here** page walks you through every step
   in plain English and marks each one done from the real state of the app, so you always know
   what is left.
@@ -47,14 +50,22 @@ Français
   with no mail server before anything is sent. Dead addresses bounce, and bounces are the
   fastest way to get blacklisted. Every other column in your sheet is kept, shown in
   **My contacts** and usable in your message as a tag, such as `{{Phone No.}}`.
+- **Nobody gets the same email twice.** Contacts are emailed in the order of your spreadsheet,
+  and each one is remembered by their address, so stopping and starting, clearing the list or
+  importing the same sheet again never sends anyone a second copy. **My contacts** shows each
+  person's status and when they were last emailed, and can show just one group, such as
+  everyone not emailed yet. A short hiccup is retried up to three times. To email everyone again
+  with a new message, press **Start a new campaign**; to email one person again, right-click
+  them and choose **Send to this person again**.
 - **Several subjects and messages.** Write a few versions of each, use tags like
   `{{FirstName}}` and `{{Company}}`, and the app picks a different combination for each person,
   so hundreds of identical emails never go out. A new one appears at the top, and the tag
   buttons stay at the top of the screen however far you scroll. Already have them in a
   spreadsheet? Import the subjects and messages in one go.
 - **Email designs, as easy as Canva.** Pick a starting design (simple letter, announcement,
-  welcome card, newsletter, product spotlight, event invitation and more), then click anything
-  in the email to change it. Add logos, banners, pictures, videos, buttons, social icons, quotes,
+  welcome card, newsletter, product spotlight, event invitation and more), then drag blocks into
+  the email, drag them around to rearrange them, double-click any words to type straight onto
+  the email, and drag the corner of a picture or button to resize it. Add logos, banners, pictures, videos, buttons, social icons, quotes,
   two columns, highlighted cards, lines and footers; set colours, fades, fonts, rounded corners,
   shadows, widths and alignment; centre your message or keep it to the left. Undo and redo,
   check the phone view, keep a brand kit with your logo, colours and font, save several designs
@@ -74,10 +85,15 @@ Français
 - **Human pacing.** A random delay between emails (you set the minimum and maximum), office
   hours only, weekdays only and public holidays skipped. A fixed interval at 3am is an obvious
   sign of automation.
-- **An automatic stop.** Sending halts by itself if too many emails start failing, before real
-  damage is done to your domain.
-- **Bounce and unsubscribe handling.** The app reads your inbox and permanently removes anyone
-  who bounced or asked to be removed. You choose whether emails carry an unsubscribe line and
+- **An automatic stop.** Sending halts by itself if too many emails start failing or bouncing,
+  before real damage is done to your domain. It counts bounces that arrive minutes after
+  sending too, which is how Gmail and Outlook report most of them.
+- **Bounce and unsubscribe handling.** The app checks your inbox in the background every 10
+  minutes while it is open, including the Junk folder, and permanently removes anyone who
+  bounced or asked to be removed. Each bounce is matched to the exact email that bounced, the
+  wording of Gmail, Outlook, Microsoft 365, Yahoo and Zoho is understood, a full mailbox is
+  tried again later, and "still trying to deliver" notices and out-of-office replies are not
+  mistaken for bounces or real replies. You choose whether emails carry an unsubscribe line and
   the one-click unsubscribe header (which puts an Unsubscribe button in Gmail and Outlook).
   Switching them off keeps mail out of Gmail's Promotions tab; replies asking to unsubscribe
   are still handled either way.
@@ -98,13 +114,13 @@ Français
 | | |
 |---|---|
 | ![The Contacts page listing imported contacts with company, contact person, status, source file and extra spreadsheet columns](docs/screenshots/contacts-dark.png) | ![The My message page previewing one personalised email next to its spam score of 97, the estimate that it will land in the main inbox, and advice](docs/screenshots/templates-dark.png) |
-| **My contacts.** Your imported list, searchable and sortable, with every column from your spreadsheet. | **My message.** The finished email for a real contact, its spam score, where it will land (main inbox, Promotions or spam) and what to change. |
-| ![The Email design page: blocks to add on the left, a designed email with a logo, heading, photo and button in the middle, and the selected heading's settings on the right](docs/screenshots/design-dark.png) | ![The warm-up section of Sending options with the Very safe, Safe (recommended), Faster and My own plan choices and the next days' limits](docs/screenshots/warmup-dark.png) |
-| **Email design.** Click anything in the email to change it: words, colours, pictures, buttons and more. | **Warm-up plans.** A safe recommended plan, two others, or your own number for each day. |
+| **My contacts.** Your imported list with each person's status and when they were last emailed, searchable, sortable and filterable. | **My message.** The finished email for a real contact, its spam score, where it will land (main inbox, Promotions or spam) and what to change. |
+| ![The Email design page: block tiles to drag in on the left, a designed email in the middle with the photo selected, showing its move, copy and remove buttons and a resize handle, and the photo's settings on the right](docs/screenshots/design-dark.png) | ![The warm-up section of Sending options with the Very safe, Safe (recommended), Faster and My own plan choices and the next days' limits](docs/screenshots/warmup-dark.png) |
+| **Email design.** Drag blocks in and around, type straight onto the email, drag pictures to resize. | **Warm-up plans.** A safe recommended plan, two others, or your own number for each day. |
 | ![The Sent emails page with a table of every email sent, its outcome and the subject used](docs/screenshots/sent-dark.png) | ![The My inbox page with two replies and one bounce, each labelled](docs/screenshots/inbox-dark.png) |
 | **Sent emails.** Every message that went out, and what came back. Exports to Excel. | **My inbox.** Replies, bounces and opt-outs, readable inside the app. |
 | ![The Deliverability page building an SPF record from a list of email services](docs/screenshots/deliverability-dark.png) | ![The Send page with its before-you-send checklist, counters and the Start Emailing button](docs/screenshots/send-dark.png) |
-| **Domain check.** Checks your domain and writes SPF, DMARC and DKIM records for you. | **Send emails.** A checklist first, then sending at a human pace that you can pause any time. |
+| **Domain check.** Checks your domain and writes SPF, DMARC and DKIM records for you. | **Send emails.** A checklist first, then sending at a human pace that you can pause any time, and a new campaign when you want to email everyone again. |
 | ![The update popup saying a new version is available, with Update later and Update now buttons](docs/screenshots/update-popup.png) | ![The dashboard in the light theme](docs/screenshots/home-light.png) |
 | **Automatic updates.** One click to update; the app reopens by itself. | **Light theme.** Or dark, or match your computer, at five text sizes. |
 | ![The dashboard in Arabic, with the whole layout mirrored to read from right to left](docs/screenshots/home-arabic.png) | ![The Settings page in German, with the language choice at the top: English, Arabic, German, Spanish and French](docs/screenshots/settings-german.png) |
@@ -116,7 +132,7 @@ Français
 
 You don't need to know anything about coding.
 
-1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.7.1.zip`**.
+1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.7.2.zip`**.
 2. Right-click the downloaded file → **Extract All...** → **Extract**.
 3. In the folder that opens, double-click **`HomingPigeon Setup.exe`**.
 4. Click **Install**. Setup shows you every step while it works: it downloads what the app needs
@@ -150,7 +166,8 @@ next time instead. You can also check any time in **Settings → Updates and hel
 contacts, templates and settings are always kept.
 
 If you have v0.5.1 or older, install v0.6.0 once by hand (download it and run its Setup as
-above); every update after that is automatic.
+above); every update after that is automatic. From v0.7.2 on, Setup itself also checks GitHub
+first: if you run an older Setup and a newer version exists, it installs the newer one instead.
 
 **Removing:** Settings → Apps → Installed apps → HomingPigeon → Uninstall, or **Settings →
 Uninstall HomingPigeon** inside the app. Your information is kept unless you choose to delete it

@@ -6,7 +6,7 @@ themselves, the people who answered, and the addresses that were dropped.
 """
 from __future__ import annotations
 
-from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QHBoxLayout, QPlainTextEdit, QSplitter, QVBoxLayout, QWidget
 
 from app.core import credentials, db, imap_sync, prefs
@@ -21,20 +21,42 @@ from app.ui.widgets.tables import DataTable
 from app.workers import jobs
 from app.workers.base import Task
 
-AUTO_SYNC_MINUTES = 30
+# The main window checks this often while the app is open, so late bounces are
+# caught during a send, not only when this page is on screen
+AUTO_SYNC_MINUTES = 10
 
 SOURCE_LABELS = {"bounce": "Bounce", "reply": "Opted out", "manual": "Manual",
                  "import": "Imported", "send": "Rejected"}
 
 # What the check decided each message was, in words a non-technical reader gets
 KIND_LABELS = {"reply": "Reply", "bounce": "Bounce", "optout": "Opt-out request",
-               "other": "Other mail"}
-KIND_TONES = {"reply": "success", "bounce": "error", "optout": "warning", "other": None}
+               "autoreply": "Auto-reply", "delay": "Delivery delayed", "other": "Other mail"}
+KIND_TONES = {"reply": "success", "bounce": "error", "optout": "warning", "autoreply": None,
+              "delay": "warning", "other": None}
 # The table colours cells by theme token, so these are token names, not QSS tones.
 
 # The filter buttons above the message list
 FILTERS = [("all", "Everything"), ("reply", "Replies"), ("bounce", "Bounces"),
-           ("optout", "Opt-outs"), ("other", "Other mail")]
+           ("optout", "Opt-outs"), ("autoreply", "Auto-replies"), ("other", "Other mail")]
+
+
+def imap_settings() -> imap_sync.ImapSettings | None:
+    """The inbox details from My email account, or None when there are none yet."""
+    host = db.get_setting("imap_host", "")
+    if not host:
+        return None
+    password = (credentials.load_secret(credentials.IMAP_PASSWORD)
+                or credentials.load_secret(credentials.SMTP_PASSWORD))
+    try:
+        port = int(db.get_setting("imap_port", 993))
+    except (TypeError, ValueError):
+        port = 993
+    return imap_sync.ImapSettings(
+        host=host, port=port,
+        username=db.get_setting("smtp_username", "") or db.get_setting("sender_email", ""),
+        password=password, use_ssl=port == 993,
+        folder=db.get_setting("imap_folder", "INBOX"),
+    )
 
 
 class InboxPage(Page):
@@ -45,14 +67,6 @@ class InboxPage(Page):
         self._shown: list = []
         self._reading = False
         self._build()
-
-        # Background polling: a timer on the UI thread that starts a worker.
-        # The IMAP call itself never touches the UI thread.
-        self._auto_timer = QTimer(self)
-        self._auto_timer.setInterval(AUTO_SYNC_MINUTES * 60 * 1000)
-        self._auto_timer.timeout.connect(self._auto_sync)
-        if self.auto_sync.isChecked():
-            self._auto_timer.start()
 
     def _build(self) -> None:
         self.add_header(
@@ -188,31 +202,10 @@ class InboxPage(Page):
         return holder
 
     # --- sync ---------------------------------------------------------------
-    def _settings(self) -> imap_sync.ImapSettings | None:
-        host = db.get_setting("imap_host", "")
-        if not host:
-            return None
-        password = (credentials.load_secret(credentials.IMAP_PASSWORD)
-                    or credentials.load_secret(credentials.SMTP_PASSWORD))
-        try:
-            port = int(db.get_setting("imap_port", 993))
-        except (TypeError, ValueError):
-            port = 993
-        return imap_sync.ImapSettings(
-            host=host, port=port,
-            username=db.get_setting("smtp_username", "") or db.get_setting("sender_email", ""),
-            password=password, use_ssl=port == 993,
-            folder=db.get_setting("imap_folder", "INBOX"),
-        )
-
-    def _auto_sync(self) -> None:
-        if self.auto_sync.isChecked() and not self._syncing and self._settings() is not None:
-            self._sync(quiet=True)
-
     def _sync(self, quiet: bool = False) -> None:
         if self._syncing:
             return
-        settings = self._settings()
+        settings = imap_settings()
         if settings is None:
             if not quiet:
                 self.notify("Add your IMAP details on the 'My email account' page first", "warn")
@@ -262,10 +255,13 @@ class InboxPage(Page):
 
     def _toggle_auto(self, enabled: bool) -> None:
         db.set_setting("auto_imap_sync", enabled)
-        if enabled:
-            self._auto_timer.start()
-        else:
-            self._auto_timer.stop()
+
+    def background_check_done(self, result: imap_sync.SyncResult) -> None:
+        """The main window's automatic check finished: show what it found."""
+        if not self._syncing:
+            self.sync_status.setText(t(result.summary()))
+            set_tone(self.sync_status, "muted")
+            self._load()
 
     def busy_reason(self) -> str | None:
         return "the inbox check is still running" if self._syncing else None

@@ -254,6 +254,7 @@ class SendWorker(threading.Thread):
         self.sent = 0
         self.failed = 0
         self.skipped = 0
+        self._started = db.now()
 
     # -- control -------------------------------------------------------------
     def request_stop(self) -> None:
@@ -332,18 +333,29 @@ class SendWorker(threading.Thread):
 
     # -- recipients ----------------------------------------------------------
     def _pending(self) -> list:
+        # Spreadsheet order: contacts are numbered in the order they were imported
         return db.query(
-            "SELECT c.* FROM campaign_recipients r JOIN contacts c ON c.id = r.contact_id "
+            "SELECT c.*, r.attempts AS tries FROM campaign_recipients r "
+            "JOIN contacts c ON c.id = r.contact_id "
             "WHERE r.campaign_id = ? AND r.status IN ('pending', 'retry') AND c.valid = 1 "
-            "ORDER BY r.rowid",
+            "ORDER BY c.id",
             (self.plan.campaign_id,),
         )
+
+    def _retry_or_fail(self, contact) -> str:
+        """'retry' while there are attempts left, then 'failed' for good."""
+        return "retry" if (contact["tries"] or 0) + 1 < config.MAX_SEND_ATTEMPTS else "failed"
 
     def _record(self, contact, status: str, message=None, subject: str = "",
                 error: str | None = None, sent_at: str | None = None) -> None:
         """Copy this attempt into the permanent sent history, body and all."""
         if status not in ("sent", "failed", "bounced"):
             return
+        try:
+            db.record_contacted(contact["email"], self.plan.campaign_id, status, sent_at)
+        except Exception as problem:  # noqa: BLE001 - logged, and the send record still has it
+            self._log(t("Could not save a copy of the email to {email}: {problem}",
+                        email=contact['email'], problem=problem), "warn")
         body_html = ""
         if message is not None:
             part = message.get_body(("html",))
@@ -378,10 +390,19 @@ class SendWorker(threading.Thread):
         )
 
     def _hard_bounce_rate(self) -> float:
+        """Failures in this run, plus bounces the inbox check has found since it started.
+
+        Gmail and Outlook accept nearly everything at send time and bounce it
+        minutes later, so without the inbox's late bounces this would never trip.
+        """
         attempted = self.sent + self.failed
         if attempted < config.MIN_SAMPLE_FOR_BOUNCE_RATE:
             return 0.0
-        return self.failed / attempted
+        row = db.query_one(
+            "SELECT COUNT(*) AS n FROM campaign_recipients WHERE campaign_id = ? "
+            "AND status = 'bounced' AND sent_at >= ?", (self.plan.campaign_id, self._started))
+        late = row["n"] if row else 0
+        return min(1.0, (self.failed + late) / attempted)
 
     # -- main loop -----------------------------------------------------------
     def run(self) -> None:
@@ -455,6 +476,15 @@ class SendWorker(threading.Thread):
 
             email = (contact["email"] or "").strip()
 
+            # A last check by address: someone deleted and imported again gets a
+            # new contact number, but must still not be emailed twice
+            if db.already_contacted(email, self.plan.campaign_id):
+                self._mark(contact["id"], "skipped", last_error="Already emailed in this campaign")
+                self.skipped += 1
+                self._log(t("Skipped {email}: already emailed in this campaign.", email=email),
+                          "warn")
+                continue
+
             if db.is_suppressed(email):
                 self._mark(contact["id"], "skipped", last_error="On the suppression list")
                 self.skipped += 1
@@ -488,9 +518,10 @@ class SendWorker(threading.Thread):
                     self.plan.sender, email, context, local_content, rng=rng
                 )
             except Exception as error:  # noqa: BLE001
-                self._mark(contact["id"], "failed", last_error=t("Compose error: {error}",
-                                                                 error=error))
-                self._record(contact, "failed", error=t("Compose error: {error}", error=error))
+                outcome = self._retry_or_fail(contact)
+                self._mark(contact["id"], outcome, last_error=t("Compose error: {error}",
+                                                                error=error))
+                self._record(contact, outcome, error=t("Compose error: {error}", error=error))
                 self.failed += 1
                 self._log(t("Could not build the message for {email}: {error}",
                             email=email, error=error), "error")
@@ -502,9 +533,9 @@ class SendWorker(threading.Thread):
                 code = getattr(error, "smtp_code", 0) or 0
                 detail = str(error)[:400]
                 permanent = 500 <= code < 600
-                self._mark(contact["id"], "bounced" if permanent else "retry", last_error=detail)
-                self._record(contact, "bounced" if permanent else "retry", message, subject,
-                             error=detail)
+                outcome = "bounced" if permanent else self._retry_or_fail(contact)
+                self._mark(contact["id"], outcome, last_error=detail)
+                self._record(contact, outcome, message, subject, error=detail)
                 self.failed += 1
                 self._consecutive_failures += 1
                 if permanent:
@@ -515,14 +546,18 @@ class SendWorker(threading.Thread):
                     self._log(t("Temporary failure: {email}, {detail}",
                                 email=email, detail=detail), "warn")
             except (smtplib.SMTPServerDisconnected, smtplib.SMTPConnectError) as error:
-                self._mark(contact["id"], "retry", last_error=str(error)[:400])
+                outcome = self._retry_or_fail(contact)
+                self._mark(contact["id"], outcome, last_error=str(error)[:400])
+                self._record(contact, outcome, message, subject, error=str(error)[:400])
                 self._consecutive_failures += 1
                 self._close_server()
                 self._log(t("Connection lost on {email}; will reconnect. ({error})",
                             email=email, error=error), "warn")
             except Exception as error:  # noqa: BLE001
-                self._mark(contact["id"], "failed", last_error=f"{type(error).__name__}: {error}"[:400])
-                self._record(contact, "failed", message, subject,
+                outcome = self._retry_or_fail(contact)
+                self._mark(contact["id"], outcome,
+                           last_error=f"{type(error).__name__}: {error}"[:400])
+                self._record(contact, outcome, message, subject,
                              error=f"{type(error).__name__}: {error}"[:400])
                 self.failed += 1
                 self._consecutive_failures += 1

@@ -2,6 +2,38 @@
 
 Newest first. Add to the top when you change something.
 
+## v0.7.2 beta
+
+- **Nobody is emailed twice.** New `contacted` table (schema 4), keyed by email
+  and campaign, filled from the existing history on upgrade. The Send page now
+  always keeps the current campaign; before, a finished campaign made the next
+  Send create a new one and queue everyone again, and Clear whole list deleted
+  the campaign, so a re-import emailed people a second time. Queueing is one
+  indexed SQL statement (`db.queue_contacts`), sending follows the spreadsheet's
+  order, and the worker checks the address once more before each email.
+- **Campaigns.** "Start a new campaign" on Send emails emails everyone again
+  (bounced, unsubscribed and do-not-contact left out). Right-click "Send to this
+  person again" on My contacts and Sent emails. Temporary failures are retried
+  up to 3 times, then marked failed.
+- **My contacts:** Status is now Not sent yet / Sent, no reply / Replied /
+  Bounced / Failed / Unsubscribed / Excluded, with a Last sent column and a
+  "Show:" filter.
+- **Bounce detection.** Inbox checked in the background every 10 minutes while
+  the app is open (was: only while My inbox was open, every 30). Bounces matched
+  by Message-ID; Outlook, Microsoft 365, Yahoo and Zoho wording; the Junk folder
+  is read for bounces; delay notices are no longer bounces; a full mailbox is
+  retried; out-of-office replies are no longer counted as replies; a renumbered
+  mailbox (UIDVALIDITY) is read again. Late bounces count toward the 5% stop.
+- **Email design is drag and drop.** Block tiles with real icons, drag blocks in
+  and around with a drop line, type straight onto the email, resize handles for
+  pictures, buttons and empty space, a move grip on the toolbar instead of
+  arrows, and a simpler right panel ("Look" plus "More options").
+- **Setup installs the newest version.** An installer from v0.7.2 on checks
+  GitHub first and installs a newer release instead (checked against GitHub's
+  SHA-256), or its own copy when offline.
+- **Look:** number boxes have proper arrows inside the box, and drop-down lists
+  open straight below their box.
+
 ## v0.7.1 beta
 
 - **Email design page** (new, between My message and Sending options). A

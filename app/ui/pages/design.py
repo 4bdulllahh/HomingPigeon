@@ -8,11 +8,11 @@ import tempfile
 import webbrowser
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QColor, QKeySequence, QShortcut
-from PyQt6.QtWidgets import (QAbstractItemView, QColorDialog, QDialog, QFileDialog, QHBoxLayout,
-                             QInputDialog, QLabel, QListWidget, QListWidgetItem, QMenu,
-                             QPushButton, QSplitter, QVBoxLayout, QWidget)
+from PyQt6.QtCore import QPoint, Qt, pyqtSignal
+from PyQt6.QtGui import QAction, QColor, QIcon, QKeySequence, QShortcut
+from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QColorDialog, QDialog, QFileDialog,
+                             QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QListWidget,
+                             QListWidgetItem, QMenu, QPushButton, QSplitter, QVBoxLayout, QWidget)
 
 from app.core import composer, credentials, db, design, importer, merge, scorer, sender
 from app.i18n import t
@@ -23,7 +23,8 @@ from app.ui.widgets.common import (Card, ChoiceButtons, FormRow, ScrollPage, Tab
                                    primary_button, row, secondary_button, set_tone, small_button,
                                    subheading)
 from app.ui.widgets.dialogs import ChoiceDialog, ConfirmDialog, InfoDialog
-from app.ui.widgets.email_canvas import EmailCanvas, picture_thumbnail, snapshot
+from app.ui.widgets.email_canvas import (INLINE, MIME_NEW, EmailCanvas, faded, picture_thumbnail,
+                                         snapshot, start_drag)
 from app.ui.widgets.inputs import (Debouncer, checkbox, combo, get_text, line_edit, set_text,
                                    spin_box, text_box)
 from app.workers.base import Task
@@ -38,16 +39,20 @@ HELP_SECTIONS = [
     ("The quick way", [
         "Step 1. Press \"New design\" and pick a starting design you like.",
         "Step 2. Click anything in the email in the middle to change it on the right.",
-        "Step 3. Add blocks from the left. Drag them in \"Your blocks\" to change the order, or "
-        "use the arrows on the selected block.",
+        "Step 3. Drag blocks from the left into the email. A blue line shows where they will "
+        "land. Drag any block in the email to move it.",
         "Step 4. Press Save, then tick \"Send my emails with this design\".",
         "Step 5. Press \"Send me a test\" to see it in your own inbox before sending to anyone.",
     ]),
     ("Click and change", [
         "Click a block in the email to select it. Its settings appear on the right.",
+        "Double-click a heading, text, quote or button to type straight onto the email. Press "
+        "Enter or click somewhere else when you are done.",
+        "Pictures, buttons and empty space get a small square handle when selected. Drag it "
+        "to make them bigger or smaller.",
         "Click the coloured area around the email to change the email's own style: width, "
         "colours, corners, font and the inbox preview text.",
-        "The small buttons on a selected block move it up or down, make a copy or remove it.",
+        "The small buttons beside a selected block move it (drag), make a copy or remove it.",
         "Ctrl+Z undoes a change and Ctrl+Y does it again. Ctrl+S saves.",
     ]),
     ("Your message block", [
@@ -287,6 +292,57 @@ class StarterDialog(QDialog):
         layout.addWidget(row(None, secondary_button("Cancel", self.reject, 110)))
 
 
+class BlockTile(QFrame):
+    """One block in the Add panel: drag it into the email, or click it to add it."""
+
+    def __init__(self, spec: design.BlockSpec, on_click):
+        super().__init__()
+        self.spec = spec
+        self._on_click = on_click
+        self._press: QPoint | None = None
+        self.setProperty("role", "tile")
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.setToolTip(t(spec.note))
+        scale = theme.text_scale()
+        self.setMinimumHeight(round(64 * scale))
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, round(8 * scale), 4, round(6 * scale))
+        layout.setSpacing(round(4 * scale))
+        icon = QLabel(theme.block_icon(spec.kind, spec.glyph))
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setStyleSheet(theme.icon_css(20) + f" color: {theme.color('accent')}; "
+                                                "background: transparent; border: none;")
+        name = QLabel(t(spec.label))
+        name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        name.setWordWrap(True)
+        name.setStyleSheet(f"font-size: {theme.px(12)}px; background: transparent; border: none;")
+        for label in (icon, name):
+            label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            layout.addWidget(label)
+
+    def mousePressEvent(self, event):  # noqa: N802 - Qt naming
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._press = event.position().toPoint()
+
+    def mouseMoveEvent(self, event):  # noqa: N802 - Qt naming
+        if (self._press is not None and event.buttons() & Qt.MouseButton.LeftButton
+                and (event.position().toPoint() - self._press).manhattanLength()
+                >= QApplication.startDragDistance()):
+            self._press = None
+            start_drag(self, MIME_NEW, self.spec.kind, faded(self))
+
+    def mouseReleaseEvent(self, event):  # noqa: N802 - Qt naming
+        if self._press is not None and self.rect().contains(event.position().toPoint()):
+            self._on_click()
+        self._press = None
+
+
+# Settings shown straight away for a block; the rest wait under "More options"
+QUICK_STYLE = {"color", "align", "size", "width", "height", "bar", "play", "card_bg",
+               "text_color", "title_size"}
+QUICK_PAGE = {"width", "bg", "card_bg", "font", "size"}
+
+
 class DesignPage(Page):
     def __init__(self, window):
         super().__init__(window)
@@ -389,7 +445,11 @@ class DesignPage(Page):
         self.canvas.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         self.canvas.selected.connect(self._select)
         self.canvas.action.connect(self._block_action)
-        self.canvas.edit.connect(self._focus_first_field)
+        self.canvas.edit.connect(self._edit_on_email)
+        self.canvas.dropped.connect(self._dropped)
+        self.canvas.typed.connect(self._typed)
+        self.canvas.resized.connect(self._resized)
+        self.canvas.resize_done.connect(self._show_properties)
         canvas_card = Card(kind="card", padding=0)
         canvas_card.add(self.canvas, 1)
         splitter.addWidget(canvas_card)
@@ -437,17 +497,22 @@ class DesignPage(Page):
 
     def _palette(self) -> QWidget:
         area = ScrollPage(spacing=6)
-        area.add(hint("Click a block to add it below the selected one."))
+        area.add(hint("Drag a block into the email, or click it to add it below the selected "
+                      "one."))
         for group in design.GROUPS:
             area.add(subheading(group))
-            holder, layout = flow_row(6)
-            for spec in design.BLOCKS.values():
-                if spec.group != group or spec.kind == "message":
-                    continue
-                button = small_button(f"{spec.glyph}  {t(spec.label)}",
-                                      lambda k=spec.kind: self._add_block(k))
-                button.setToolTip(t(spec.note))
-                layout.addWidget(button)
+            holder = QWidget()
+            holder.setProperty("role", "plain")
+            grid = QGridLayout(holder)
+            grid.setContentsMargins(0, 0, 0, 0)
+            grid.setSpacing(6)
+            specs = [spec for spec in design.BLOCKS.values()
+                     if spec.group == group and spec.kind != "message"]
+            for index, spec in enumerate(specs):
+                grid.addWidget(BlockTile(spec, lambda k=spec.kind: self._add_block(k)),
+                               index // 2, index % 2)
+            grid.setColumnStretch(0, 1)
+            grid.setColumnStretch(1, 1)
             area.add(holder)
         area.add_stretch()
         return area
@@ -760,15 +825,19 @@ class DesignPage(Page):
             if value and spec.kind not in ("footer", "html"):
                 words = value.splitlines()[0][:28]
                 break
-        return f"{spec.glyph}   {t(spec.label)}" + (f"  ·  {words}" if words else "")
+        return t(spec.label) + (f"  ·  {words}" if words else "")
 
     def _fill_layers(self) -> None:
         if self._design is None:
             return
         blocked = self.layers.blockSignals(True)
         self.layers.clear()
+        size = theme.px(18)
         for block in self._design["blocks"]:
+            spec = design.BLOCKS[block["type"]]
             item = QListWidgetItem(self._summary(block))
+            item.setIcon(QIcon(theme.icon_pixmap(theme.block_icon(spec.kind, spec.glyph), size,
+                                                 "accent")))
             item.setData(Qt.ItemDataRole.UserRole, block["id"])
             self.layers.addItem(item)
             if block["id"] == self._selected:
@@ -806,14 +875,44 @@ class DesignPage(Page):
         if first is not None:
             first.setFocus()
 
+    def _edit_on_email(self, block_id: str) -> None:
+        """Double-click: type on the email when the block has words, else go to its first setting."""
+        block = self._block(block_id)
+        key = INLINE.get(block["type"]) if block else None
+        if key is None:
+            self._focus_first_field(block_id)
+            return
+        self._select(block_id)
+        field = next(f for f in design.fields_for(block["type"]) if f.key == key)
+        self.canvas.start_typing(block_id, key, field.kind == "multiline")
+
+    def _typed(self, block_id: str, key: str, text: str) -> None:
+        block = self._block(block_id)
+        if block is None or block.get(key) == text:
+            return
+        block[key] = text
+        self._touch()
+        self._fill_layers()
+        if block_id == self._selected:
+            self._show_properties()
+
+    def _resized(self, block_id: str, key: str, value) -> None:
+        block = self._block(block_id)
+        if block is not None:
+            block[key] = value
+            self._touch()
+
     # --- adding, moving, removing ----------------------------------------------------------
-    def _add_block(self, kind: str) -> None:
+    def _add_block(self, kind: str, index: int | None = None) -> None:
+        """Add a block at ``index``, or below the selected one when it was clicked, not dropped."""
         if self._design is None:
             return
         blocks = self._design["blocks"]
         block = design.new_block(kind, design.brand_kit(), self._design)
         current = self._block(self._selected)
-        if current is not None:
+        if index is not None:
+            index = max(0, min(index, len(blocks)))
+        elif current is not None:
             index = blocks.index(current) + 1
         elif blocks and blocks[-1]["type"] == "footer" and kind != "footer":
             index = len(blocks) - 1
@@ -823,6 +922,22 @@ class DesignPage(Page):
         self._selected = block["id"]
         self._structure_changed()
         self.canvas.reveal(block["id"])
+
+    def _dropped(self, kind: str, value: str, index: int) -> None:
+        if self._design is None:
+            return
+        if kind == "new":
+            if value in design.BLOCKS and value != "message":
+                self._add_block(value, index)
+            return
+        block = self._block(value)
+        if block is None:
+            return
+        self._selected = value
+        if not design.move_block(self._design["blocks"], block, index):
+            self.canvas.select(value)
+            return
+        self._structure_changed()
 
     def _block_action(self, block_id: str, action: str) -> None:
         block = self._block(block_id)
@@ -925,11 +1040,27 @@ class DesignPage(Page):
                 self.props.add(group)
             group.add(self._field(field, target))
 
+    def _simple_sections(self, fields, target: dict, quick: set, quick_title: str) -> None:
+        """The few settings most people want, open; everything else under "More options"."""
+        fields = list(fields)
+        words = [f for f in fields if f.section not in ("Style", design.SPACING)
+                 and target is not self._design["page"]]
+        look = [f for f in fields if f not in words and f.key in quick]
+        more = [f for f in fields if f not in words and f not in look]
+        self._sections(words, target)
+        for title, group_fields, opened in ((quick_title, look, True),
+                                            ("More options", more, False)):
+            if group_fields:
+                group = Collapsible(title, opened)
+                for field in group_fields:
+                    group.add(self._field(field, target))
+                self.props.add(group)
+
     def _page_properties(self) -> None:
         self.props.add(subheading("Email style"))
         self.props.add(hint("Settings for the whole email. Click a block in the email to change "
                             "that block instead."))
-        self._sections(design.PAGE_FIELDS, self._design["page"], closed=("Inbox",))
+        self._simple_sections(design.PAGE_FIELDS, self._design["page"], QUICK_PAGE, "Look")
         self.props.add(self._brand_section())
 
     def _block_properties(self, block: dict) -> None:
@@ -937,13 +1068,18 @@ class DesignPage(Page):
         back = ghost_button("‹  Email style", lambda: self._select(""))
         back.setToolTip(t("Back to the settings for the whole email"))
         self.props.add(row(back, None))
-        self.props.add(subheading(f"{spec.glyph}  {t(spec.label)}"))
-        self.props.add(hint(spec.note))
+        icon = QLabel(theme.block_icon(spec.kind, spec.glyph))
+        icon.setStyleSheet(theme.icon_css(18) + f" color: {theme.color('accent')};")
+        self.props.add(row(icon, subheading(spec.label), None, spacing=8))
+        note = spec.note
+        if spec.kind in INLINE:
+            note = t("{note} Double-click it in the email to type straight onto it.",
+                     note=t(spec.note))
+        self.props.add(hint(note))
         tools = [small_button(label, lambda a=action: self._block_action(block["id"], a))
-                 for label, action in (("↑ Up", "up"), ("↓ Down", "down"), ("⧉ Copy", "copy"),
-                                       ("✕ Remove", "remove"))]
+                 for label, action in (("Make a copy", "copy"), ("Remove", "remove"))]
         self.props.add(row(*tools, None, spacing=4))
-        self._sections(design.fields_for(block["type"]), block, closed=(design.SPACING,))
+        self._simple_sections(design.fields_for(block["type"]), block, QUICK_STYLE, "Look")
 
     def _set(self, target: dict, key: str, value) -> None:
         target[key] = value

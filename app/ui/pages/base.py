@@ -43,6 +43,19 @@ class Page(QWidget):
     def go(self, page: str) -> None:
         self.window_.show_page(page)
 
+    def allow_again(self, emails: list[str]) -> None:
+        """"Send to this person again", from My contacts or Sent emails."""
+        from app.core import db
+        from app.i18n import t
+
+        allowed, refused = db.allow_again(emails)
+        if allowed:
+            self.notify(t("{count} can be emailed again in this campaign", count=allowed),
+                        "success")
+        if refused:
+            self.notify(t("{count} left out: they bounced, unsubscribed or are on your "
+                          "do-not-contact list", count=refused), "warn", 7000)
+
     def on_show(self) -> None:
         """Called every time the page becomes visible. Keep it cheap."""
 

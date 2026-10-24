@@ -148,6 +148,30 @@ def load_setup():
     return module
 
 
+def test_an_old_setup_installs_the_newest_release_instead(monkeypatch, tmp_path):
+    import json
+
+    setup = load_setup()
+    data = release_zip()
+    digest = "sha256:" + hashlib.sha256(data).hexdigest()
+    reply = json.dumps(github_reply(digest=digest)).encode()
+    monkeypatch.setattr(setup.urllib.request, "urlopen", lambda *_a, **_k: FakeReply(reply))
+    release = setup.newest_release()
+    assert release["version"] == "9.9.9" and release["sha256"] == digest.split(":")[1]
+    assert setup.version_tuple("v0.7.2 beta") == (0, 7, 2) < setup.version_tuple("9.9.9")
+
+    archive = tmp_path / "release.zip"
+    archive.write_bytes(data)
+    staged = setup.unpack_release(archive, tmp_path / "newest")
+    assert setup.read_version(staged) == "9.9.9"
+    assert not (staged / "HomingPigeon Setup.exe").exists()
+
+    # A release without a published checksum is never installed
+    unchecked = json.dumps(github_reply()).encode()
+    monkeypatch.setattr(setup.urllib.request, "urlopen", lambda *_a, **_k: FakeReply(unchecked))
+    assert setup.newest_release() is None
+
+
 def test_installer_can_update_without_questions():
     setup = load_setup()
     assert "auto_update" in setup.SetupWindow.__init__.__code__.co_varnames

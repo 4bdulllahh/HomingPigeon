@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import QFileDialog, QGridLayout, QHBoxLayout, QMenu, QVBoxL
 
 from app.core import db, importer, prefs
 from app.i18n import t
-from app.models.contacts_model import (SORT_MENU, SORT_SHORT, ContactsModel,
+from app.models.contacts_model import (SORT_MENU, SORT_SHORT, STATUS_MENU, ContactsModel,
                                        all_contact_emails)
 from app.models.table_model import SimpleTableModel
 from app.ui import theme
@@ -329,6 +329,10 @@ class ContactsPage(Page):
 
         self.sort_button = MenuButton(SORT_MENU, "import", prefix="Sort: ",
                                       on_change=self._change_sort, short=SORT_SHORT)
+        self.status_button = MenuButton(STATUS_MENU, "all", prefix="Show: ",
+                                        on_change=self._change_status)
+        self.status_button.setToolTip(t("Show only the contacts with one status, such as the "
+                                        "people not emailed yet"))
         self.delete_button = danger_button("Delete selected", self._delete_selected, 150)
         self.delete_button.setEnabled(False)
         self.clear_button = danger_button("Clear whole list...", self._clear_list, 160)
@@ -337,7 +341,8 @@ class ContactsPage(Page):
         controls = QHBoxLayout()
         controls.setSpacing(8)
         controls.addWidget(self.search_box, 1)
-        for button in (self.sort_button, self.delete_button, self.clear_button, export_button):
+        for button in (self.status_button, self.sort_button, self.delete_button,
+                       self.clear_button, export_button):
             controls.addWidget(button)
         layout.addLayout(controls)
 
@@ -385,6 +390,12 @@ class ContactsPage(Page):
         self.contacts_table.fit_columns()
         db.set_setting_soft("contacts_sort", key)
 
+    def _change_status(self, key: str) -> None:
+        self.contacts_model.set_status_filter(key)
+        self.contacts_table.clear_selection()
+        self.contacts_table.view.scrollToTop()
+        self.contacts_table.fit_columns()
+
     def _selection_changed(self) -> None:
         count = len(self.contacts_table.selected_rows())
         self.delete_button.setEnabled(count > 0)
@@ -392,7 +403,7 @@ class ContactsPage(Page):
             t(t("Delete {count} selected", count=count) if count > 1 else "Delete selected"))
 
     def _update_counts(self, total: int, sendable: int, matching: int) -> None:
-        if self.contacts_model.search_text():
+        if self.contacts_model.search_text() or self.contacts_model.status_filter() != "all":
             self.contacts_summary.setText(
                 t("{matching:,} match “{search_text}”  ·  {total:,} contacts in total  ·  "
                   "{sendable:,} sendable",
@@ -421,10 +432,23 @@ class ContactsPage(Page):
         menu.addAction(suppress)
 
         menu.addSeparator()
+        again = QAction(t(t("Send to these {count} people again", count=len(rows))
+                          if len(rows) > 1 else "Send to this person again"), menu)
+        again.setToolTip(t("Lets them get another email in the current campaign"))
+        again.triggered.connect(self._send_again)
+        menu.addAction(again)
+
+        menu.addSeparator()
         copy = QAction(t("Copy email address"), menu)
         copy.triggered.connect(lambda: self._copy_email(email))
         menu.addAction(copy)
         return menu
+
+    def _send_again(self) -> None:
+        rows = self.contacts_table.selected_rows()
+        if rows:
+            self.allow_again(self.contacts_model.emails_for_rows(rows))
+            self.contacts_model.reload()
 
     def _copy_email(self, email: str) -> None:
         from app.ui.widgets.common import copy_to_clipboard
@@ -470,8 +494,9 @@ class ContactsPage(Page):
             return
         if not ConfirmDialog.ask(
             self, "Clear the whole contact list?",
-            t("All {total:,} contacts will be removed, along with the progress of any "
-              "campaign that has not finished.\n\nYour do-not-contact list is kept, so "
+            t("All {total:,} contacts will be removed. The app still remembers who was "
+              "already emailed, so importing them again never emails anyone twice."
+              "\n\nYour do-not-contact list is kept, so "
               "anyone who has unsubscribed or bounced stays protected when you import a "
               "new spreadsheet.\n\nThis cannot be undone. Export first if you want a copy.",
               total=total),

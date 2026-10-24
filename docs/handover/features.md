@@ -20,6 +20,9 @@ Where each feature lives and how it works. Paths are from the repository root.
 ## My contacts list
 
 - Model: `app/models/contacts_model.py`, paged from SQLite 300 rows at a time.
+- Status and Last sent columns come from `db.contact_send_status()` and the
+  `contacted` table. "Show:" filters by status in SQL. Right-click "Send to this
+  person again" calls `Page.allow_again()` (also on Sent emails).
 - Columns: the fixed ones, then every heading from `importer.extra_columns()`
   (capped at 200 to survive junk sheets).
 - Delete selected (button, Delete key, right-click), "Delete and never contact
@@ -83,9 +86,23 @@ Where each feature lives and how it works. Paths are from the repository root.
   `preview_message` writes them in as data: URIs so a browser can show them.
 - The canvas (`EmailCanvas`) draws the design with Qt widgets, not a browser
   engine (too big, and Smart App Control blocks parts of it). It follows the
-  HTML closely; "Open in browser" shows the exact email. Clicking selects,
-  double-click jumps to the first setting, the floating toolbar moves, copies
-  and removes.
+  HTML closely; "Open in browser" shows the exact email.
+- **Drag and drop (v0.7.2).** The Add panel is a grid of `BlockTile`s with icons
+  from the Fluent icon font (`theme.BLOCK_ICONS`). A tile or a block on the
+  canvas starts a `QDrag` (`email_canvas.start_drag`); the canvas surface takes
+  the drop, shows a blue line and emits `dropped`, and the page inserts or moves
+  the block (`design.move_block`). Drags start from a `QTimer.singleShot(0)` so
+  the rebuild after a drop never deletes the widget whose handler is running.
+  Blocks are a flat list: dragging into the two columns or card is not possible.
+- **Typing on the email.** Double-click a block in `email_canvas.INLINE` opens a
+  `_Typing` editor over it; Enter (Ctrl+Enter for paragraphs) or clicking away
+  keeps it, Esc cancels. Other blocks still jump to their first setting.
+- **Resize handle.** Pictures, logos, videos, buttons and empty space get a
+  `_Handle`; dragging it changes the setting in `email_canvas.RESIZE`, clamped
+  to the field's limits. The handle stays shown while dragging, because hiding
+  it would let go of the mouse.
+- The floating toolbar is a move grip, copy and remove. The right panel shows
+  the words, then "Look" (`QUICK_STYLE` / `QUICK_PAGE`), then "More options".
 - Pictures go through `design.prepare_image` (Pillow) on a worker: rotated per
   EXIF, cut to 1200 px wide, recompressed; small animated GIFs kept as they are.
   Social icons and the video play button are drawn by Pillow at send time.
@@ -152,6 +169,11 @@ See [languages.md](languages.md). Settings → Language; `MainWindow.change_lang
   `SendWorker`. Status goes into `campaign_recipients` after every email.
 - Safety: random delay between emails, office hours and weekdays, holidays, the
   warm-up daily cap, stop after 5 failures in a row or a bounce rate over 5%.
+  The rate includes bounces the inbox check found for emails sent in this run
+  (late bounces), read from `campaign_recipients`.
+- **Campaigns (v0.7.2).** The Send page always uses `db.current_campaign()`;
+  "Start a new campaign" (`db.start_new_campaign`) closes it and queues everyone
+  again. Temporary failures retry up to `config.MAX_SEND_ATTEMPTS` (3) times.
 - After each attempt `_record()` copies the email into `sent_log`.
 
 ## Sent emails (`app/ui/pages/sent.py`, `app/models/sent_model.py`)
@@ -170,9 +192,19 @@ See [languages.md](languages.md). Settings → Language; `MainWindow.change_lang
 
 ## Inbox (`app/ui/pages/inbox.py`, `app/core/imap_sync.py`)
 
-- Reads new mail over IMAP from the last UID seen. Bounces are parsed for the
-  failed address; hard bounces are suppressed. Replies from known contacts set
-  `replied_at`. Everything read is stored in `inbox_messages` for reading.
+- Reads new mail over IMAP from the last UID seen, per folder, and starts again
+  from the last 30 days when the server's UIDVALIDITY changes. The Junk folder
+  (found by its `\Junk` flag or a usual name) is read too, for bounces only.
+- `MainWindow.check_inbox_in_background()` runs it every `AUTO_SYNC_MINUTES` (10)
+  while the app is open; a lock in `imap_sync.sync` stops two checks overlapping.
+- A bounce is matched to our email by the Message-ID in the copy it carries
+  (`original_message_id`, looked up in `sent_log`), then by the report's
+  recipient, then by a guess from the text. Hard bounces are suppressed; soft
+  ones (full mailbox, server busy) go back to `retry` (`_retry_later`).
+- "Still trying" notices (`is_delay`) are stored as `delay` and change nothing.
+  Out-of-office answers (`is_auto_reply`) are stored as `autoreply` and do not
+  count as replies. Replies from known contacts set `replied_at`. Everything read
+  is stored in `inbox_messages` for reading.
 
 ## Other pages
 

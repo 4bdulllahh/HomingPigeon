@@ -47,12 +47,15 @@ SKIP_NAMES = {
     "EMAIL_HINTS", "COMPANY_HINTS", "PERSON_HINTS", "SEVERITY_WEIGHT", "SQL", "CSS",
     "DATE_FORMATS", "STATUS_ICONS", "ICONS", "BLACKLISTS", "DNSBLS", "COMMON_SELECTORS",
     "hard_markers", "soft_markers", "SKIP_IN_PYTHON", "__all__", "FONTS", "QUICK_COLOURS", "LINKS_EXAMPLE",
+    "DELAY_SUBJECTS", "AUTO_REPLY_SUBJECTS", "HARD_MARKERS", "SOFT_MARKERS", "JUNK_NAMES",
+    "BLOCK_ICONS", "INLINE", "RESIZE", "BUTTON_SIZES", "QUICK_STYLE", "QUICK_PAGE",
 }
 
 # Strings that pass every test below but are still not wording: folder names,
 # a header name, programmer errors and DNS record types
 IGNORE = {
-    "a mx", "Doc", "Scripts", "Lib", "Message-ID", "Desktop", "sign off",
+    "a mx", "Doc", "Scripts", "Lib", "Message-ID", "Desktop", "sign off", "In-Reply-To",
+    "References", "Action",
     "db.init() must be called before db.connect()", "CryptProtectData failed",
     "CryptUnprotectData failed", "Start HomingPigeon - Mac.command",
     "Start HomingPigeon - Linux.sh", "Arial", "DejaVuSans-Bold.ttf", "DejaVuSans.ttf",

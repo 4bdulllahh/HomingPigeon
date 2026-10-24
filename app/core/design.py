@@ -379,6 +379,18 @@ def new_block(kind: str, kit: dict | None = None, design: dict | None = None) ->
     return block
 
 
+def move_block(blocks: list, block: dict, index: int) -> bool:
+    """Move ``block`` to land before whatever is at ``index`` now. False when nothing moves."""
+    old = blocks.index(block)
+    if index > old:
+        index -= 1      # everything below shifts up once the block is taken out
+    index = max(0, min(index, len(blocks) - 1))
+    if index == old:
+        return False
+    blocks.insert(index, blocks.pop(old))
+    return True
+
+
 def apply_brand(design: dict, kit: dict) -> None:
     """Recolour a design from the brand kit: every brand colour, the font and empty logos."""
     page = design["page"]

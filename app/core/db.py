@@ -15,7 +15,7 @@ from typing import Any, Iterable, Sequence
 
 from app import config
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _local = threading.local()
 _db_path: Path | None = None
@@ -236,6 +236,20 @@ CREATE TABLE IF NOT EXISTS sent_log (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sent_log_recipient ON sent_log(campaign_id, contact_id);
 CREATE INDEX IF NOT EXISTS idx_sent_log_when ON sent_log(sent_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sent_log_email ON sent_log(email);
+CREATE INDEX IF NOT EXISTS idx_sent_log_message ON sent_log(message_id);
+
+-- Who has been emailed in each campaign, by address (v0.7.2). This is what stops
+-- a person getting the same campaign twice: it survives deleting contacts,
+-- re-importing the sheet and clearing the Sent history. Only "Send to this
+-- person again" and "Start a new campaign" let someone be emailed once more.
+-- Status is the final outcome: sent, bounced or failed.
+CREATE TABLE IF NOT EXISTS contacted (
+    email       TEXT NOT NULL COLLATE NOCASE,
+    campaign_id INTEGER NOT NULL,
+    status      TEXT NOT NULL,
+    sent_at     TEXT,
+    PRIMARY KEY (email, campaign_id)
+);
 
 -- Email designs (v0.7.1): page styling and blocks as JSON, pictures included.
 -- The design emails are sent with is the setting design_id; 0 means plain.
@@ -262,6 +276,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if row["version"] < 3:
         # v0.7.1: the designs table. The schema above creates it; nothing to copy.
         pass
+    if row["version"] < 4:
+        # v0.7.2: who was already emailed, by address. Filled from both records, so
+        # a contact deleted or re-imported before the update is still remembered.
+        backfill_contacted(conn)
     if row["version"] < SCHEMA_VERSION:
         conn.execute("UPDATE schema_info SET version = ?", (SCHEMA_VERSION,))
 
@@ -275,6 +293,19 @@ def backfill_sent_log(conn: sqlite3.Connection) -> None:
         "SELECT r.campaign_id, r.contact_id, c.email, c.company, c.person, c.extra_json, "
         "r.status, r.attempts, r.subject_used, r.message_id, r.sent_at, r.last_error, "
         "c.replied_at, c.bounced_at "
+        "FROM campaign_recipients r JOIN contacts c ON c.id = r.contact_id "
+        "WHERE r.status IN ('sent', 'failed', 'bounced')")
+
+
+def backfill_contacted(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO contacted(email, campaign_id, status, sent_at) "
+        "SELECT lower(email), campaign_id, status, sent_at FROM sent_log "
+        "WHERE campaign_id IS NOT NULL AND email IS NOT NULL "
+        "AND status IN ('sent', 'failed', 'bounced')")
+    conn.execute(
+        "INSERT OR IGNORE INTO contacted(email, campaign_id, status, sent_at) "
+        "SELECT lower(c.email), r.campaign_id, r.status, r.sent_at "
         "FROM campaign_recipients r JOIN contacts c ON c.id = r.contact_id "
         "WHERE r.status IN ('sent', 'failed', 'bounced')")
 
@@ -513,6 +544,110 @@ def clear_sent() -> int:
     row = query_one("SELECT COUNT(*) AS n FROM sent_log")
     execute("DELETE FROM sent_log")
     return row["n"] if row else 0
+
+
+# --- Who was already emailed ------------------------------------------------
+def current_campaign() -> int | None:
+    """The campaign sends go into: the newest one. Only "Start a new campaign" makes another."""
+    row = query_one("SELECT MAX(id) AS id FROM campaigns")
+    return row["id"] if row and row["id"] is not None else None
+
+
+def record_contacted(email: str, campaign_id: int, status: str, sent_at: str | None = None,
+                     conn: sqlite3.Connection | None = None) -> None:
+    conn = conn or connect()
+    conn.execute(
+        "INSERT INTO contacted(email, campaign_id, status, sent_at) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(email, campaign_id) DO UPDATE SET status = excluded.status, "
+        "sent_at = COALESCE(excluded.sent_at, contacted.sent_at)",
+        ((email or "").strip().lower(), campaign_id, status, sent_at))
+    conn.commit()
+
+
+def already_contacted(email: str, campaign_id: int) -> bool:
+    return query_one("SELECT 1 FROM contacted WHERE email = ? AND campaign_id = ?",
+                     ((email or "").strip(), campaign_id)) is not None
+
+
+def queue_contacts(campaign_id: int) -> int:
+    """Add every contact who can be emailed in this campaign and is not queued yet.
+
+    One statement, so SQLite does the matching with its indexes: each contact is
+    looked up in the do-not-contact list and in ``contacted`` by its address,
+    which takes about as long for 100,000 contacts as for 100 per lookup.
+    """
+    conn = connect()
+    cur = conn.execute(
+        "INSERT OR IGNORE INTO campaign_recipients(campaign_id, contact_id, status) "
+        "SELECT ?, c.id, 'pending' FROM contacts c WHERE c.valid = 1 "
+        "AND NOT EXISTS (SELECT 1 FROM suppression s WHERE s.email = c.email) "
+        "AND NOT EXISTS (SELECT 1 FROM contacted k WHERE k.email = c.email "
+        "AND k.campaign_id = ?) ORDER BY c.id",
+        (campaign_id, campaign_id))
+    conn.commit()
+    return cur.rowcount
+
+
+def allow_again(emails: Iterable[str]) -> tuple[int, int]:
+    """Let these people be emailed once more in the current campaign.
+
+    Returns (allowed, refused). Bounced addresses and people who asked not to be
+    contacted are refused: emailing them again would hurt the sender.
+    """
+    campaign_id = current_campaign()
+    emails = sorted({(e or "").strip().lower() for e in emails if (e or "").strip()})
+    if campaign_id is None or not emails:
+        return 0, 0
+    allowed = refused = 0
+    conn = connect()
+    with conn:
+        for email in emails:
+            blocked = conn.execute(
+                "SELECT 1 FROM suppression WHERE email = ? UNION ALL "
+                "SELECT 1 FROM contacts WHERE email = ? AND (valid = 0 OR bounced_at IS NOT NULL)",
+                (email, email)).fetchone()
+            if blocked:
+                refused += 1
+                continue
+            conn.execute("DELETE FROM contacted WHERE email = ? AND campaign_id = ?",
+                         (email, campaign_id))
+            conn.execute(
+                "UPDATE campaign_recipients SET status = 'pending', attempts = 0, "
+                "last_error = NULL WHERE campaign_id = ? AND contact_id IN "
+                "(SELECT id FROM contacts WHERE email = ?)", (campaign_id, email))
+            allowed += 1
+    queue_contacts(campaign_id)
+    return allowed, refused
+
+
+def start_new_campaign(name: str) -> int:
+    """Close the current campaign and open a new one in which everyone can be emailed again."""
+    stamp = now()
+    conn = connect()
+    with conn:
+        conn.execute("UPDATE campaigns SET status = 'finished', finished_at = COALESCE("
+                     "finished_at, ?) WHERE status != 'finished'", (stamp,))
+        campaign_id = conn.execute(
+            "INSERT INTO campaigns(name, status, created_at) VALUES (?, 'draft', ?)",
+            (name, stamp)).lastrowid
+    queue_contacts(campaign_id)
+    return campaign_id
+
+
+def contact_send_status(campaign_id: int | None) -> str:
+    """SQL for one contact's status in the current campaign, for filtering and sorting.
+
+    Used inside a query on ``contacts``. The order is what matters most to the
+    user: an unsubscribe or a bounce outranks a reply, a reply outranks a send.
+    """
+    current = int(campaign_id) if campaign_id is not None else -1
+    return ("CASE WHEN EXISTS (SELECT 1 FROM suppression s WHERE s.email = contacts.email "
+            "AND s.source = 'reply') THEN 'unsubscribed' "
+            "WHEN contacts.bounced_at IS NOT NULL THEN 'bounced' "
+            "WHEN contacts.replied_at IS NOT NULL THEN 'replied' "
+            "WHEN contacts.valid = 0 THEN 'excluded' "
+            f"ELSE COALESCE((SELECT k.status FROM contacted k WHERE k.email = contacts.email "
+            f"AND k.campaign_id = {current}), 'not_sent') END")
 
 
 # --- Campaign stats ---------------------------------------------------------

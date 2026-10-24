@@ -27,6 +27,7 @@ BASE_COLUMNS = [
     ("Company", "company"),
     ("Contact person", "person"),
     ("Status", "_status"),
+    ("Last sent", "_last_sent"),
     ("Flags", "risk_flags"),
     ("Source file", "source_file"),
     ("Imported", "imported_at"),
@@ -50,6 +51,20 @@ def _alphabetical(column: str, descending: bool) -> str:
     return (f"({column} IS NULL OR {column} = '') ASC, "
             f"{column} COLLATE NOCASE {direction}")
 
+
+# Each contact's status in the current campaign (db.contact_send_status), as
+# words and a colour. The keys double as the "Show" filter.
+STATUSES = {
+    "not_sent": ("Not sent yet", "fg_muted"),
+    "sent": ("Sent, no reply", "fg"),
+    "replied": ("Replied", "success"),
+    "bounced": ("Bounced", "error"),
+    "failed": ("Failed", "error"),
+    "unsubscribed": ("Unsubscribed", "warning"),
+    "excluded": ("Excluded", "fg_muted"),
+}
+STATUS_MENU: list = [("all", "Everyone"), None,
+                     *((key, label) for key, (label, _tone) in STATUSES.items())]
 
 # Status worth acting on first: a bounce is dead, an excluded address will not
 # be sent to, a reply is a lead, everything else is untouched.
@@ -129,6 +144,8 @@ class ContactsModel(QAbstractTableModel):
         self._extras: list[str] = []
         self._columns = list(BASE_COLUMNS)
         self._search = ""
+        self._status = "all"
+        self._campaign: int | None = None
         self._sort = DEFAULT_SORT
         self._matching = 0
         self._exhausted = False
@@ -215,6 +232,16 @@ class ContactsModel(QAbstractTableModel):
     def search_text(self) -> str:
         return self._search
 
+    def set_status_filter(self, key: str) -> None:
+        """Show only contacts with one status, or "all"."""
+        if key == self._status:
+            return
+        self._status = key
+        self.reload()
+
+    def status_filter(self) -> str:
+        return self._status
+
     def set_sort(self, key: str) -> None:
         """Change the order. Re-runs the query; SQLite does the sorting."""
         if key not in _ORDER_BY or key == self._sort:
@@ -247,6 +274,7 @@ class ContactsModel(QAbstractTableModel):
         """Re-read the columns and the first page. Cheap: one COUNT plus 300 rows."""
         self.beginResetModel()
         self._refresh_columns()
+        self._campaign = db.current_campaign()
         self._rows = self._query(0, PAGE_SIZE)
         self._exhausted = len(self._rows) < PAGE_SIZE
         self._matching = self._count_matching()
@@ -260,10 +288,15 @@ class ContactsModel(QAbstractTableModel):
         self._columns = list(BASE_COLUMNS) + [(name, name) for name in self._extras]
 
     def _where(self) -> tuple[str, list]:
-        if not self._search:
-            return "", []
-        like = f"%{self._search}%"
-        return ("WHERE email LIKE ? OR company LIKE ? OR person LIKE ?", [like, like, like])
+        conditions, params = [], []
+        if self._search:
+            like = f"%{self._search}%"
+            conditions.append("(email LIKE ? OR company LIKE ? OR person LIKE ?)")
+            params += [like, like, like]
+        if self._status in STATUSES:
+            conditions.append(f"{db.contact_send_status(self._campaign)} = ?")
+            params.append(self._status)
+        return ("WHERE " + " AND ".join(conditions) if conditions else ""), params
 
     def _count_matching(self) -> int:
         clause, params = self._where()
@@ -279,25 +312,20 @@ class ContactsModel(QAbstractTableModel):
         # arrangement per page, which shows some rows twice and hides others.
         order = _ORDER_BY.get(self._sort, _ORDER_BY[DEFAULT_SORT])
         rows = db.query(
-            f"SELECT * FROM contacts {clause} ORDER BY {order}, id ASC LIMIT ? OFFSET ?",
+            f"SELECT *, {db.contact_send_status(self._campaign)} AS send_status, "
+            "(SELECT MAX(k.sent_at) FROM contacted k WHERE k.email = contacts.email) AS last_sent "
+            f"FROM contacts {clause} ORDER BY {order}, id ASC LIMIT ? OFFSET ?",
             [*params, limit, offset])
 
         out: list[dict] = []
         for row in rows:
-            if row["bounced_at"]:
-                status, tone = "Bounced", "error"
-            elif row["replied_at"]:
-                status, tone = "Replied", "success"
-            elif not row["valid"]:
-                status, tone = "Excluded", "fg_muted"
-            else:
-                status, tone = "Active", "fg_muted"
-
+            status, tone = STATUSES.get(row["send_status"], STATUSES["not_sent"])
             item = {
                 "_id": row["id"],
                 "_valid": bool(row["valid"]),
                 "_status": status,
                 "_status_tone": tone,
+                "_last_sent": prefs.format_date(row["last_sent"]) if row["last_sent"] else "",
                 "email": row["email"] or "",
                 "company": row["company"] or "",
                 "person": row["person"] or "",
@@ -359,7 +387,9 @@ class ContactsModel(QAbstractTableModel):
         """Empty the contact list so another spreadsheet can be imported cleanly.
 
         The do-not-contact list is deliberately left alone: those addresses must
-        survive a re-import, or suppressed people start receiving mail again.
+        survive a re-import, or suppressed people start receiving mail again. So
+        are the campaigns and the record of who was emailed: someone imported
+        again is still recognised by their address and not emailed twice.
         """
         connection = db.connect()
         row = connection.execute("SELECT COUNT(*) AS n FROM contacts").fetchone()
@@ -369,7 +399,6 @@ class ContactsModel(QAbstractTableModel):
         with connection:
             connection.execute("DELETE FROM campaign_recipients")
             connection.execute("DELETE FROM contacts")
-            connection.execute("DELETE FROM campaigns WHERE status IN ('draft', 'paused')")
         # The next spreadsheet brings its own headings
         from app.core import importer
 

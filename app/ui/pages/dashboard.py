@@ -199,9 +199,7 @@ class DashboardPage(Page):
     def _refresh_campaign(self) -> None:
         clear_layout(self.campaign_body)
 
-        record = db.query_one(
-            "SELECT * FROM campaigns WHERE status IN ('running', 'paused', 'draft') "
-            "ORDER BY id DESC LIMIT 1")
+        record = db.query_one("SELECT * FROM campaigns ORDER BY id DESC LIMIT 1")
         if record is None:
             self.campaign_body.addWidget(muted("No active campaign."))
             self.campaign_body.addWidget(

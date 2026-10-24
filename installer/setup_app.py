@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import ctypes
 import hashlib
+import json
 import math
 import os
 import queue
@@ -98,11 +99,76 @@ ERROR = "#ef8a7f"
 # Paths and facts about this computer
 # =============================================================================
 def payload_dir() -> Path:
-    """The app files packed inside Setup.exe (or the repo, when run from source)."""
+    """The app files packed inside Setup.exe (or the repo, when run from source).
+
+    When a newer release was found and fetched, its files are used instead.
+    """
+    if _newer_payload is not None:
+        return _newer_payload
     base = getattr(sys, "_MEIPASS", None)
     if base:
         return Path(base) / "payload"
     return Path(__file__).resolve().parent.parent
+
+
+# =============================================================================
+# The newest release (v0.7.2 and later)
+# =============================================================================
+# Someone may run an old Setup they downloaded months ago. Setup then asks GitHub
+# for the newest release and installs that instead, checked against the SHA-256
+# GitHub publishes for it. Offline, or with no checked release, it installs the
+# version inside Setup, and the app's own update check catches up later.
+RELEASES_API = "https://api.github.com/repos/4bdulllahh/HomingPigeon/releases/latest"
+RELEASE_ZIP = re.compile(r"^HomingPigeon-v[\d.]+\.zip$")
+_newer_payload: Path | None = None
+
+
+def version_tuple(text: str) -> tuple[int, ...]:
+    """'v0.7.2 beta' -> (0, 7, 2)."""
+    match = re.search(r"\d+(?:\.\d+)*", str(text or ""))
+    return tuple(int(part) for part in match.group(0).split(".")) if match else (0,)
+
+
+def newest_release(timeout: float = 10) -> dict | None:
+    """{"version", "url", "sha256", "size"} for the latest release, or None.
+
+    None when GitHub can't be reached or the release has no zip with a
+    published checksum: an unchecked download is never installed.
+    """
+    try:
+        request = urllib.request.Request(RELEASES_API, headers={
+            "User-Agent": f"{APP_NAME}-Setup", "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except Exception:  # noqa: BLE001 - offline, rate limited, no releases yet
+        return None
+    for asset in data.get("assets") or []:
+        digest = str(asset.get("digest") or "")
+        if RELEASE_ZIP.match(str(asset.get("name") or "")) and digest.startswith("sha256:"):
+            return {"version": str(data.get("tag_name") or "").lstrip("v"),
+                    "url": str(asset.get("browser_download_url") or ""),
+                    "sha256": digest.split(":", 1)[1].lower(),
+                    "size": int(asset.get("size") or 0)}
+    return None
+
+
+def unpack_release(archive: Path, target: Path) -> Path:
+    """The app files from a release zip (its files/ folder), unpacked into ``target``."""
+    shutil.rmtree(target, ignore_errors=True)
+    target.mkdir(parents=True)
+    with zipfile.ZipFile(archive) as bundle:
+        for member in bundle.infolist():
+            if not member.filename.startswith("files/") or member.is_dir():
+                continue
+            destination = target / member.filename[len("files/"):]
+            if target.resolve() not in destination.resolve().parents:
+                continue  # never write outside the folder
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with bundle.open(member) as source, open(destination, "wb") as out:
+                shutil.copyfileobj(source, out)
+    if not (target / "run.py").exists() or read_version(target) is None:
+        raise OSError("the download didn't contain the app's files")
+    return target
 
 
 def default_install_dir() -> Path:
@@ -316,6 +382,7 @@ class StepFailed(Exception):
 
 INSTALL_STEPS = [
     ("internet", "Check the internet connection", 2),
+    ("newest", "Get the newest version", 4),
     ("download", f"Download Python {PYTHON_VERSION[:4]} from python.org", 22),
     ("verify", "Check the download is genuine", 3),
     ("unpack", "Unpack Python", 10),
@@ -486,6 +553,43 @@ class InstallJob(Job):
             self.check_cancel()
             time.sleep(1)
         raise StepFailed("HomingPigeon is still open.", "Close HomingPigeon, then click Try again.")
+
+    # -- 1b --------------------------------------------------------------------
+    def step_newest(self) -> str:
+        """Install the newest release when this Setup is older than it."""
+        global _newer_payload
+        bundled = read_version(payload_dir()) or "0"
+        if self.wait_for_app:
+            return f"v{bundled}"        # the app's own update already fetched the newest
+        self.log("Checking GitHub for a newer version")
+        release = newest_release()
+        if release is None:
+            self.log(f"  couldn't check; installing v{bundled} from this Setup")
+            return f"v{bundled}"
+        if version_tuple(release["version"]) <= version_tuple(bundled):
+            self.log(f"  v{bundled} is the newest")
+            return f"v{bundled}"
+
+        self.log(f"  v{release['version']} is available; installing it instead of v{bundled}")
+        partial = Path(tempfile.gettempdir()) / f"{APP_NAME}-v{release['version']}.part"
+        try:
+            self._fetch_serial(release["url"], partial, release["size"])
+            digest = hashlib.sha256()
+            with open(partial, "rb") as data:
+                for chunk in iter(lambda: data.read(DOWNLOAD_CHUNK), b""):
+                    digest.update(chunk)
+            if digest.hexdigest() != release["sha256"]:
+                raise OSError("the download was damaged on the way")
+            staged = unpack_release(partial, Path(tempfile.gettempdir()) / f"{APP_NAME}-newest")
+        except Cancelled:
+            raise
+        except Exception as error:  # noqa: BLE001 - the version inside Setup still works
+            self.log(f"  couldn't use it ({error}); installing v{bundled} from this Setup")
+            return f"v{bundled}"
+        finally:
+            partial.unlink(missing_ok=True)
+        _newer_payload = staged
+        return f"v{release['version']}"
 
     # -- 2 ---------------------------------------------------------------------
     def step_download(self) -> str:
@@ -971,6 +1075,7 @@ class SetupWindow:
         self.busy = False
         self.uninstalled = False
         self.new_version = read_version(payload_dir()) or ""
+        self.newer_version = ""     # a newer release on GitHub, found while the welcome shows
         self.old_version = read_version(install_dir) if (install_dir / "run.py").exists() else None
 
         self.root = tk.Tk()
@@ -1020,6 +1125,7 @@ class SetupWindow:
             self.page_confirm_uninstall()
         else:
             self.page_welcome()
+            threading.Thread(target=self._look_for_newer, daemon=True).start()
 
     # -- frame -----------------------------------------------------------------
     def _build_frame(self, assets: Path) -> None:
@@ -1134,18 +1240,24 @@ class SetupWindow:
     def page_welcome(self) -> None:
         self._clear()
         s = self.scale
+        shown = self.newer_version or self.new_version
         if self.old_version:
-            same = self.old_version == self.new_version
-            title = f"Repair {APP_NAME} v{self.new_version}" if same else f"Update {APP_NAME} to v{self.new_version}"
+            same = self.old_version == shown
+            title = f"Repair {APP_NAME} v{shown}" if same else f"Update {APP_NAME} to v{shown}"
             subtitle = ("HomingPigeon is already installed. This will check everything and fix anything "
                         "that's missing." if same else
                         f"You have v{self.old_version}. Your contacts, templates and settings are kept.")
             action = "Repair" if same else "Update"
         else:
-            title = f"Install {APP_NAME} v{self.new_version}"
+            title = f"Install {APP_NAME} v{shown}"
             subtitle = "Safe, simple email for your business. Setup takes about 2 to 5 minutes."
             action = "Install"
         self._heading(title, subtitle)
+        if self.newer_version:
+            tk.Label(self.body, text=f"A newer version (v{self.newer_version}) is available, so "
+                                     "that is what will be installed.",
+                     bg=BG, fg=CONFIRM, font=self.fonts["bold"], anchor="w",
+                     justify="left").pack(anchor="w", pady=(int(4 * s), 0))
 
         outer, card = self._card()
         outer.pack(fill="x", pady=(int(8 * s), 0))
@@ -1176,9 +1288,20 @@ class SetupWindow:
                                  "and about 400 MB of free space.",
                  bg=BG, fg=FG_MUTED, font=self.fonts["small"], anchor="w").pack(anchor="w", pady=(int(14 * s), 0))
 
-        self._footer_note(f"v{self.new_version}  ·  Free beta")
+        self._footer_note(f"v{shown}  ·  Free beta")
         self._button(action, self.start_install, "confirm", primary=True)
         self._button("Cancel", self.root.destroy)
+
+    def _look_for_newer(self) -> None:
+        """Runs on a thread while the welcome page shows; tkinter is only touched via after()."""
+        release = newest_release()
+        if release and version_tuple(release["version"]) > version_tuple(self.new_version):
+            self.root.after(0, lambda: self._newer_found(release["version"]))
+
+    def _newer_found(self, version: str) -> None:
+        self.newer_version = version
+        if self.job is None and not self.uninstall:
+            self.page_welcome()
 
     def start_install(self) -> None:
         if self.old_version and running_app_pids(self.install_dir):
@@ -1315,6 +1438,7 @@ class SetupWindow:
                         self.rows[index].set(state, detail)
                 elif kind == "finished":
                     self.busy = False
+                    self.new_version = read_version(payload_dir()) or self.new_version
                     self.bob_speed = 0.09
                     if self.uninstall:
                         self.page_uninstalled()

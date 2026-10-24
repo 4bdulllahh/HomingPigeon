@@ -5,8 +5,11 @@ engine would add a hundred megabytes to the download, and Windows Smart App
 Control blocks some of its parts. The layout follows the real email closely;
 "Open in browser" shows the exact HTML.
 
-Clicking a block selects it, a small toolbar on the selected block moves,
-copies or removes it, and clicking outside the email selects the page itself.
+Clicking a block selects it and clicking outside the email selects the page
+itself. Blocks are dragged in from the Add panel and dragged around the email
+to move them; a blue line shows where they will land. Double-clicking a block
+with words lets the user type straight onto the email, and pictures, buttons
+and empty space have a handle to drag them bigger or smaller.
 """
 from __future__ import annotations
 
@@ -14,10 +17,11 @@ import base64
 import random
 from typing import Callable
 
-from PyQt6.QtCore import QPoint, QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
-from PyQt6.QtWidgets import (QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QScrollArea,
-                             QSizePolicy, QVBoxLayout, QWidget)
+from PyQt6.QtCore import QMimeData, QPoint, QRect, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QDrag, QPainter, QPainterPath, QPen, QPixmap
+from PyQt6.QtWidgets import (QApplication, QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel,
+                             QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout,
+                             QWidget)
 
 from app.core import composer, design, merge
 from app.i18n import t
@@ -26,6 +30,44 @@ from app.ui.widgets.common import small_button
 
 PHONE_WIDTH = 375
 RICH_STYLE = "<style>p{margin:0 0 10px 0;} ul{margin:0 0 10px 0;}</style>"
+
+# What a drag carries: a new block's kind from the Add panel, or the id of a block being moved
+MIME_NEW = "application/x-homingpigeon-new-block"
+MIME_MOVE = "application/x-homingpigeon-move-block"
+
+# The words each block lets the user type straight onto the email
+INLINE = {"heading": "text", "text": "text", "quote": "text", "button": "label",
+          "footer": "text", "banner": "title", "card": "title"}
+
+# The setting a resize handle changes
+RESIZE = {"logo": "width", "image": "width", "video": "width", "button": "size",
+          "spacer": "height"}
+BUTTON_SIZES = ("small", "medium", "large")
+
+
+def faded(widget: QWidget, width: int = 320) -> QPixmap:
+    """A see-through picture of a widget to carry under the pointer while dragging."""
+    picture = widget.grab()
+    if picture.width() > width:
+        picture = picture.scaledToWidth(width, Qt.TransformationMode.SmoothTransformation)
+    out = QPixmap(picture.size())
+    out.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(out)
+    painter.setOpacity(0.75)
+    painter.drawPixmap(0, 0, picture)
+    painter.end()
+    return out
+
+
+def start_drag(source: QWidget, mime_type: str, value: str, picture: QPixmap) -> None:
+    """Drag a block, new or existing, from ``source``."""
+    data = QMimeData()
+    data.setData(mime_type, value.encode("utf-8"))
+    drag = QDrag(source)
+    drag.setMimeData(data)
+    drag.setPixmap(picture)
+    drag.setHotSpot(QPoint(picture.width() // 2, min(16, picture.height() // 2)))
+    drag.exec(Qt.DropAction.CopyAction | Qt.DropAction.MoveAction)
 
 
 def _family(font: str) -> str:
@@ -87,6 +129,8 @@ class BlockView(QFrame):
         self.layout_ = QVBoxLayout(self)
         self.layout_.setSpacing(0)
         self.outline = _Outline(self)
+        self.target: QWidget | None = self   # what the resize handle sits on
+        self._press: QPoint | None = None
 
     def pad(self, top=None, side=None, bottom=None) -> None:
         b = self.block
@@ -123,14 +167,134 @@ class BlockView(QFrame):
 
     def mousePressEvent(self, event):  # noqa: N802 - Qt naming
         if event.button() == Qt.MouseButton.LeftButton:
+            self._press = event.position().toPoint()
             self.canvas.selected.emit(self.block["id"])
             event.accept()
             return
         super().mousePressEvent(event)
 
+    def mouseMoveEvent(self, event):  # noqa: N802 - Qt naming
+        if (self._press is not None and event.buttons() & Qt.MouseButton.LeftButton
+                and (event.position().toPoint() - self._press).manhattanLength()
+                >= QApplication.startDragDistance()):
+            self._press = None
+            # Started from the event loop, not from here: dropping rebuilds the
+            # email, and this block must not be deleted while its handler runs.
+            block_id = self.block["id"]
+            QTimer.singleShot(0, lambda: self.canvas.drag_block(block_id))
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):  # noqa: N802 - Qt naming
+        self._press = None
+        super().mouseReleaseEvent(event)
+
     def mouseDoubleClickEvent(self, event):  # noqa: N802 - Qt naming
         self.canvas.edit.emit(self.block["id"])
         event.accept()
+
+
+class _Surface(QFrame):
+    """The coloured area the email sits on. Takes the drops for the whole email."""
+
+    def __init__(self, canvas: "EmailCanvas"):
+        super().__init__()
+        self.canvas = canvas
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):  # noqa: N802 - Qt naming
+        self.canvas.drag_over(event)
+
+    def dragMoveEvent(self, event):  # noqa: N802 - Qt naming
+        self.canvas.drag_over(event)
+
+    def dragLeaveEvent(self, event):  # noqa: N802 - Qt naming
+        self.canvas.marker.hide()
+
+    def dropEvent(self, event):  # noqa: N802 - Qt naming
+        self.canvas.drop(event)
+
+
+class _Grip(QPushButton):
+    """The move handle on the toolbar: drag it to move the selected block."""
+
+    def __init__(self, canvas: "EmailCanvas"):
+        super().__init__(theme.icon("move"))
+        self.canvas = canvas
+        self._press: QPoint | None = None
+        self.setCursor(Qt.CursorShape.SizeAllCursor)
+
+    def mousePressEvent(self, event):  # noqa: N802 - Qt naming
+        self._press = event.position().toPoint()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):  # noqa: N802 - Qt naming
+        if (self._press is not None and event.buttons() & Qt.MouseButton.LeftButton
+                and (event.position().toPoint() - self._press).manhattanLength()
+                >= QApplication.startDragDistance()):
+            self._press = None
+            self.setDown(False)
+            QTimer.singleShot(0, lambda: self.canvas.drag_block(self.canvas._selected))
+        super().mouseMoveEvent(event)
+
+
+class _Handle(QFrame):
+    """A small square on a picture's corner, or under empty space, to drag its size."""
+
+    def __init__(self, canvas: "EmailCanvas"):
+        super().__init__(canvas.outer)
+        self.canvas = canvas
+        self._start: QPoint | None = None
+        self.setFixedSize(12, 12)
+        self.setStyleSheet(f"background-color: #ffffff; border: 2px solid {theme.color('accent')}; "
+                           "border-radius: 3px;")
+        self.setToolTip(t("Drag to make it bigger or smaller"))
+        self.hide()
+
+    def mousePressEvent(self, event):  # noqa: N802 - Qt naming
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._start = event.globalPosition().toPoint()
+            self.canvas.begin_resize()
+            event.accept()
+
+    def mouseMoveEvent(self, event):  # noqa: N802 - Qt naming
+        if self._start is not None:
+            self.canvas.resize_by(event.globalPosition().toPoint() - self._start)
+
+    def mouseReleaseEvent(self, event):  # noqa: N802 - Qt naming
+        if self._start is not None:
+            self._start = None
+            self.canvas.end_resize()
+
+
+class _Typing(QPlainTextEdit):
+    """Typing straight onto the email. Enter or clicking away keeps it, Esc cancels."""
+
+    finished = pyqtSignal(bool)
+
+    def __init__(self, parent: QWidget, multiline: bool):
+        super().__init__(parent)
+        self.multiline = multiline
+        self._done = False
+
+    def keyPressEvent(self, event):  # noqa: N802 - Qt naming
+        key = event.key()
+        if key == Qt.Key.Key_Escape:
+            self._finish(False)
+            return
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and (
+                not self.multiline or event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            self._finish(True)
+            return
+        super().keyPressEvent(event)
+
+    def focusOutEvent(self, event):  # noqa: N802 - Qt naming
+        super().focusOutEvent(event)
+        self._finish(True)
+
+    def _finish(self, keep: bool) -> None:
+        if not self._done:
+            self._done = True
+            self.finished.emit(keep)
 
 
 class EmailCanvas(QScrollArea):
@@ -139,6 +303,10 @@ class EmailCanvas(QScrollArea):
     selected = pyqtSignal(str)
     action = pyqtSignal(str, str)
     edit = pyqtSignal(str)
+    dropped = pyqtSignal(str, str, int)     # "new" and a kind, or "move" and a block id; where
+    typed = pyqtSignal(str, str, str)       # block id, setting, the words typed
+    resized = pyqtSignal(str, str, object)  # block id, setting, new value
+    resize_done = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -151,8 +319,10 @@ class EmailCanvas(QScrollArea):
         self._selected = ""
         self._views: dict[str, BlockView] = {}
         self._pixmaps: dict[str, QPixmap] = {}
+        self._typing: tuple[_Typing, str, str] | None = None
+        self._resizing: tuple | None = None
 
-        self.outer = QFrame()
+        self.outer = _Surface(self)
         self.outer.setObjectName("CanvasOuter")
         self.outer_layout = QVBoxLayout(self.outer)
         self.card = QFrame()
@@ -165,6 +335,10 @@ class EmailCanvas(QScrollArea):
         self.outer_layout.addStretch(1)
         self.setWidget(self.outer)
         self.tools = self._toolbar()
+        self.handle = _Handle(self)
+        self.marker = QFrame(self.outer)
+        self.marker.setStyleSheet(f"background-color: {theme.color('accent')}; border-radius: 2px;")
+        self.marker.hide()
 
     # --- public -----------------------------------------------------------------
     def show_design(self, data: dict, sample: dict, selected: str = "") -> None:
@@ -175,22 +349,33 @@ class EmailCanvas(QScrollArea):
         self._rebuild()
 
     def select(self, block_id: str) -> None:
+        # Blocks never take the keyboard, so clicking another one would not end the typing
+        if self._typing is not None and self._typing[1] != block_id:
+            self.finish_typing()
         self._selected = block_id
         for key, view in self._views.items():
             view.set_state("selected" if key == block_id else "")
         self.place_tools()
 
     def _toolbar(self) -> QWidget:
-        """Move up, move down, copy and remove, beside the selected block."""
+        """Drag to move, copy and remove, beside the selected block."""
         bar = QFrame(self.outer)
         bar.setProperty("role", "card")
         layout = QVBoxLayout(bar)
         layout.setContentsMargins(3, 3, 3, 3)
         layout.setSpacing(3)
-        for glyph, action, tip in (("↑", "up", "Move up"), ("↓", "down", "Move down"),
-                                   ("⧉", "copy", "Make a copy"), ("✕", "remove", "Remove")):
-            button = small_button(glyph, lambda a=action: self.action.emit(self._selected, a))
+        grip = _Grip(self)
+        grip.setToolTip(t("Drag to move this block"))
+        buttons = [grip]
+        for name, action, tip in (("copy", "copy", "Make a copy"), ("delete", "remove", "Remove")):
+            button = small_button(theme.icon(name),
+                                  lambda a=action: self.action.emit(self._selected, a))
             button.setToolTip(t(tip))
+            buttons.append(button)
+        side = round(30 * theme.text_scale())
+        for button in buttons:
+            button.setFixedSize(side, side)
+            button.setStyleSheet(theme.icon_css(14) + " padding: 0; min-height: 0;")
             layout.addWidget(button)
         bar.adjustSize()
         bar.hide()
@@ -199,8 +384,10 @@ class EmailCanvas(QScrollArea):
     def place_tools(self) -> None:
         """Beside the email, level with the selected block; inside it when there is no room."""
         view = self._views.get(self._selected)
-        if view is None:
+        if view is None or self._typing is not None:
             self.tools.hide()
+            if self._resizing is None:
+                self.handle.hide()
             return
         corner = view.mapTo(self.outer, QPoint(view.width(), 0))
         x = corner.x() + 8
@@ -209,6 +396,186 @@ class EmailCanvas(QScrollArea):
         self.tools.move(x, corner.y())
         self.tools.show()
         self.tools.raise_()
+        self._place_handle(view)
+
+    def _place_handle(self, view: BlockView) -> None:
+        target = view.target
+        if view.block["type"] not in RESIZE or target is None:
+            self.handle.hide()
+            return
+        if view.block["type"] == "spacer":
+            point = target.mapTo(self.outer, QPoint(target.width() // 2, target.height()))
+            self.handle.setCursor(Qt.CursorShape.SizeVerCursor)
+        elif view.block.get("align") == "right" and not view.block.get("full"):
+            point = target.mapTo(self.outer, QPoint(0, target.height()))
+            self.handle.setCursor(Qt.CursorShape.SizeBDiagCursor)
+        else:
+            point = target.mapTo(self.outer, QPoint(target.width(), target.height()))
+            self.handle.setCursor(Qt.CursorShape.SizeFDiagCursor)
+        half = self.handle.width() // 2
+        self.handle.move(point.x() - half, point.y() - half)
+        self.handle.show()
+        self.handle.raise_()
+
+    # --- dragging blocks ----------------------------------------------------------------
+    def drag_block(self, block_id: str) -> None:
+        view = self._views.get(block_id)
+        if view is None:
+            return
+        self.tools.hide()
+        self.handle.hide()
+        start_drag(self, MIME_MOVE, block_id, faded(view))
+        self.marker.hide()
+        self.place_tools()
+
+    def _index_at(self, y: int) -> int:
+        """Where a block dropped at height ``y`` goes: before the first block whose middle is lower."""
+        blocks = self._design["blocks"] if self._design else []
+        for index, block in enumerate(blocks):
+            view = self._views.get(block["id"])
+            if view is not None and y < view.mapTo(self.outer, QPoint(0, view.height() // 2)).y():
+                return index
+        return len(blocks)
+
+    def drag_over(self, event) -> None:
+        data = event.mimeData()
+        if self._design is None or not (data.hasFormat(MIME_NEW) or data.hasFormat(MIME_MOVE)):
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        point = event.position().toPoint()
+        index = self._index_at(point.y())
+        blocks = self._design["blocks"]
+        card = self.card.geometry()
+        if index < len(blocks) and blocks[index]["id"] in self._views:
+            y = self._views[blocks[index]["id"]].mapTo(self.outer, QPoint(0, 0)).y()
+        elif blocks and blocks[-1]["id"] in self._views:
+            last = self._views[blocks[-1]["id"]]
+            y = last.mapTo(self.outer, QPoint(0, last.height())).y()
+        else:
+            y = card.top() + 20
+        self.marker.setGeometry(card.left(), y - 2, card.width(), 4)
+        self.marker.show()
+        self.marker.raise_()
+        # Near the top or bottom edge the email scrolls, so a long one can be dragged across
+        edge = self.outer.mapTo(self.viewport(), point).y()
+        bar = self.verticalScrollBar()
+        if edge < 48:
+            bar.setValue(bar.value() - 24)
+        elif edge > self.viewport().height() - 48:
+            bar.setValue(bar.value() + 24)
+
+    def drop(self, event) -> None:
+        self.marker.hide()
+        data = event.mimeData()
+        index = self._index_at(event.position().toPoint().y())
+        if data.hasFormat(MIME_NEW):
+            kind, value = "new", bytes(data.data(MIME_NEW)).decode("utf-8")
+        elif data.hasFormat(MIME_MOVE):
+            kind, value = "move", bytes(data.data(MIME_MOVE)).decode("utf-8")
+        else:
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        # After the drag has finished, so the email is rebuilt from the normal event loop
+        QTimer.singleShot(0, lambda: self.dropped.emit(kind, value, index))
+
+    # --- typing on the email ------------------------------------------------------------
+    def start_typing(self, block_id: str, key: str, multiline: bool) -> None:
+        view = self._views.get(block_id)
+        if view is None:
+            return
+        self.finish_typing()
+        block = view.block
+        if block["type"] == "banner":
+            size = int(block.get("title_size", 30))
+        elif key == "title":
+            size = 18
+        elif block["type"] == "button":
+            size = 15
+        else:
+            size = int(block.get("size", 15))
+        bold = (block.get("weight") == "bold" if block["type"] == "heading"
+                else block["type"] in ("button", "banner", "card"))
+        editor = _Typing(self.outer, multiline)
+        editor.setPlainText(str(block.get(key, "")))
+        editor.setStyleSheet(
+            f"QPlainTextEdit {{ background-color: #ffffff; color: #1f2530; "
+            f"border: 2px solid {theme.color('accent')}; border-radius: 4px; padding: 4px; "
+            f"font-family: '{_family(block.get('font') or self._design['page']['font'])}'; "
+            f"font-size: {size}px; "
+            f"font-weight: {700 if bold else 400}; }}")
+        option = editor.document().defaultTextOption()
+        option.setAlignment(self._qt_align(block.get("align", "left")))
+        editor.document().setDefaultTextOption(option)
+        lines =editor.toPlainText().count("\n") + (2 if multiline else 1)
+        height = max(view.height(), round(size * 1.5 * lines) + 20)
+        editor.setGeometry(QRect(view.mapTo(self.outer, QPoint(0, 0)),
+                                 view.size()).adjusted(0, 0, 0, height - view.height()))
+        editor.finished.connect(self.finish_typing)
+        self._typing = (editor, block_id, key)
+        self.tools.hide()
+        self.handle.hide()
+        editor.show()
+        editor.raise_()
+        editor.setFocus()
+        editor.selectAll()
+
+    def finish_typing(self, keep: bool = True) -> None:
+        if self._typing is None:
+            return
+        editor, block_id, key = self._typing
+        self._typing = None
+        text = editor.toPlainText()
+        if not editor.multiline:
+            text = " ".join(text.splitlines())
+        editor.hide()
+        editor.deleteLater()
+        if keep:
+            self.typed.emit(block_id, key, text)
+        self.place_tools()
+
+    # --- resizing -----------------------------------------------------------------------
+    def begin_resize(self) -> None:
+        view = self._views.get(self._selected)
+        if view is None or view.block["type"] not in RESIZE:
+            return
+        key = RESIZE[view.block["type"]]
+        self._resizing = (self._selected, key, view.block.get(key), self._inner(view.block))
+
+    def resize_by(self, delta: QPoint) -> None:
+        if self._resizing is None:
+            return
+        block_id, key, start, inner = self._resizing
+        view = self._views.get(block_id)
+        if view is None:
+            return
+        block = view.block
+        kind = block["type"]
+        if kind == "spacer":
+            value = int(start) + delta.y()
+        else:
+            # A centred picture grows on both sides, so it follows the pointer at half speed
+            align = "left" if block.get("full") else block.get("align", "left")
+            grow = delta.x() * (-1 if align == "right" else 1) * (2 if align == "center" else 1)
+            if kind == "button":
+                step = BUTTON_SIZES.index(start) + round(grow / 60)
+                value = BUTTON_SIZES[max(0, min(len(BUTTON_SIZES) - 1, step))]
+            elif kind == "logo":
+                value = int(start) + grow
+            else:
+                value = int(start) + round(grow * 100 / inner)
+        if not isinstance(value, str):
+            field = next(f for f in design.fields_for(kind) if f.key == key)
+            value = max(field.low, min(field.high, value))
+        if value != block.get(key):
+            self.resized.emit(block_id, key, value)
+
+    def end_resize(self) -> None:
+        if self._resizing is not None:
+            self._resizing = None
+            self.resize_done.emit()
+            self.place_tools()
 
     def reveal(self, block_id: str) -> None:
         view = self._views.get(block_id)
@@ -237,6 +604,7 @@ class EmailCanvas(QScrollArea):
     def _rebuild(self) -> None:
         if self._design is None:
             return
+        self.finish_typing()
         self.setUpdatesEnabled(False)
         try:
             while self.card_layout.count():
@@ -246,6 +614,9 @@ class EmailCanvas(QScrollArea):
                     item.widget().deleteLater()
             self._views.clear()
             self.tools.hide()
+            if self._resizing is None:
+                # Hiding the handle mid-drag would let go of the mouse, so it stays put then
+                self.handle.hide()
             self._paint_page()
             for block in self._design["blocks"]:
                 view = BlockView(block, self)
@@ -440,8 +811,8 @@ class EmailCanvas(QScrollArea):
                                           b["color"], b["align"]))
 
     def _draw_logo(self, view: BlockView, b: dict) -> None:
-        view.layout_.addWidget(self._aligned(self._picture(b.get("image"), int(b["width"])),
-                                             b["align"]))
+        view.target = self._picture(b.get("image"), int(b["width"]))
+        view.layout_.addWidget(self._aligned(view.target, b["align"]))
 
     def _draw_banner(self, view: BlockView, b: dict) -> None:
         view.pad(0, 0, 0)
@@ -470,24 +841,26 @@ class EmailCanvas(QScrollArea):
 
     def _draw_image(self, view: BlockView, b: dict) -> None:
         width = round(self._inner(b) * int(b["width"]) / 100)
-        view.layout_.addWidget(self._aligned(self._picture(b.get("image"), width, int(b["radius"])),
-                                             b["align"]))
+        view.target = self._picture(b.get("image"), width, int(b["radius"]))
+        view.layout_.addWidget(self._aligned(view.target, b["align"]))
         if str(b.get("caption", "")).strip():
             view.layout_.addSpacing(8)
             view.layout_.addWidget(self._text(self._w(b["caption"]), 13, "#777777", b["align"]))
 
     def _draw_video(self, view: BlockView, b: dict) -> None:
         width = round(self._inner(b) * int(b["width"]) / 100)
-        view.layout_.addWidget(self._aligned(
-            self._picture(b.get("image"), width, int(b["radius"]), play=b["play"]), b["align"]))
+        view.target = self._picture(b.get("image"), width, int(b["radius"]), play=b["play"])
+        view.layout_.addWidget(self._aligned(view.target, b["align"]))
 
     def _draw_button(self, view: BlockView, b: dict) -> None:
         if not str(b["label"]).strip():
-            view.layout_.addWidget(self._text(t("Type the button's words on the right."), 12,
-                                              "#8a8f98", "center"))
+            view.layout_.addWidget(self._text(t("Double-click here to type the button's words."),
+                                              12, "#8a8f98", "center"))
+            view.target = None
             return
         button = self._button(self._w(b["label"]), b["color"], b["text_color"], b["radius"], b["size"],
                               b.get("full"), b.get("border", ""))
+        view.target = button
         view.layout_.addWidget(button if b.get("full") else self._aligned(button, b["align"]))
 
     def _draw_social(self, view: BlockView, b: dict) -> None:

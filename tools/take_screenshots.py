@@ -113,6 +113,7 @@ def fill_demo_data() -> None:
     # The Sent emails page reads the permanent history, filled the same way an upgrade does
     connection = db.connect()
     db.backfill_sent_log(connection)
+    db.backfill_contacted(connection)
     connection.commit()
     db.suppress(contacts[10]["email"], "Hard bounce: mailbox does not exist", "imap")
 
@@ -258,8 +259,9 @@ def main() -> int:
             page = window.page(key)
             if key == "design":
                 settle(800)
-                heading = next(b for b in page._design["blocks"] if b["type"] == "heading")
-                page._select(heading["id"])
+                # The picture, so the shot shows its resize handle and the toolbar
+                picture = next(b for b in page._design["blocks"] if b["type"] == "image")
+                page._select(picture["id"])
             elif key == "campaign":
                 settle(400)
                 scroll = page.findChild(QScrollArea)
@@ -274,7 +276,7 @@ def main() -> int:
             from app.ui.widgets.update_dialog import UpdateDialog
 
             release = updater.Release(
-                tag="v0.7.1", page_url=f"{config.REPO_URL}/releases",
+                tag="v0.7.3", page_url=f"{config.REPO_URL}/releases",
                 notes="* Faster imports\n* A new template for follow-ups\n* Fixes for the inbox")
             updater.can_update_itself = lambda _release=None: True   # show the installed wording
             dialog = UpdateDialog(window, release)

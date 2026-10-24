@@ -288,13 +288,14 @@ def check_mark() -> str:
         'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>')
 
 
-def chevron(token: str = "fg_muted") -> str:
+def chevron(token: str = "fg_muted", up: bool = False) -> str:
     """The drop-down arrow. One file per colour, so it follows the theme."""
     shade = color(token).lstrip("#")
+    path = "M1.5 6 L6 1.5 L10.5 6" if up else "M1.5 2 L6 6.5 L10.5 2"
     return _asset(
-        f"chevron-{shade}.svg",
+        f"chevron-{'up-' if up else ''}{shade}.svg",
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 8">'
-        f'<path d="M1.5 2 L6 6.5 L10.5 2" fill="none" stroke="#{shade}" '
+        f'<path d="{path}" fill="none" stroke="#{shade}" '
         'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>')
 
 
@@ -317,12 +318,53 @@ ICONS = {
     "inbox": ("", "↩"),
     "settings": ("", "⚙"),
     "refresh": ("", "↻"),
+    "move": ("", "✥"),
+    "copy": ("", "⧉"),
+    "delete": ("", "✕"),
+}
+
+# The Email design blocks, from the same icon font as the menu. Elsewhere each
+# block's own symbol (design.BlockSpec.glyph) stands in.
+BLOCK_ICONS = {
+    "heading": "", "message": "", "text": "", "quote": "",
+    "links": "", "logo": "", "banner": "", "image": "",
+    "video": "", "button": "", "social": "", "columns": "",
+    "card": "", "divider": "", "spacer": "", "footer": "",
+    "html": "",
 }
 
 
 def icon(name: str) -> str:
     glyph, fallback = ICONS.get(name, ("", "•"))
     return glyph if icon_family() else fallback
+
+
+def block_icon(kind: str, fallback: str) -> str:
+    return BLOCK_ICONS.get(kind, fallback) if icon_family() else fallback
+
+
+def icon_css(size: int) -> str:
+    """Style for a label or button that shows one icon."""
+    family = icon_family()
+    return (f'font-family: "{family}"; ' if family else "") + f"font-size: {px(size)}px;"
+
+
+def icon_pixmap(glyph: str, size: int, token: str = "fg_muted"):
+    """An icon drawn into a picture, for places that take a QIcon such as list rows."""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtGui import QFont, QPainter, QPixmap
+
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+    font = QFont(icon_family() or ui_family())
+    font.setPixelSize(round(size * 0.8))
+    painter.setFont(font)
+    painter.setPen(qcolor(token))
+    painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, glyph)
+    painter.end()
+    return pixmap
 
 
 # --- Status helpers ---------------------------------------------------------
@@ -414,6 +456,12 @@ QFrame[role="card"], QFrame[role="section"] {{
     border: 1px solid {t['border']};
     border-radius: {RADIUS_CARD}px;
 }}
+QFrame[role="tile"] {{
+    background-color: {t['bg_input']};
+    border: 1px solid {t['border_strong']};
+    border-radius: {RADIUS}px;
+}}
+QFrame[role="tile"]:hover {{ background-color: {t['bg_hover']}; border-color: {t['accent']}; }}
 QFrame[role="danger-card"] {{
     background-color: {t['bg_panel']};
     border: 1px solid {t['error']};
@@ -467,7 +515,32 @@ QPlainTextEdit[role="console"] {{
     background-color: transparent;
     border: none;
 }}
+/* A plain list that drops down under the box. Fusion's default puts the
+   current item over the box, which lands the list in odd places. */
+QComboBox {{ combobox-popup: 0; }}
 QComboBox::drop-down {{ border: none; width: {px(22)}px; }}
+/* Number boxes: two small chevrons stacked inside the right edge. */
+QAbstractSpinBox {{ padding-right: 2px; }}
+QAbstractSpinBox::up-button, QAbstractSpinBox::down-button {{
+    subcontrol-origin: border;
+    width: {px(20)}px;
+    border: none;
+    border-radius: 4px;
+    background-color: transparent;
+}}
+QAbstractSpinBox::up-button {{ subcontrol-position: top right; margin: 3px 3px 0 0; }}
+QAbstractSpinBox::down-button {{ subcontrol-position: bottom right; margin: 0 3px 3px 0; }}
+QAbstractSpinBox::up-button:hover, QAbstractSpinBox::down-button:hover {{
+    background-color: {t['bg_hover']};
+}}
+QAbstractSpinBox::up-arrow {{ image: url("{chevron(up=True)}"); width: {px(9)}px; height: {px(6)}px; }}
+QAbstractSpinBox::down-arrow {{ image: url("{chevron()}"); width: {px(9)}px; height: {px(6)}px; }}
+QAbstractSpinBox::up-arrow:disabled, QAbstractSpinBox::up-arrow:off {{
+    image: url("{chevron('border_strong', up=True)}");
+}}
+QAbstractSpinBox::down-arrow:disabled, QAbstractSpinBox::down-arrow:off {{
+    image: url("{chevron('border_strong')}");
+}}
 QComboBox::down-arrow {{
     image: url("{chevron()}");
     width: {px(11)}px;

@@ -157,6 +157,17 @@ class MainWindow(QMainWindow):
         # The status bar reads the database; keep it off the startup path
         QTimer.singleShot(200, self.refresh_status)
 
+        # Bounces and replies are read in the background whenever the app is open,
+        # not only while My inbox is on screen: Gmail and Outlook bounce minutes
+        # after sending, and the send safety check needs to hear about it.
+        from app.ui.pages.inbox import AUTO_SYNC_MINUTES
+
+        self._inbox_timer = QTimer(self)
+        self._inbox_timer.setInterval(AUTO_SYNC_MINUTES * 60 * 1000)
+        self._inbox_timer.timeout.connect(self.check_inbox_in_background)
+        self._inbox_timer.start()
+        QTimer.singleShot(60_000, self.check_inbox_in_background)
+
     # --- chrome -------------------------------------------------------------
     def _set_title(self) -> None:
         self.setWindowTitle(f"{config.APP_TITLE} {config.APP_VERSION}  ·  {t(config.APP_TAGLINE)}")
@@ -616,6 +627,30 @@ class MainWindow(QMainWindow):
             self.show_page(current)
         finally:
             self.setUpdatesEnabled(True)
+
+    # --- inbox ---------------------------------------------------------------
+    def check_inbox_in_background(self) -> None:
+        from app.ui.pages.inbox import imap_settings
+        from app.workers import jobs
+        from app.workers.base import Task
+
+        if not db.get_setting("auto_imap_sync", True):
+            return
+        settings = imap_settings()
+        if settings is not None:
+            Task(jobs.sync_inbox, settings).start(on_result=self._inbox_checked)
+
+    def _inbox_checked(self, result) -> None:
+        if result.errors or not result.scanned:
+            return
+        inbox = self._pages.get("inbox")
+        if inbox is not None:
+            inbox.background_check_done(result)
+        if result.hard_bounces or result.unsubscribes:
+            self.notify(t("{count} bounced and {count2} opted-out addresses removed",
+                          count=len(result.hard_bounces), count2=len(result.unsubscribes)),
+                        "success")
+        self.refresh_status()
 
     # --- updates ------------------------------------------------------------
     def check_for_update_soon(self, delay_ms: int = 2500) -> None:

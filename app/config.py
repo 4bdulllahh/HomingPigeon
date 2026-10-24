@@ -5,7 +5,7 @@ from pathlib import Path
 
 APP_NAME = "HomingPigeon"
 APP_TITLE = "HomingPigeon"
-APP_VERSION = "v0.7.1 beta"
+APP_VERSION = "v0.7.2 beta"
 APP_TAGLINE = "Safe, simple email for your business"
 REPO_URL = "https://github.com/4bdulllahh/HomingPigeon"
 
@@ -55,6 +55,8 @@ SMTP_RECONNECT_EVERY = 25
 MAX_CONSECUTIVE_FAILURES = 5
 MAX_HARD_BOUNCE_RATE = 0.05
 MIN_SAMPLE_FOR_BOUNCE_RATE = 20
+# A temporary failure is tried again on later runs, up to this many attempts in all
+MAX_SEND_ATTEMPTS = 3
 
 # Re-run the spam score automatically when the stored one is older than this
 SCORE_STALE_HOURS = 36

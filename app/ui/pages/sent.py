@@ -166,8 +166,14 @@ class SentPage(Page):
         find.triggered.connect(lambda: self._open_in_contacts(email))
         menu.addAction(find)
 
-        menu.addSeparator()
         rows = self.table.selected_rows()
+        emails = sorted({self.model.email_at(row) for row in rows} - {""})
+        again = QAction(t(t("Send to these {count} people again", count=len(emails))
+                          if len(emails) > 1 else "Send to this person again"), menu)
+        again.triggered.connect(lambda: self.allow_again(emails))
+        menu.addAction(again)
+
+        menu.addSeparator()
         delete = QAction(t(t("Delete {count} emails from the history",
                              count=len(rows)) if len(rows) > 1
                          else "Delete from the history"), menu)

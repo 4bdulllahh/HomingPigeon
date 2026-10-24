@@ -982,6 +982,57 @@ def test_the_design_page_builds_edits_and_protects_the_message(qt_app, store):
         window.deleteLater()
 
 
+def test_the_design_page_drops_types_and_resizes_on_the_email(qt_app, store):
+    from PyQt6.QtCore import QPoint
+
+    from app.ui.main_window import MainWindow
+
+    window = MainWindow()
+    window.resize(1300, 800)
+    window.show()
+    try:
+        window.show_page("design")
+        page = window.page("design")
+        page._create("announcement", "Announcement")
+        page._redraw.flush()
+        blocks = page._design["blocks"]
+        count = len(blocks)
+
+        # A block dragged in from the Add panel lands where it was dropped
+        page._dropped("new", "spacer", 0)
+        assert blocks[0]["type"] == "spacer" and len(blocks) == count + 1
+        page._dropped("new", "message", 0)      # never a second message block
+        assert len(blocks) == count + 1
+
+        # Dragging a block on the email moves it
+        spacer = blocks[0]
+        page._dropped("move", spacer["id"], len(blocks))
+        assert blocks[-1] is spacer
+
+        # Typing straight onto the email
+        from app.ui.widgets.email_canvas import INLINE
+
+        words = next(b for b in blocks if b["type"] in INLINE)
+        page._edit_on_email(words["id"])
+        assert page.canvas._typing is not None
+        page.canvas._typing[0].setPlainText("Hello there")
+        page.canvas.finish_typing()
+        assert words[INLINE[words["type"]]] == "Hello there"
+
+        # The handle under empty space changes its height, within its limits
+        page._select(spacer["id"])
+        page._redraw.flush()
+        page.canvas.begin_resize()
+        page.canvas.resize_by(QPoint(0, 40))
+        assert spacer["height"] == 64
+        page.canvas.resize_by(QPoint(0, 9000))
+        assert spacer["height"] == 200
+        page.canvas.end_resize()
+    finally:
+        window.close()
+        window.deleteLater()
+
+
 def test_the_custom_warmup_plan_is_saved(qt_app, store):
     from app.core import warmup
     from app.ui.main_window import MainWindow

@@ -21,8 +21,9 @@ user ticks "delete my data" in Settings.
 | `settings` | Key/value, values stored as JSON | `db.get_setting` / `db.set_setting` |
 | `contacts` | One row per address | `email` is unique, case-insensitive. Spreadsheet columns other than email/company/person go into `extra_json` |
 | `template_sets`, `subjects`, `bodies` | My message | One set in practice. Bodies are typed text (or HTML if the user wrote HTML) |
-| `campaigns` | One per send run setup | |
-| `campaign_recipients` | Who is in which campaign and their status | `pending`, `retry`, `sent`, `failed`, `bounced`, `skipped`. This is what prevents emailing someone twice. Cascades away if the contact is deleted |
+| `campaigns` | A round of sending. The newest one is current (`db.current_campaign()`); only "Start a new campaign" makes another (v0.7.2) | |
+| `campaign_recipients` | Who is queued in which campaign and their status | `pending`, `retry`, `sent`, `failed`, `bounced`, `skipped`. `attempts` caps retries at `config.MAX_SEND_ATTEMPTS`. Cascades away if the contact is deleted, which is why `contacted` exists |
+| `contacted` | Who was emailed in each campaign, by address (v0.7.2) | Primary key (email, campaign_id), email case-insensitive. Status `sent`, `bounced` or `failed`. **This is what stops emailing someone twice**: it survives deleting contacts, Clear list, re-imports and clearing the Sent history. Only `db.allow_again()` and a new campaign let someone be emailed again |
 | `sent_log` | Permanent history for the Sent emails page (v0.6.2) | A copy of the contact's details plus the finished email, zlib-compressed in `body_z`. Not linked by foreign key, so it survives contact deletion and Clear list. Only the user deletes from it |
 | `suppression` | Do-not-contact list | Bounces and unsubscribe replies land here automatically and survive Clear list |
 | `events` | Activity log | |
@@ -42,7 +43,17 @@ user ticks "delete my data" in Settings.
   LEFT JOIN on email, using whichever is set.
 - `db.sent_message(id)` returns a dict with `body_html` unpacked, for the viewer.
 - `db.delete_sent(ids)` / `db.clear_sent()` touch `sent_log` only. Never make
-  them touch `campaign_recipients`.
+  them touch `campaign_recipients` or `contacted`.
+
+### Never emailing someone twice (v0.7.2)
+
+- `db.queue_contacts(campaign)` is one `INSERT ... SELECT` with two `NOT EXISTS`
+  lookups (do-not-contact list and `contacted`), both on indexed email columns.
+- `SendWorker` checks `db.already_contacted()` again right before each email and
+  records the final outcome with `db.record_contacted()` (inside `_record`).
+- Contacts are sent in `contacts.id` order, which is the spreadsheet's order.
+- `db.contact_send_status(campaign)` is the SQL behind the Status column and
+  the Show filter on My contacts.
 - Rows copied over from before v0.6.2 have no `body_z`; the viewer says so.
 
 ## Settings keys worth knowing
@@ -61,6 +72,8 @@ user ticks "delete my data" in Settings.
 | `design_id`, `brand_kit` | The design emails are sent with (0 = plain) and the brand kit (v0.7.1) |
 | `appearance`, `text_size`, `high_contrast`, `bold_text`, `date_format`, `time_format`, `start_page`, `last_page` | Look and feel (`app/core/prefs.py`) |
 | `contacts_sort` | Remembered sort on My contacts |
+| `auto_imap_sync` | Check the inbox in the background (default on). The timer is on `MainWindow` |
+| `imap_folder_marks` | `{folder: [uidvalidity, last uid]}` for the inbox and the Junk folder (v0.7.2) |
 | `language` | `en`, `ar`, `de`, `es` or `fr`. Empty until chosen in Settings: then the computer's language is used if supported, else English |
 
 ## Migrations
@@ -79,4 +92,6 @@ or rename freely on old versions, so prefer adding.
 
 History: version 1 was every release up to v0.6.1. Version 2 (v0.6.2) added
 `sent_log` and copies existing sends into it (`backfill_sent_log`). Version 3
-(v0.7.1) added the `designs` table; nothing to copy.
+(v0.7.1) added the `designs` table; nothing to copy. Version 4 (v0.7.2) added
+`contacted` and fills it from `sent_log` and `campaign_recipients`
+(`backfill_contacted`), so nobody already emailed is emailed again after the update.

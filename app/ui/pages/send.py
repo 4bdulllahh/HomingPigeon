@@ -83,6 +83,13 @@ class SendPage(Page):
         self.state_label = muted("Idle", wrap=False)
         controls.addWidget(self.state_label)
         controls.addStretch(1)
+        self.campaign_label = hint("", wrap=False)
+        controls.addWidget(self.campaign_label)
+        self.new_campaign_button = secondary_button("Start a new campaign", self._new_campaign)
+        self.new_campaign_button.setToolTip(t(
+            "Email everyone on My contacts once more, for example with a new offer. People who "
+            "bounced or unsubscribed are always left out."))
+        controls.addWidget(self.new_campaign_button)
         self.root.addWidget(controls_holder)
 
         self.progress = QProgressBar()
@@ -251,24 +258,42 @@ class SendPage(Page):
         )
 
     def _ensure_campaign(self) -> int:
-        """Reuse an unfinished campaign so a stopped run resumes where it left off."""
-        record = db.query_one(
-            "SELECT id FROM campaigns WHERE status IN ('draft', 'running', 'paused') "
-            "ORDER BY id DESC LIMIT 1")
-        if record:
-            campaign_id = record["id"]
-        else:
-            campaign_id = db.execute(
-                "INSERT INTO campaigns(name, status, created_at) VALUES (?, 'draft', ?)",
-                (f"Campaign {prefs.format_date(datetime.now())}", db.now()))
+        """Keep using the current campaign, so nobody in it is ever emailed twice.
 
-        db.execute(
-            "INSERT OR IGNORE INTO campaign_recipients(campaign_id, contact_id, status) "
-            "SELECT ?, id, 'pending' FROM contacts WHERE valid = 1 "
-            "AND email NOT IN (SELECT email FROM suppression)",
-            (campaign_id,))
+        A finished campaign stays current too: contacts imported later are added
+        to it, and people already emailed are not. Only "Start a new campaign"
+        opens another one.
+        """
+        campaign_id = db.current_campaign()
+        if campaign_id is None:
+            campaign_id = db.start_new_campaign(self._campaign_name())
+        else:
+            db.queue_contacts(campaign_id)
         self.campaign_id = campaign_id
         return campaign_id
+
+    @staticmethod
+    def _campaign_name() -> str:
+        return t("Campaign {date}", date=prefs.format_date(datetime.now()))
+
+    def _new_campaign(self) -> None:
+        if self.is_running():
+            self.notify("Stop sending first, then start a new campaign", "warn")
+            return
+        if not ConfirmDialog.ask(
+            self, "Start a new campaign?",
+            "Everyone on My contacts can be emailed once more, for example with a new message. "
+            "People who bounced, unsubscribed or are on your do-not-contact list are left out."
+            "\n\nThe current campaign is closed and its emails stay in Sent emails. In the new "
+            "campaign each person is still emailed only once.",
+            confirm_text="Start a new campaign",
+        ):
+            return
+        self.campaign_id = db.start_new_campaign(self._campaign_name())
+        stats = db.campaign_stats(self.campaign_id)
+        self.notify(t("New campaign started: {count:,} people can be emailed",
+                      count=stats.get("pending", 0)), "success")
+        self.on_show()
 
     # --- actions ------------------------------------------------------------
     def _start(self) -> None:
@@ -282,7 +307,8 @@ class SendPage(Page):
         stats = db.campaign_stats(plan.campaign_id)
         pending = stats.get("pending", 0) + stats.get("retry", 0)
         if not pending:
-            self.notify("Every contact in this campaign has already been processed", "info")
+            self.notify("Everyone in this campaign has been emailed. To email them again, press "
+                        "Start a new campaign", "info", 8000)
             return
 
         report = scorer.latest_report()
@@ -459,6 +485,9 @@ class SendPage(Page):
         self.tile_sent.update_value(str(stats.get("sent", 0)))
         self.tile_failed.update_value(
             str(stats.get("failed", 0) + stats.get("bounced", 0)))
+        record = db.query_one("SELECT name FROM campaigns WHERE id = ?", (self.campaign_id,))
+        self.campaign_label.setText(t("Current campaign: {name}", name=record["name"])
+                                    if record else "")
 
 
 def _escape(text: str) -> str:
