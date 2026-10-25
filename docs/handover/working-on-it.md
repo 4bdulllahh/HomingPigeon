@@ -71,5 +71,9 @@ then set the server to `localhost`, port `1025`, security "None (testing only)".
 - **The `{{` pattern is generous on purpose** (any heading text). If you change
   `merge.TAG_PATTERN`, run the merge and spintax tests: spintax must not eat
   tags.
+- **Application event filters also see `QWindow`s.** A filter installed on
+  the `QApplication` (like `app/ui/scrolling.py`) gets mouse and wheel events
+  for the window before the widget. Check `isinstance(obj, QWidget)` before
+  calling widget methods on `obj`.
 - **Deleting history is not deleting the send record.** `sent_log` is for the
   user to look at; `campaign_recipients` is what stops duplicates.

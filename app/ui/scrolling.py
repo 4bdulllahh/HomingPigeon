@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import QEasingCurve, QEvent, QObject, QPropertyAnimation, Qt
 from PyQt6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplication, QComboBox,
-                             QScrollBar)
+                             QScrollBar, QWidget)
 
 DURATION_MS = 220
 
@@ -44,6 +44,10 @@ class ScrollFilter(QObject):
         delta = event.angleDelta().y()
         if (not delta or not event.pixelDelta().isNull() or event.angleDelta().x()
                 or event.modifiers() != Qt.KeyboardModifier.NoModifier):
+            return False
+        # Qt shows the wheel to the window (a QWindow, not a widget) before the
+        # widget under the mouse; let it through, the widget's turn comes next
+        if not isinstance(obj, QWidget):
             return False
         widget = obj
         while widget is not None:

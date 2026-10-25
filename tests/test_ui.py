@@ -1167,3 +1167,37 @@ def test_the_signature_and_footer_are_saved_with_the_message(qt_app, store):
     finally:
         window.close()
         window.deleteLater()
+
+
+def test_smooth_scrolling_ignores_the_window_and_scrolls_the_page(qt_app, store):
+    from PyQt6.QtCore import QPoint, QPointF
+    from PyQt6.QtGui import QWheelEvent
+    from PyQt6.QtTest import QTest
+
+    from app.ui import scrolling
+    from app.ui.main_window import MainWindow
+
+    def wheel():
+        return QWheelEvent(QPointF(5, 5), QPointF(5, 5), QPoint(), QPoint(0, -120),
+                           Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+                           Qt.ScrollPhase.NoScrollPhase, False)
+
+    window = MainWindow()
+    window.resize(1000, 650)
+    window.show()
+    try:
+        window.show_page("templates")
+        page = window.page("templates")
+        for index in range(15):
+            page._add_subject(f"Subject {index}")
+        QTest.qWait(100)
+        smooth = scrolling.ScrollFilter()
+        # Qt hands every wheel turn to the QWindow first; that used to raise
+        assert smooth.eventFilter(window.windowHandle(), wheel()) is False
+        bar = page.scroll.verticalScrollBar()
+        assert smooth.eventFilter(page.scroll.viewport(), wheel()) is True
+        QTest.qWait(scrolling.DURATION_MS + 100)
+        assert bar.value() > 0
+    finally:
+        window.close()
+        window.deleteLater()

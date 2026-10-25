@@ -14,6 +14,8 @@ correctly, cleans your contact list before you send, makes every message slightl
 sends at a human pace, and quietly removes addresses that bounce. It runs on your own computer,
 and your contacts never leave it.
 
+**New in 0.7.4:** a fix: smooth scrolling no longer shows "Something went wrong" messages.
+
 **New in 0.7.3:** **format your emails like in Outlook.** Select words on **My message** and
 make them bold, italic, underlined, bigger, smaller or coloured, add bullet points, numbered
 lists and links, and put your logo in your signature. A new **Footer** adds small print, such as
@@ -22,7 +24,7 @@ and the starting designs, saves itself as you work, and keeps a copy of each des
 Documents folder. Scrollbars are slimmer and scrolling is smooth (you can switch it off in
 Settings).
 
-**Download:** [latest release](../../releases/latest) · **Version:** 0.7.3 (free beta) ·
+**Download:** [latest release](../../releases/latest) · **Version:** 0.7.4 (free beta) ·
 **Works on:** Windows, Mac and Linux · **Languages:** English, العربية, Deutsch, Español,
 Français
 
@@ -142,7 +144,7 @@ Français
 
 You don't need to know anything about coding.
 
-1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.7.3.zip`**.
+1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.7.4.zip`**.
 2. Right-click the downloaded file → **Extract All...** → **Extract**.
 3. In the folder that opens, double-click **`HomingPigeon Setup.exe`**.
 4. Click **Install**. Setup shows you every step while it works: it downloads what the app needs

@@ -2,6 +2,15 @@
 
 Newest first. Add to the top when you change something.
 
+## v0.7.4 beta
+
+- **Smooth scrolling no longer shows "Something went wrong".** An
+  application-wide event filter sees every wheel turn first on the window's
+  `QWindow`, which is not a widget and has no `parentWidget()`. `ScrollFilter`
+  now ignores anything that is not a `QWidget`; the widget under the mouse gets
+  the event next. The stacked error toasts were also what looked like an after
+  image while scrolling.
+
 ## v0.7.3 beta
 
 - **My designs page.** Email design opens on a page of the user's designs
