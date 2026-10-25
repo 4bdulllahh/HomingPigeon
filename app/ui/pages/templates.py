@@ -10,7 +10,7 @@ from pathlib import Path
 from PyQt6 import sip
 from PyQt6.QtCore import QEvent, Qt, QTimer
 from PyQt6.QtGui import QKeySequence, QShortcut
-from PyQt6.QtWidgets import QFileDialog, QInputDialog, QSplitter, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QFileDialog, QSplitter, QTextBrowser, QVBoxLayout, QWidget
 
 from app.core import composer, db, design, examples, importer, merge, scorer
 from app.i18n import t
@@ -21,7 +21,9 @@ from app.ui.widgets.common import (Card, ScrollPage, StickyBar, TabBar, body, cl
                                    row, secondary_button, separator, set_tone, small_button,
                                    subheading)
 from app.ui.widgets.dialogs import ChoiceDialog, InfoDialog
-from app.ui.widgets.inputs import Debouncer, checkbox, get_text, read_only_box, set_text, text_box
+from app.ui.widgets import rich_text
+from app.ui.widgets.inputs import Debouncer, checkbox, get_text, set_text, text_box
+from app.ui.widgets.rich_text import RichBox, RichToolbar
 from app.workers import jobs
 from app.workers.base import Task
 
@@ -98,9 +100,13 @@ PAGE_HELP_SECTIONS = [
     ("Typing your message", [
         "Press Enter (or Ctrl+Enter) to start a new line.",
         "Leave an empty line between paragraphs.",
-        "Start a line with a dash and a space, like \"- Fast delivery\", to make a bullet point.",
-        "To make words bold or turn them into a link, select them and press Bold or Link above "
-        "the message.",
+        "Select some words, then use the bar above the message to change them, as you would in "
+        "Outlook: font, size, bold, italic, underline, colour, highlight, bullet points, "
+        "numbered lists, alignment and links. Ctrl+B, Ctrl+I and Ctrl+U work too.",
+        "The picture button adds a picture or your logo where the cursor is. Double-click a "
+        "picture to change its size.",
+        "Formatting is shown to the person exactly as you see it, but keep it light in a first "
+        "email: heavy formatting reads like a newsletter and can land in Promotions.",
         "A subject is always sent as one line. If you press Enter in a subject, the lines are "
         "joined with a space.",
     ]),
@@ -137,9 +143,11 @@ PAGE_HELP_SECTIONS = [
         "Either way, anyone who replies with \"unsubscribe\" is taken off your list "
         "automatically when the inbox is checked.",
     ]),
-    ("Already know HTML?", [
-        "You can still use it. Once a message contains <p> or <br>, the app sends it exactly as "
-        "written and stops adding line breaks for you.",
+    ("Signature and footer", [
+        "The Signature tab is your name, job, company and phone number. Add your logo with the "
+        "picture button.",
+        "The Footer tab is the small print under the signature, such as your company's address "
+        "or a confidentiality notice. It is sent in small grey writing.",
     ]),
     ("Handy keys", [
         "Ctrl+S saves.",
@@ -252,10 +260,10 @@ class VariantEditor(Card):
         self.add(row(self.enabled_box, self.info, None, remove))
 
         if multiline:
-            self.editor = text_box(
+            self.editor = RichBox(
                 "Type your message here, just like a normal email.\n\n"
                 "Press Enter for a new line and leave an empty line between paragraphs.",
-                lines=12)
+                kind="message", lines=12)
         else:
             self.editor = text_box(
                 "Type a subject line, for example: A quick question for {{Company}}", lines=2)
@@ -263,7 +271,10 @@ class VariantEditor(Card):
         self.editor.installEventFilter(self)
 
         if text:
-            set_text(self.editor, text)
+            if multiline:
+                self.editor.set_html(text)
+            else:
+                set_text(self.editor, text)
 
         # Counting spintax variants parses the text, so it is debounced like the score
         self._debounce = Debouncer(250, self)
@@ -277,7 +288,11 @@ class VariantEditor(Card):
         return False
 
     def get_text(self) -> str:
-        return get_text(self.editor)
+        """What is saved and sent: HTML for a message, plain text for a subject."""
+        return self.editor.html() if self.multiline else get_text(self.editor)
+
+    def plain_text(self) -> str:
+        return self.editor.toPlainText() if self.multiline else get_text(self.editor)
 
     @property
     def enabled(self) -> bool:
@@ -291,7 +306,7 @@ class VariantEditor(Card):
             else t("Subject {number}", number=index)
 
     def _changed(self) -> None:
-        text = self.get_text()
+        text = self.plain_text()
         error = merge.validate_spintax(text)
         variants = merge.spintax_variants(text)
         if error:
@@ -311,36 +326,6 @@ class VariantEditor(Card):
         self.editor.setFocus()
         self._changed()
 
-    def wrap_selection(self, before: str, after: str, placeholder: str) -> None:
-        """Put ``before`` and ``after`` round the selected words, or round a placeholder."""
-        cursor = self.editor.textCursor()
-        # QTextCursor marks line breaks in a selection with U+2029
-        chosen = cursor.selectedText().replace(" ", "\n")
-        cursor.insertText(before + (chosen or placeholder) + after)
-        if not chosen:
-            # Leave the placeholder selected so typing replaces it
-            end = cursor.position() - len(after)
-            cursor.setPosition(end - len(placeholder))
-            cursor.setPosition(end, cursor.MoveMode.KeepAnchor)
-            self.editor.setTextCursor(cursor)
-        self.editor.setFocus()
-
-    def insert_list(self) -> None:
-        """Bullet points: the selected lines become the points, or two to type over."""
-        cursor = self.editor.textCursor()
-        chosen = cursor.selectedText().replace(" ", "\n").strip("\n")
-        points = [line.strip() for line in chosen.splitlines() if line.strip()] \
-            or ["First point", "Second point"]
-        # A message laid out in HTML would ignore "- ", so it gets a real list
-        if composer.uses_html(self.get_text()):
-            block = "<ul>\n" + "\n".join(f"  <li>{p}</li>" for p in points) + "\n</ul>"
-        else:
-            block = "\n".join(f"- {p}" for p in points)
-        before = "" if cursor.atBlockStart() or cursor.hasSelection() else "\n"
-        cursor.insertText(before + block + "\n")
-        self.editor.setFocus()
-
-
 class TemplatesPage(Page):
     def __init__(self, window):
         super().__init__(window)
@@ -354,6 +339,7 @@ class TemplatesPage(Page):
         self._preview_html = ""
         self._tag_layouts: dict[bool, list] = {}    # multiline -> every bar showing the tags
         self._tag_names: list[str] = []
+        self._toolbars: dict[str, list[RichToolbar]] = {}   # kind -> both copies of its bar
 
         # Everything above the Save button scrolls as one page. It used to be a
         # fixed frame with a small scrolling list squeezed inside it, and once a
@@ -379,10 +365,11 @@ class TemplatesPage(Page):
         self.tabs.add("Subjects", self._build_subjects)
         self.tabs.add("Message", self._build_bodies)
         self.tabs.add("Signature", self._build_signature)
+        self.tabs.add("Footer", self._build_footer)
         self.tabs.add("Preview & score", self._build_preview)
         self.tabs.changed.connect(self._tab_changed)
         self.scroll.add(self.tabs, 1)
-        # The four tabs share the same content, so they are all built up front:
+        # The tabs share the same content, so they are all built up front:
         # loading saved subjects has to be able to reach the Subjects tab even
         # while the Signature tab is the one on screen.
         self.tabs.build_all()
@@ -457,22 +444,6 @@ class TemplatesPage(Page):
         for multiline in list(self._tag_layouts):
             self._fill_tag_bar(multiline, names)
 
-    def _format_bar(self) -> QWidget:
-        """Bold, link and bullet points for people who have never written HTML."""
-        from app.ui.widgets.common import flow_row
-
-        container, layout = flow_row(4)
-        layout.addWidget(hint("Style:", wrap=False))
-        bold = small_button("Bold", lambda: self._format("bold"))
-        bold.setToolTip(t("Select some words, then press this to make them bold"))
-        link = small_button("Link", lambda: self._format("link"))
-        link.setToolTip(t("Select some words, then press this to turn them into a link"))
-        bullets = small_button("Bullet points", lambda: self._format("list"))
-        bullets.setToolTip(t("Turn the selected lines into bullet points, or start a new list"))
-        for button in (bold, link, bullets):
-            layout.addWidget(button)
-        return container
-
     def _insert(self, multiline: bool, snippet: str) -> None:
         editor = self._target(multiline)
         if editor is None:
@@ -480,24 +451,40 @@ class TemplatesPage(Page):
             return
         editor.insert(snippet)
 
-    def _format(self, kind: str) -> None:
-        editor = self._target(True)
-        if editor is None:
-            self.notify("Add a message first", "warn")
-            return
-        if kind == "bold":
-            editor.wrap_selection("<strong>", "</strong>", "bold words")
-        elif kind == "list":
-            editor.insert_list()
-        else:
-            address, ok = QInputDialog.getText(
-                self, t("Add a link"), t("Web address the link opens, for example www.yourcompany.com"))
-            address = address.strip()
-            if not ok or not address:
-                return
-            if "://" not in address and not address.startswith("mailto:"):
-                address = "https://" + address
-            editor.wrap_selection(f'<a href="{address}">', "</a>", "link text")
+    # --- the formatting bar ---------------------------------------------------
+    def _rich_target(self, kind: str) -> RichBox | None:
+        if kind == "message":
+            editor = self._target(True)
+            return editor.editor if editor is not None else None
+        return getattr(self, f"{kind}_box", None)
+
+    def _toolbar(self, kind: str) -> RichToolbar:
+        bar = RichToolbar(lambda: self._rich_target(kind), on_picture=self._add_picture)
+        self._toolbars.setdefault(kind, []).append(bar)
+        return bar
+
+    def _watch(self, box: RichBox, kind: str) -> None:
+        """Keep the toolbar showing the formatting where the cursor is in this box."""
+        def sync() -> None:
+            if self._rich_target(kind) is box:
+                for bar in self._toolbars.get(kind, []):
+                    bar.sync(box)
+
+        box.cursorPositionChanged.connect(sync)
+        box.currentCharFormatChanged.connect(lambda _fmt: sync())
+
+    def _add_picture(self, box: RichBox, path: str) -> None:
+        widest = 2 * rich_text.PICTURE_WIDTHS.get(box.kind, rich_text.PICTURE_WIDTHS["message"])
+        self.notify("Getting the picture ready...", "info", 2000)
+
+        def done(asset: dict) -> None:
+            if not sip.isdeleted(box):
+                box.insert_picture(asset)
+
+        Task(design.prepare_image, path, widest).start(
+            on_result=self.guard(done), on_error=self.guard(
+                lambda message: self.notify(t("Could not use that picture: {message}",
+                                              message=message), "error", 8000)))
 
     def _list_holder(self) -> tuple[QWidget, QVBoxLayout]:
         holder = QWidget()
@@ -591,7 +578,7 @@ class TemplatesPage(Page):
             "for you."))
         self._bodies_sticky = StickyBar(self.scroll, lambda: column(
             self._tag_bar(True),
-            self._format_bar(),
+            self._toolbar("message"),
             row(primary_button("+ Add a message", self._new_body, 190),
                 secondary_button("Show me an example", self._example_body, 190), None)))
         layout.addWidget(self._bodies_sticky)
@@ -611,6 +598,7 @@ class TemplatesPage(Page):
         editor = VariantEditor(text, enabled, multiline=True, on_change=self._content_changed,
                                on_delete=self._remove_body, index=len(self.body_editors) + 1,
                                on_focus=self._remember_focus)
+        self._watch(editor.editor, "message")
         self._place(editor, self.bodies_layout, self.body_editors, at_top)
         return editor
 
@@ -645,13 +633,16 @@ class TemplatesPage(Page):
 
         layout.addWidget(muted(
             "Added to the bottom of every message. Type it the way you want it to look, with "
-            "your name, job title, company, phone number and address each on its own line. A "
-            "real signature helps your email reach the inbox."))
+            "your name, job title, company, phone number and address each on its own line. Use "
+            "the picture button to add your logo. A real signature helps your email reach the "
+            "inbox."))
 
-        self.signature_box = text_box(
-            "For example:\nSarah Jones\nSales manager, Jones Supplies\nPhone: ...")
-        self.signature_box.setMinimumHeight(self.signature_box.fontMetrics().lineSpacing() * 12)
+        layout.addWidget(StickyBar(self.scroll, lambda: self._toolbar("signature")))
+        self.signature_box = RichBox(
+            "For example:\nSarah Jones\nSales manager, Jones Supplies\nPhone: ...",
+            kind="signature", lines=12)
         self.signature_box.textChanged.connect(self._content_changed)
+        self._watch(self.signature_box, "signature")
         layout.addWidget(self.signature_box, 1)
         layout.addWidget(row(secondary_button("Show me an example",
                                               self._insert_example_signature, 210), None))
@@ -681,14 +672,40 @@ class TemplatesPage(Page):
             self._score_debounce.poke()
 
     def _signature_text(self) -> str:
-        box = getattr(self, "signature_box", None)
-        if box is not None:
-            return get_text(box)
-        record = db.query_one("SELECT signature_html FROM template_sets ORDER BY id LIMIT 1")
-        return (record["signature_html"] or "") if record else ""
+        return self.signature_box.html()
+
+    def _footer_text(self) -> str:
+        return self.footer_box.html()
 
     def _insert_example_signature(self) -> None:
-        set_text(self.signature_box, examples.for_language()["signature"])
+        self.signature_box.set_html(examples.for_language()["signature"])
+        self._content_changed()
+        self.notify("Replace everything in [square brackets] with your own details", "info", 6000)
+
+    # --- footer -------------------------------------------------------------
+    def _build_footer(self) -> QWidget:
+        holder = QWidget()
+        holder.setProperty("role", "plain")
+        layout = QVBoxLayout(holder)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.addWidget(muted(
+            "Small print added under your signature in every email, such as your company's "
+            "registered address or a note that the email is confidential. It is sent in small "
+            "grey writing. Leave it empty if you do not need one."))
+        layout.addWidget(StickyBar(self.scroll, lambda: self._toolbar("footer")))
+        self.footer_box = RichBox(
+            "For example: Jones Supplies Ltd, 12 Mill Street, Leeds, UK. This email and any "
+            "files sent with it are confidential...", kind="footer", lines=8)
+        self.footer_box.textChanged.connect(self._content_changed)
+        self._watch(self.footer_box, "footer")
+        layout.addWidget(self.footer_box, 1)
+        layout.addWidget(row(secondary_button("Show me an example",
+                                              self._insert_example_footer, 210), None))
+        return holder
+
+    def _insert_example_footer(self) -> None:
+        self.footer_box.set_html(examples.for_language()["footer"])
         self._content_changed()
         self.notify("Replace everything in [square brackets] with your own details", "info", 6000)
 
@@ -774,7 +791,7 @@ class TemplatesPage(Page):
         for text in sheet.bodies:
             self._add_body(text)
         if sheet.signature and (mode == "replace" or not self._signature_text().strip()):
-            set_text(self.signature_box, sheet.signature)
+            self.signature_box.set_html(sheet.signature)
         self._content_changed()
 
         unknown = sorted({tag for text in sheet.subjects + sheet.bodies
@@ -831,8 +848,12 @@ class TemplatesPage(Page):
         self.preview_subject.setWordWrap(True)
         left.add(self.preview_subject)
         left.add(separator())
-        self.preview_body = read_only_box("", role="", lines=12)
-        self.preview_body.setMaximumHeight(16777215)   # at least 12 lines, then fill the card
+        self.preview_body = QTextBrowser()
+        self.preview_body.setOpenExternalLinks(True)
+        # An email is read on white whatever the app's theme, so it is shown that way
+        self.preview_body.setStyleSheet("QTextBrowser { background: #ffffff; color: #333333; "
+                                        "border: 1px solid #cccccc; border-radius: 6px; }")
+        self.preview_body.setMinimumHeight(round(300 * theme.text_scale()))
         left.add(self.preview_body, 1)
         splitter.addWidget(left)
 
@@ -899,6 +920,7 @@ class TemplatesPage(Page):
             body_variants=[e.get_text() for e in self.body_editors
                            if e.enabled and e.get_text().strip()],
             signature_html=self._signature_text(),
+            footer_html=self._footer_text(),
             attach_mode=db.get_setting("attach_mode", "link"),
             attachment_path=db.get_setting("attachment_path", ""),
             link_url=db.get_setting("link_url", ""),
@@ -920,7 +942,7 @@ class TemplatesPage(Page):
         content = self.current_content()
         if not content.subject_variants or not content.body_variants:
             self.preview_subject.setText(t("Add at least one subject and one body"))
-            self.preview_body.setPlainText("")
+            self.preview_body.setHtml("")
             self.preview_variant.setText("")
             return
 
@@ -961,7 +983,7 @@ class TemplatesPage(Page):
         subject, html, text = result
         self._preview_html = html
         self.preview_subject.setText(t(subject))
-        self.preview_body.setPlainText(text)
+        self.preview_body.setHtml(html)
 
     def _show_score(self, report: scorer.ScoreReport) -> None:
         if self._set_id:
@@ -1031,14 +1053,14 @@ class TemplatesPage(Page):
             self.notify("Add at least one subject and one body before saving", "warn")
             return
 
-        signature = self._signature_text()
+        signature, footer = self._signature_text(), self._footer_text()
         if self._set_id is None:
             self._set_id = db.execute(
-                "INSERT INTO template_sets(name, signature_html, created_at) VALUES (?, ?, ?)",
-                ("Default", signature, db.now()))
+                "INSERT INTO template_sets(name, signature_html, footer_html, created_at) "
+                "VALUES (?, ?, ?, ?)", ("Default", signature, footer, db.now()))
         else:
-            db.execute("UPDATE template_sets SET signature_html = ? WHERE id = ?",
-                       (signature, self._set_id))
+            db.execute("UPDATE template_sets SET signature_html = ?, footer_html = ? WHERE id = ?",
+                       (signature, footer, self._set_id))
 
         db.execute("DELETE FROM subjects WHERE set_id = ?", (self._set_id,))
         db.execute("DELETE FROM bodies WHERE set_id = ?", (self._set_id,))
@@ -1066,9 +1088,8 @@ class TemplatesPage(Page):
             return
 
         self._set_id = record["id"]
-        box = getattr(self, "signature_box", None)
-        if box is not None:
-            set_text(box, record["signature_html"] or "")
+        self.signature_box.set_html(record["signature_html"] or "")
+        self.footer_box.set_html(record["footer_html"] or "")
 
         for editor in self.subject_editors + self.body_editors:
             editor.setParent(None)

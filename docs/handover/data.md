@@ -20,7 +20,7 @@ user ticks "delete my data" in Settings.
 | `schema_info` | One row: the schema version | See migrations below |
 | `settings` | Key/value, values stored as JSON | `db.get_setting` / `db.set_setting` |
 | `contacts` | One row per address | `email` is unique, case-insensitive. Spreadsheet columns other than email/company/person go into `extra_json` |
-| `template_sets`, `subjects`, `bodies` | My message | One set in practice. Bodies are typed text (or HTML if the user wrote HTML) |
+| `template_sets`, `subjects`, `bodies` | My message | One set in practice. Bodies are typed text from before v0.7.3, or HTML from the formatting editor. `footer_html` is the small print under the signature (v0.7.3) |
 | `campaigns` | A round of sending. The newest one is current (`db.current_campaign()`); only "Start a new campaign" makes another (v0.7.2) | |
 | `campaign_recipients` | Who is queued in which campaign and their status | `pending`, `retry`, `sent`, `failed`, `bounced`, `skipped`. `attempts` caps retries at `config.MAX_SEND_ATTEMPTS`. Cascades away if the contact is deleted, which is why `contacted` exists |
 | `contacted` | Who was emailed in each campaign, by address (v0.7.2) | Primary key (email, campaign_id), email case-insensitive. Status `sent`, `bounced` or `failed`. **This is what stops emailing someone twice**: it survives deleting contacts, Clear list, re-imports and clearing the Sent history. Only `db.allow_again()` and a new campaign let someone be emailed again |
@@ -95,3 +95,4 @@ History: version 1 was every release up to v0.6.1. Version 2 (v0.6.2) added
 (v0.7.1) added the `designs` table; nothing to copy. Version 4 (v0.7.2) added
 `contacted` and fills it from `sent_log` and `campaign_recipients`
 (`backfill_contacted`), so nobody already emailed is emailed again after the update.
+Version 5 (v0.7.3) added `template_sets.footer_html`; nothing to copy.

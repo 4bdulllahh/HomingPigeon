@@ -68,6 +68,11 @@ EXAMPLES: dict[str, dict] = {
             "Phone: +000 0 000 0000",
             "[Street address, city, country]",
         ]),
+        # Shown only when "Show me an example" is pressed on the Footer tab
+        "footer": "\n\n".join([
+            '[Your Company Ltd], [street address, city, country]. Registered in [country], company number [000000].',
+            'This email and any files sent with it are confidential and meant only for the person it is addressed to. If you received it by mistake, please tell the sender and delete it.',
+        ]),
     },
     "ar": {
         "subjects": [
@@ -113,6 +118,11 @@ EXAMPLES: dict[str, dict] = {
             "[مسماك الوظيفي]، [اسم شركتك]",
             "الهاتف: +000 0 000 0000",
             "[العنوان، المدينة، الدولة]",
+        ]),
+        # Shown only when "Show me an example" is pressed on the Footer tab
+        "footer": "\n\n".join([
+            '[اسم شركتك]، [العنوان، المدينة، الدولة]. مسجلة في [الدولة]، رقم السجل التجاري [000000].',
+            'هذه الرسالة وأي ملفات مرفقة بها سرية ومخصصة فقط للشخص الموجهة إليه. إذا وصلتك عن طريق الخطأ، يرجى إبلاغ المرسل وحذفها.',
         ]),
     },
     "de": {
@@ -166,6 +176,11 @@ EXAMPLES: dict[str, dict] = {
             "Telefon: +000 0 000 0000",
             "[Straße, Ort, Land]",
         ]),
+        # Shown only when "Show me an example" is pressed on the Footer tab
+        "footer": "\n\n".join([
+            '[Ihr Unternehmen GmbH], [Straße, Ort, Land]. Registergericht [Ort], [HRB 000000].',
+            'Diese E-Mail und alle mitgesendeten Dateien sind vertraulich und nur für die Person bestimmt, an die sie gerichtet sind. Wenn Sie sie irrtümlich erhalten haben, informieren Sie bitte den Absender und löschen Sie sie.',
+        ]),
     },
     "es": {
         "subjects": [
@@ -214,6 +229,11 @@ EXAMPLES: dict[str, dict] = {
             "[Su cargo], [Su empresa]",
             "Teléfono: +000 0 000 0000",
             "[Dirección, ciudad, país]",
+        ]),
+        # Shown only when "Show me an example" is pressed on the Footer tab
+        "footer": "\n\n".join([
+            '[Su empresa S.L.], [dirección, ciudad, país]. Inscrita en [país], número de registro [000000].',
+            'Este correo y cualquier archivo enviado con él son confidenciales y están destinados solo a la persona a la que van dirigidos. Si lo ha recibido por error, avise al remitente y bórrelo.',
         ]),
     },
     "fr": {
@@ -265,6 +285,11 @@ EXAMPLES: dict[str, dict] = {
             "[Votre poste], [Votre entreprise]",
             "Téléphone : +000 0 000 0000",
             "[Adresse, ville, pays]",
+        ]),
+        # Shown only when "Show me an example" is pressed on the Footer tab
+        "footer": "\n\n".join([
+            '[Votre entreprise SARL], [adresse, ville, pays]. Immatriculée en [pays], numéro [000000].',
+            "Cet e-mail et les fichiers joints sont confidentiels et destinés uniquement à leur destinataire. Si vous l'avez reçu par erreur, merci de prévenir l'expéditeur et de le supprimer.",
         ]),
     },
 }

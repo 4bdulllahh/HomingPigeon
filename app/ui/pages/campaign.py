@@ -90,9 +90,11 @@ class RampEditor(QWidget):
             return
         self.boxes.pop()
         item = self.days_layout.takeAt(self.days_layout.count() - 1)
-        if item is not None and item.widget() is not None:
-            item.widget().setParent(None)
-            item.widget().deleteLater()
+        widget = item.widget() if item is not None else None
+        if widget is not None:
+            # Held in a name: an unparented cell only Python refers to is freed at once
+            widget.setParent(None)
+            widget.deleteLater()
         self.changed.emit()
 
 

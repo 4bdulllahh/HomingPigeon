@@ -608,10 +608,12 @@ class EmailCanvas(QScrollArea):
         self.setUpdatesEnabled(False)
         try:
             while self.card_layout.count():
-                item = self.card_layout.takeAt(0)
-                if item.widget() is not None:
-                    item.widget().setParent(None)
-                    item.widget().deleteLater()
+                # Held in a name: once unparented, a label only Python refers to is freed at
+                # the end of the line, and asking the item for it again crashed the app
+                widget = self.card_layout.takeAt(0).widget()
+                if widget is not None:
+                    widget.setParent(None)
+                    widget.deleteLater()
             self._views.clear()
             self.tools.hide()
             if self._resizing is None:

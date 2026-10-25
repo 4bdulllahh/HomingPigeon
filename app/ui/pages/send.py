@@ -215,7 +215,8 @@ class SendPage(Page):
             self.go("templates")
             return None
 
-        signature_row = db.query_one("SELECT signature_html FROM template_sets ORDER BY id LIMIT 1")
+        signature_row = db.query_one("SELECT signature_html, footer_html FROM template_sets "
+                                     "ORDER BY id LIMIT 1")
         content = composer.Content(
             subject_variants=subjects,
             body_variants=bodies,
@@ -226,6 +227,7 @@ class SendPage(Page):
             link_text=db.get_setting("link_text", "View our brochure"),
             unsubscribe_note=bool(db.get_setting("unsubscribe_note", True)),
             design=design.active(),
+            footer_html=(signature_row["footer_html"] or "") if signature_row else "",
         )
 
         try:

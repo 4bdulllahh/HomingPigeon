@@ -209,6 +209,7 @@ def main() -> int:
     for name in ("DB_PATH", "SECRETS_PATH", "KEYS_DIR", "EXPORTS_DIR", "LOGS_DIR"):
         setattr(config, name, data / getattr(config, name).relative_to(real))
     config.DATA_DIR = data
+    config.DESIGNS_DIR = data / "Designs"
 
     from PyQt6.QtCore import Qt
     from PyQt6.QtWidgets import QApplication, QScrollArea
@@ -235,8 +236,9 @@ def main() -> int:
             app.processEvents()
 
     shots = [("dashboard", "home", None), ("guide", "start-here", None),
-             ("contacts", "contacts", "My contacts"), ("templates", "templates", "Preview & score"),
-             ("design", "design", None), ("campaign", "warmup", None),
+             ("contacts", "contacts", "My contacts"), ("templates", "message", "Message"),
+             ("templates", "templates", "Preview & score"),
+             ("design", "design-library", None), ("design", "design", None), ("campaign", "warmup", None),
              ("send", "send", None), ("sent", "sent", None), ("inbox", "inbox", None),
              ("deliverability", "deliverability", "SPF generator"), ("settings", "settings", None)]
     for appearance in ("Dark", "Light"):
@@ -248,7 +250,7 @@ def main() -> int:
         window.show()
         settle(1200)
         for key, name, tab in shots if appearance == "Dark" else shots[:1]:
-            if key == "design":
+            if name == "design-library":
                 # Switched on only now, so the My message shot shows the plain email
                 from app.core import design
 
@@ -257,7 +259,8 @@ def main() -> int:
             if tab:
                 window.page(key).tabs.set(tab)
             page = window.page(key)
-            if key == "design":
+            if name == "design":
+                page._open(design_id)
                 settle(800)
                 # The picture, so the shot shows its resize handle and the toolbar
                 picture = next(b for b in page._design["blocks"] if b["type"] == "image")
@@ -267,6 +270,20 @@ def main() -> int:
                 scroll = page.findChild(QScrollArea)
                 scroll.verticalScrollBar().setValue(scroll.verticalScrollBar().maximum())
             settle(2500 if tab else 600)
+            if name == "design-library":
+                # The real folder is a temp one; show where it goes on a user's PC
+                page.mine_note.setText(page.mine_note.text().replace(
+                    str(config.DESIGNS_DIR), r"C:\Users\Jamie\Documents\HomingPigeon\Designs"))
+            elif name == "message":
+                # Some formatting, so the shot shows what the toolbar does
+                box = page.body_editors[0].editor
+                box.setTextCursor(box.document().find("a few samples"))
+                box.toggle_bold()
+                box.set_colour("#d9622b")
+                cursor = box.textCursor()
+                cursor.clearSelection()
+                box.setTextCursor(cursor)
+                settle(200)
             path = OUT / f"{name}-{appearance.lower()}.png"
             window.grab().save(str(path))
             print(f"saved {path.relative_to(ROOT)}")

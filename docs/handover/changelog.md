@@ -2,6 +2,40 @@
 
 Newest first. Add to the top when you change something.
 
+## v0.7.3 beta
+
+- **My designs page.** Email design opens on a page of the user's designs
+  (thumbnail, "In use" badge, Open, More: rename, copy, use or stop using, save
+  to a file, delete) and the starting designs, Blank first. The design picker,
+  StarterDialog and the New design popup are gone: New design goes to the
+  starting designs.
+- **Rename in place.** The design's name sits next to Computer/Phone with a
+  Rename button. Changes save themselves a second after the last edit
+  (`Debouncer`), and on leaving the page or closing the app (`before_close`).
+- **Design files.** Every design is also kept as a `.hpdesign` file in
+  Documents\HomingPigeon\Designs (`config.DESIGNS_DIR`, `design.write_file`,
+  written on a worker). Renaming renames the file; deleting sends it to the
+  Recycle Bin (`design.recycle_file`).
+- **Block list** is a list like the sidebar (icon, name, short line), with no
+  scrollbar; the wheel still scrolls it. Colour code boxes are as tall as the
+  swatch next to them.
+- **Formatting like Outlook on My message.** Message, Signature and the new
+  Footer tab use `RichBox` (`app/ui/widgets/rich_text.py`) with a pinned toolbar:
+  font, size, bold, italic, underline, strikethrough, colour, highlight,
+  bullets, numbers, indent, alignment, links, pictures and clear. The editor
+  saves tidy email HTML (`document_to_html`), so the spam score is not hurt by
+  editor clutter. Pictures go into the email as inline parts (cid:).
+- **Footer** (new): small grey print under the signature, such as a company
+  address or confidentiality note. Column `template_sets.footer_html` (schema
+  5). "Show me an example" fills one in every language.
+- **Starting designs** now use headings, bold and bullet points. The "Show me an
+  example" messages stay plain so they keep reaching the main inbox.
+- **Scrolling.** Scrollbars are thin and widen when the mouse is over them.
+  Smooth scrolling (`app/ui/scrolling.py`), with a switch in Settings.
+- **Fixes.** Adding a block to a Blank design and removing a warm-up day could
+  crash the app (a widget was freed while still in use). Setup guide step
+  numbers now line up with their titles.
+
 ## v0.7.2 beta
 
 - **Nobody is emailed twice.** New `contacted` table (schema 4), keyed by email

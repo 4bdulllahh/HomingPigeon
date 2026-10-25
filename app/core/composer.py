@@ -6,6 +6,8 @@ line off, and deliberately omits any X-Mailer header. Bulk tools that advertise 
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import mimetypes
 import random
 import re
@@ -44,6 +46,7 @@ class Content:
     link_text: str = "View our brochure"
     unsubscribe_note: bool = True
     design: dict | None = None         # an email design (app/core/design.py), or None for plain
+    footer_html: str = ""              # small print under the signature, such as a disclaimer
 
 
 class AttachmentTooLarge(ValueError):
@@ -199,6 +202,9 @@ def assemble_html(body_html: str, content: Content, sender: SenderIdentity) -> s
     if content.signature_html.strip():
         parts.append(text_to_html(content.signature_html).strip())
 
+    if content.footer_html.strip():
+        parts.append(footer_block(content.footer_html))
+
     if content.unsubscribe_note:
         parts.append(unsubscribe_footer(sender))
 
@@ -221,21 +227,55 @@ def assemble_html(body_html: str, content: Content, sender: SenderIdentity) -> s
     )
 
 
+def footer_block(footer_html: str) -> str:
+    """The footer from My message: small grey print, as legal notices usually are."""
+    return ('<div style="font-size:11px;color:#777777;line-height:1.5;margin-top:16px;">'
+            f'{text_to_html(footer_html).strip()}</div>')
+
+
+_DATA_PICTURE = re.compile(r'src="data:(image/(?:png|jpeg|gif|webp));base64,([A-Za-z0-9+/=\s]+)"',
+                           re.IGNORECASE)
+
+
+def inline_pictures(html_text: str) -> tuple[str, dict[str, tuple[bytes, str]]]:
+    """Pictures pasted or added in the message, signature or footer, as parts of the email.
+
+    The editor keeps them inside the HTML as data: addresses, which Gmail and
+    Outlook refuse to show. Sent as inline parts (cid:) they show like a design's.
+    """
+    images: dict[str, tuple[bytes, str]] = {}
+
+    def swap(match: re.Match) -> str:
+        data = base64.b64decode(re.sub(r"\s", "", match.group(2)))
+        key = "p" + hashlib.sha1(data).hexdigest()[:16]
+        images[key] = (data, match.group(1).lower())
+        return f'src="cid:{key}@homingpigeon"'
+
+    return _DATA_PICTURE.sub(swap, html_text), images
+
+
 def assemble(body_html: str, content: Content, sender: SenderIdentity,
              context: Mapping[str, str] | None = None, rng: random.Random | None = None,
              embed: str = "cid") -> tuple[str, dict[str, tuple[bytes, str]]]:
     """The finished HTML and its inline pictures, with the design if one is in use."""
     if not content.design:
-        return assemble_html(body_html, content, sender), {}
-    from app.core import design
+        full, images = assemble_html(body_html, content, sender), {}
+    else:
+        from app.core import design
 
-    signature = text_to_html(content.signature_html).strip()         if content.signature_html.strip() else ""
-    return design.render(
-        content.design, message_html=text_to_html(body_html).strip(),
-        signature_html=signature, brochure_html=brochure_block(content),
-        unsubscribe_html=unsubscribe_footer(sender) if content.unsubscribe_note else "",
-        context=context, rng=rng, embed=embed,
-        rtl=is_right_to_left(html_to_text(body_html)))
+        signature = text_to_html(content.signature_html).strip()             if content.signature_html.strip() else ""
+        if content.footer_html.strip():
+            signature += footer_block(content.footer_html)
+        full, images = design.render(
+            content.design, message_html=text_to_html(body_html).strip(),
+            signature_html=signature, brochure_html=brochure_block(content),
+            unsubscribe_html=unsubscribe_footer(sender) if content.unsubscribe_note else "",
+            context=context, rng=rng, embed=embed,
+            rtl=is_right_to_left(html_to_text(body_html)))
+    if embed == "cid":
+        full, pictures = inline_pictures(full)
+        images = {**images, **pictures}
+    return full, images
 
 
 def check_attachment(path: str | Path) -> int:

@@ -462,6 +462,12 @@ QFrame[role="tile"] {{
     border-radius: {RADIUS}px;
 }}
 QFrame[role="tile"]:hover {{ background-color: {t['bg_hover']}; border-color: {t['accent']}; }}
+QFrame[role="blockrow"] {{
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: {RADIUS}px;
+}}
+QFrame[role="blockrow"]:hover {{ background-color: {t['bg_hover']}; border-color: {t['border']}; }}
 QFrame[role="danger-card"] {{
     background-color: {t['bg_panel']};
     border: 1px solid {t['error']};
@@ -702,23 +708,29 @@ QProgressBar[tone="success"]::chunk {{ background-color: {t['success']}; }}
 /* ---------- scroll areas ---------- */
 QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; border: none; }}
 QScrollBar:vertical {{
-    background: transparent; width: {px(11)}px; margin: 0;
+    background: transparent; width: 10px; margin: 0;
 }}
 QScrollBar::handle:vertical {{
     background: {t['border_strong']};
-    border-radius: {px(5)}px;
+    border-radius: 2px;
+    margin: 0 2px 0 4px;
     min-height: {px(28)}px;
 }}
-QScrollBar::handle:vertical:hover {{ background: {t['fg_muted']}; }}
+QScrollBar[hot="true"]::handle:vertical {{
+    background: {t['fg_muted']}; border-radius: 4px; margin: 0 1px;
+}}
 QScrollBar:horizontal {{
-    background: transparent; height: {px(11)}px; margin: 0;
+    background: transparent; height: 10px; margin: 0;
 }}
 QScrollBar::handle:horizontal {{
     background: {t['border_strong']};
-    border-radius: {px(5)}px;
+    border-radius: 2px;
+    margin: 4px 0 2px 0;
     min-width: {px(28)}px;
 }}
-QScrollBar::handle:horizontal:hover {{ background: {t['fg_muted']}; }}
+QScrollBar[hot="true"]::handle:horizontal {{
+    background: {t['fg_muted']}; border-radius: 4px; margin: 1px 0;
+}}
 QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 

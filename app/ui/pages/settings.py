@@ -16,7 +16,7 @@ from app import config
 from app.core import credentials, db, prefs, shortcut
 from app.i18n import t
 from app.services import maintenance
-from app.ui import theme
+from app.ui import scrolling, theme
 from app.ui.pages.base import Page
 from app.ui.widgets.common import (Card, ChoiceButtons, Section, confirm_button, danger_button,
                                    muted, open_url, primary_button, row, secondary_button,
@@ -116,6 +116,14 @@ class SettingsPage(Page):
                                     on_change=self.window_.change_bold_text))
 
         control = self._setting(
+            section, "Smooth scrolling",
+            "Pages glide when you turn the mouse wheel instead of jumping. Switch it off if "
+            "scrolling feels slow on your computer.")
+        self.smooth_box = checkbox("Smooth scrolling", bool(prefs.get("smooth_scroll")),
+                                   on_change=self._smooth_changed)
+        self._put(control, self.smooth_box)
+
+        control = self._setting(
             section, "Start over",
             "Put the theme, text size and reading options back to how they were when you "
             "installed the app.")
@@ -123,9 +131,15 @@ class SettingsPage(Page):
                                             self._reset_appearance, 230))
         return section
 
+    @staticmethod
+    def _smooth_changed(on: bool) -> None:
+        db.set_setting("smooth_scroll", bool(on))
+        scrolling.set_smooth(bool(on))
+
     def _reset_appearance(self) -> None:
-        for key in ("appearance", "text_size", "high_contrast", "bold_text"):
+        for key in ("appearance", "text_size", "high_contrast", "bold_text", "smooth_scroll"):
             db.set_setting(key, prefs.DEFAULTS[key])
+        scrolling.set_smooth(prefs.DEFAULTS["smooth_scroll"])
         theme.set_appearance(prefs.DEFAULTS["appearance"])
         theme.set_high_contrast(False)
         theme.set_bold_text(False)

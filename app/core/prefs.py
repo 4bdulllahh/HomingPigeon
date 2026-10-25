@@ -40,6 +40,7 @@ DEFAULTS = {
     "text_size": DEFAULT_TEXT_SIZE,
     "high_contrast": False,
     "bold_text": False,
+    "smooth_scroll": True,
     "date_format": DEFAULT_DATE_FORMAT,
     "time_format": DEFAULT_TIME_FORMAT,
     "start_page": "dashboard",

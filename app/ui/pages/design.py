@@ -8,13 +8,16 @@ import tempfile
 import webbrowser
 from pathlib import Path
 
-from PyQt6.QtCore import QPoint, Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QColor, QIcon, QKeySequence, QShortcut
-from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QColorDialog, QDialog, QFileDialog,
-                             QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QListWidget,
+from PyQt6 import sip
+from PyQt6.QtCore import QPoint, Qt, QTimer, QUrl, pyqtSignal
+from PyQt6.QtGui import (QAction, QColor, QDesktopServices, QIcon, QKeySequence, QPixmap,
+                         QShortcut)
+from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QColorDialog, QFileDialog,
+                             QFrame, QHBoxLayout, QInputDialog, QLabel, QListWidget,
                              QListWidgetItem, QMenu, QPushButton, QSplitter, QVBoxLayout, QWidget)
 
-from app.core import composer, credentials, db, design, importer, merge, scorer, sender
+from app import config
+from app.core import composer, credentials, db, design, importer, merge, prefs, scorer, sender
 from app.i18n import t
 from app.ui import theme
 from app.ui.pages.base import Page
@@ -22,7 +25,7 @@ from app.ui.widgets.common import (Card, ChoiceButtons, FormRow, ScrollPage, Tab
                                    column, flow_row, ghost_button, heading, hint, muted,
                                    primary_button, row, secondary_button, set_tone, small_button,
                                    subheading)
-from app.ui.widgets.dialogs import ChoiceDialog, ConfirmDialog, InfoDialog
+from app.ui.widgets.dialogs import ConfirmDialog, InfoDialog
 from app.ui.widgets.email_canvas import (INLINE, MIME_NEW, EmailCanvas, faded, picture_thumbnail,
                                          snapshot, start_drag)
 from app.ui.widgets.inputs import (Debouncer, checkbox, combo, get_text, line_edit, set_text,
@@ -37,11 +40,12 @@ HELP_INTRO = (
 
 HELP_SECTIONS = [
     ("The quick way", [
-        "Step 1. Press \"New design\" and pick a starting design you like.",
+        "Step 1. Pick a starting design you like, or Blank to build your own from scratch.",
         "Step 2. Click anything in the email in the middle to change it on the right.",
         "Step 3. Drag blocks from the left into the email. A blue line shows where they will "
         "land. Drag any block in the email to move it.",
-        "Step 4. Press Save, then tick \"Send my emails with this design\".",
+        "Step 4. Changes are saved as you make them. Tick \"Send my emails with this "
+        "design\" to use it.",
         "Step 5. Press \"Send me a test\" to see it in your own inbox before sending to anyone.",
     ]),
     ("Click and change", [
@@ -87,8 +91,11 @@ HELP_SECTIONS = [
         "be sent.",
     ]),
     ("Sharing a design", [
-        "\"More\" lets you rename, copy, delete, save a design to a file and open one from a "
-        "file. A design file includes its pictures, so it works on another computer.",
+        "Every design is also saved as a file in your Documents folder, in "
+        "HomingPigeon\\Designs. A design file includes its pictures, so it works on another "
+        "computer.",
+        "Press Rename next to a design's name to change it. \"More\" lets you copy, delete, "
+        "save a design to a file and open one from a file. \"My designs\" shows them all.",
     ]),
 ]
 
@@ -153,6 +160,9 @@ class ColorField(QWidget):
         self.swatch.clicked.connect(self._pick)
         self.code = line_edit("#rrggbb")
         self.code.setFixedWidth(round(96 * theme.text_scale()))
+        # The same height as the swatch beside it; the stylesheet's minimum would make it taller
+        self.code.setStyleSheet("min-height: 0px; padding-top: 0px; padding-bottom: 0px;")
+        self.code.setFixedHeight(size)
         self.code.editingFinished.connect(self._typed)
         parts = [self.swatch, self.code]
         if optional:
@@ -270,55 +280,55 @@ class ImageField(QWidget):
         self._on_link(address)
 
 
-class StarterDialog(QDialog):
-    """Pick a starting design for a new one."""
-
-    def __init__(self, parent, starters: QWidget):
-        super().__init__(parent)
-        self.setWindowTitle(t("New design"))
-        self.setModal(True)
-        scale = theme.text_scale()
-        self.resize(round(860 * scale), round(600 * scale))
-        layout = QVBoxLayout(self)
-        pad = round(20 * scale)
-        layout.setContentsMargins(pad, pad, pad, pad)
-        layout.addWidget(subheading("Pick a starting design"))
-        layout.addWidget(muted("You can change everything afterwards: words, colours, pictures "
-                               "and blocks."))
-        area = ScrollPage()
-        area.add(starters)
-        area.add_stretch()
-        layout.addWidget(area, 1)
-        layout.addWidget(row(None, secondary_button("Cancel", self.reject, 110)))
+# The second line under each block's name in the Add list. The longer note is its tooltip.
+BLOCK_LINES = {
+    "heading": "A big title", "text": "A paragraph of your words",
+    "quote": "Words from a happy customer", "links": "A row of small links",
+    "logo": "Your logo", "banner": "A wide picture or coloured band",
+    "image": "A photo or picture", "video": "A picture that opens a video",
+    "button": "A coloured button with a link", "social": "Links to your social pages",
+    "columns": "Two things side by side", "card": "A box that stands out",
+    "divider": "A thin line", "spacer": "Empty space",
+    "footer": "Company name and address", "html": "For people who know HTML",
+}
 
 
-class BlockTile(QFrame):
-    """One block in the Add panel: drag it into the email, or click it to add it."""
+class BlockRow(QFrame):
+    """One block in the Add list: drag it into the email, or click it to add it."""
 
     def __init__(self, spec: design.BlockSpec, on_click):
         super().__init__()
         self.spec = spec
         self._on_click = on_click
         self._press: QPoint | None = None
-        self.setProperty("role", "tile")
+        self.setProperty("role", "blockrow")
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.setToolTip(t(spec.note))
         scale = theme.text_scale()
-        self.setMinimumHeight(round(64 * scale))
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, round(8 * scale), 4, round(6 * scale))
-        layout.setSpacing(round(4 * scale))
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(round(8 * scale), round(6 * scale), round(8 * scale),
+                                  round(6 * scale))
+        layout.setSpacing(round(10 * scale))
         icon = QLabel(theme.block_icon(spec.kind, spec.glyph))
+        icon.setFixedWidth(round(22 * scale))
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon.setStyleSheet(theme.icon_css(20) + f" color: {theme.color('accent')}; "
+        icon.setStyleSheet(theme.icon_css(18) + f" color: {theme.color('accent')}; "
                                                 "background: transparent; border: none;")
+        layout.addWidget(icon)
+        text = QVBoxLayout()
+        text.setContentsMargins(0, 0, 0, 0)
+        text.setSpacing(round(1 * scale))
         name = QLabel(t(spec.label))
-        name.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        name.setWordWrap(True)
-        name.setStyleSheet(f"font-size: {theme.px(12)}px; background: transparent; border: none;")
-        for label in (icon, name):
+        name.setStyleSheet("font-weight: 600; background: transparent; border: none;")
+        line = QLabel(t(BLOCK_LINES.get(spec.kind, "")))
+        line.setProperty("role", "hint")
+        line.setWordWrap(True)
+        line.setStyleSheet("background: transparent; border: none;")
+        text.addWidget(name)
+        text.addWidget(line)
+        layout.addLayout(text, 1)
+        for label in (icon, name, line):
             label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-            layout.addWidget(label)
 
     def mousePressEvent(self, event):  # noqa: N802 - Qt naming
         if event.button() == Qt.MouseButton.LeftButton:
@@ -335,6 +345,19 @@ class BlockTile(QFrame):
         if self._press is not None and self.rect().contains(event.position().toPoint()):
             self._on_click()
         self._press = None
+
+
+def thumb_button(picture: QPixmap, on_click) -> QPushButton:
+    """A miniature email that opens when clicked."""
+    button = QPushButton()
+    button.setIcon(QIcon(picture))
+    button.setIconSize(picture.size())
+    button.setFixedSize(picture.size())
+    button.setCursor(Qt.CursorShape.PointingHandCursor)
+    button.setStyleSheet("QPushButton { border: none; background: transparent; padding: 0; "
+                         "min-height: 0; }")
+    button.clicked.connect(lambda _c=False: on_click())
+    return button
 
 
 # Settings shown straight away for a block; the rest wait under "More options"
@@ -361,6 +384,8 @@ class DesignPage(Page):
         self._redraw.connect(self._draw)
         self._remember = Debouncer(500, self)
         self._remember.connect(self._snapshot)
+        self._autosave = Debouncer(1000, self)
+        self._autosave.connect(self._save)
 
         for keys, slot in ((QKeySequence.StandardKey.Save, self.save),
                            (QKeySequence.StandardKey.Undo, self.undo),
@@ -376,14 +401,13 @@ class DesignPage(Page):
         scale = theme.text_scale()
         help_button = secondary_button("?  How it works", self._explain)
         help_button.setToolTip(t("A short guide to this page, in plain English"))
-        self.picker = combo([], translate=False)
-        self.picker.setMinimumWidth(round(200 * scale))
-        self.picker.setToolTip(t("Your saved designs"))
-        self.picker.activated.connect(self._picked)
-        new_button = primary_button("New design", self._new_design, 140)
+        self.back_button = secondary_button("My designs", self._show_library)
+        self.back_button.setToolTip(t("See all your designs"))
+        self.new_button = primary_button("New design", self._new_design, 140)
+        self.new_button.setToolTip(t("Start a new design from a blank page or a starting design"))
         self.more = secondary_button("More")
         menu = QMenu(self.more)
-        for label, slot in (("Rename...", self._rename), ("Make a copy", self._duplicate),
+        for label, slot in (("Rename...", self._start_rename), ("Make a copy", self._duplicate),
                             (None, None), ("Save to a file...", self._export),
                             ("Open a design file...", self._import), (None, None),
                             ("Delete this design", self._delete)):
@@ -394,8 +418,10 @@ class DesignPage(Page):
             action.triggered.connect(lambda _c=False, s=slot: s())
             menu.addAction(action)
         self.more.setMenu(menu)
-        self.root.addWidget(row(heading("Email design"), None, self.picker, new_button, self.more,
-                                help_button))
+        self.open_file_button = secondary_button("Open a design file...", self._import)
+        self.open_file_button.setToolTip(t("Open a design someone saved to a file"))
+        self.root.addWidget(row(heading("Email design"), None, self.back_button, self.new_button,
+                                self.more, self.open_file_button, help_button))
         self.root.addWidget(muted(
             "Give your emails your own look: logo, colours, pictures and buttons. Click anything "
             "in the email to change it. Your message still comes from the My message page."))
@@ -422,15 +448,36 @@ class DesignPage(Page):
         # Kept on one line: as a wrapping row it would stack the two buttons
         self.view_choice.setMinimumWidth(sum(b.sizeHint().width() for b in
                                              self.view_choice.buttons.values()) + 12)
+
+        # The design's name, with a button to change it right there
+        self.name_label = QLabel()
+        self.name_label.setProperty("role", "subheading")
+        self.name_label.setToolTip(t("The name of this design"))
+        self.name_edit = line_edit("A name for this design")
+        self.name_edit.setMaxLength(80)
+        self.name_edit.setMinimumWidth(round(220 * scale))
+        self.name_edit.editingFinished.connect(self._finish_rename)
+        self.name_edit.hide()
+        cancel = QShortcut(QKeySequence(Qt.Key.Key_Escape), self.name_edit)
+        cancel.setContext(Qt.ShortcutContext.WidgetShortcut)
+        cancel.activated.connect(self._cancel_rename)
+        self.rename_button = small_button("✎  Rename", self._rename_clicked)
+        self.rename_button.setToolTip(t("Change the name of this design"))
+        # Clicking it must not take the focus: that would end the typing before the click
+        self.rename_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
         browser = secondary_button("Open in browser", self._open_in_browser)
         browser.setToolTip(t("See the finished email exactly as email programs will show it"))
         test = secondary_button("Send me a test", self._send_test)
         test.setToolTip(t("Send this design to your own email address to check it"))
         self.save_status = muted("", wrap=False)
         save = primary_button("Save", self.save, 120)
-        save.setToolTip(t("Save this design (Ctrl+S)"))
-        editor_layout.addWidget(row(self.undo_button, self.redo_button, self.view_choice, None,
-                                    browser, test, save, self.save_status))
+        save.setToolTip(t("Save this design now (Ctrl+S). Changes are also saved as you make them."))
+        gap = QWidget()
+        gap.setFixedWidth(round(10 * scale))
+        editor_layout.addWidget(row(self.undo_button, self.redo_button, self.view_choice, gap,
+                                    self.name_label, self.name_edit, self.rename_button, None,
+                                    self.save_status, browser, test, save))
         self.size_note = hint("")
         set_tone(self.size_note, "warning")
         self.size_note.setVisible(False)
@@ -467,13 +514,29 @@ class DesignPage(Page):
         editor_layout.addWidget(splitter, 1)
         self.root.addWidget(self.editor, 1)
 
-        self.empty = ScrollPage(spacing=12)
-        self.empty.add(subheading("You have no designs yet"))
-        self.empty.add(muted("Your emails are sent as plain messages, which is best for a first "
-                             "email to someone new. To give them your own look, pick a starting "
-                             "design below. You can change everything in it."))
+        # The first thing on the page: every design made so far, then the ways to start one
+        self.library = ScrollPage(spacing=12)
+        folder = secondary_button("Open the folder", self._open_folder)
+        folder.setToolTip(t("Show the design files in File Explorer"))
+        self.mine_title = self.library.add(row(subheading("Your designs"), None, folder))
+        self.mine_note = muted("")
+        self.mine_row = self.library.add(self.mine_note)
+        self.mine_holder, self.mine_layout = flow_row(10)
+        self.library.add(self.mine_holder)
+        self.none_title = self.library.add(subheading("You have no designs yet"))
+        self.none_note = self.library.add(muted(
+            "Your emails are sent as plain messages, which is best for a first email to someone "
+            "new. To give them your own look, pick a starting design below. You can change "
+            "everything in it."))
+        self.start_title = self.library.add(subheading("Start a new design"))
+        self.library.add(muted("Pick Blank to build your own email from scratch, or start from "
+                               "a design and change anything in it."))
+        self._gallery_box = self.library.add(column(spacing=0))
         self._gallery = None       # drawn the first time it is needed: it renders eight emails
-        self.root.addWidget(self.empty, 1)
+        self.library.add_stretch()
+        self.root.addWidget(self.library, 1)
+        self._thumbs: dict[tuple, QPixmap] = {}
+        self._files_checked = False
 
     def showEvent(self, event):  # noqa: N802 - Qt naming
         super().showEvent(event)
@@ -496,24 +559,18 @@ class DesignPage(Page):
         return tabs
 
     def _palette(self) -> QWidget:
-        area = ScrollPage(spacing=6)
+        area = ScrollPage(spacing=2)
+        # The wheel still scrolls it; a bar beside such a narrow list only gets in the way
+        area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         area.add(hint("Drag a block into the email, or click it to add it below the selected "
                       "one."))
         for group in design.GROUPS:
-            area.add(subheading(group))
-            holder = QWidget()
-            holder.setProperty("role", "plain")
-            grid = QGridLayout(holder)
-            grid.setContentsMargins(0, 0, 0, 0)
-            grid.setSpacing(6)
-            specs = [spec for spec in design.BLOCKS.values()
-                     if spec.group == group and spec.kind != "message"]
-            for index, spec in enumerate(specs):
-                grid.addWidget(BlockTile(spec, lambda k=spec.kind: self._add_block(k)),
-                               index // 2, index % 2)
-            grid.setColumnStretch(0, 1)
-            grid.setColumnStretch(1, 1)
-            area.add(holder)
+            title = hint(group)
+            title.setStyleSheet(f"font-weight: 600; padding-top: {round(10 * theme.text_scale())}px;")
+            area.add(title)
+            for spec in design.BLOCKS.values():
+                if spec.group == group and spec.kind != "message":
+                    area.add(BlockRow(spec, lambda k=spec.kind: self._add_block(k)))
         area.add_stretch()
         return area
 
@@ -540,65 +597,141 @@ class DesignPage(Page):
             tile = Card(kind="card", padding=12)
             tile.setFixedWidth(width)
             tile.add(subheading(name))
-            preview = QLabel()
-            preview.setProperty("role", "plain")
-            preview.setPixmap(snapshot(design.starter(key, kit), self._sample,
-                                       width - round(26 * theme.text_scale()),
-                                       round(170 * theme.text_scale())))
-            tile.add(preview)
+            picture = snapshot(design.starter(key, kit), self._sample,
+                               width - round(26 * theme.text_scale()),
+                               round(170 * theme.text_scale()))
+            tile.add(thumb_button(picture, lambda k=key, n=name: on_pick(k, n)))
             tile.add(muted(note))
             tile.add(row(primary_button("Start with this", lambda k=key, n=name: on_pick(k, n)),
                          None))
+            tile.add_stretch()      # a taller neighbour must not push this one's title down
             layout.addWidget(tile)
         return holder
+
+    def _design_card(self, record: dict, width: int) -> QWidget:
+        """One saved design on the library page: its picture, name and what can be done to it."""
+        design_id = record["id"]
+        tile = Card(kind="card", padding=12)
+        tile.setFixedWidth(width)
+        name = QLabel(record["name"])           # the user's own words, never translated
+        name.setProperty("role", "subheading")
+        name.setWordWrap(True)
+        parts = [name, None]
+        if design.active_id() == design_id:
+            badge = hint("In use", wrap=False)
+            badge.setToolTip(t("Your emails are sent with this design"))
+            set_tone(badge, "success")
+            parts.append(badge)
+        tile.add(row(*parts))
+
+        key = (design_id, record["updated_at"])
+        if key not in self._thumbs:
+            data = design.load(design_id) or design.blank_design()
+            self._thumbs[key] = snapshot(data, self._sample, width - round(26 * theme.text_scale()),
+                                         round(170 * theme.text_scale()))
+        tile.add(thumb_button(self._thumbs[key], lambda: self._open(design_id)))
+        tile.add(hint(t("Changed {when}", when=prefs.format_datetime(record["updated_at"]))))
+
+        more = secondary_button("More")
+        menu = QMenu(more)
+        using = design.active_id() == design_id
+        for label, slot in (
+                ("Rename...", lambda: self._rename_from_library(design_id)),
+                ("Make a copy", lambda: self._duplicate(design_id)),
+                ("Send plain emails instead" if using else "Send my emails with this design",
+                 lambda: self._use_from_library(design_id, not using)),
+                (None, None),
+                ("Save to a file...", lambda: self._export(design_id)),
+                (None, None),
+                ("Delete this design", lambda: self._delete(design_id))):
+            if label is None:
+                menu.addSeparator()
+                continue
+            action = QAction(t(label), menu)
+            action.triggered.connect(lambda _c=False, s=slot: s())
+            menu.addAction(action)
+        more.setMenu(menu)
+        tile.add(row(primary_button("Open", lambda: self._open(design_id)), more, None))
+        tile.add_stretch()
+        return tile
 
     def _explain(self) -> None:
         InfoDialog.show_for(self, "How email designs work", HELP_INTRO, HELP_SECTIONS, HELP_FOOTER)
 
     # --- loading and saving -----------------------------------------------------------
     def load(self) -> None:
-        designs = design.list_designs()
-        self._fill_picker(designs)
-        if not designs:
-            self._design, self._id = None, None
-            self.editor.setVisible(False)
-            self.empty.setVisible(True)
-            if self._gallery is None:
-                self._gallery = self._starters(self._create)
-                self.empty.add(self._gallery)
-                self.empty.add_stretch()
-            return
-        wanted = design.active_id() or self._id
-        ids = [d["id"] for d in designs]
-        self._open(wanted if wanted in ids else ids[0])
+        self._show_library()
 
-    def _fill_picker(self, designs: list[dict] | None = None) -> None:
-        designs = design.list_designs() if designs is None else designs
-        blocked = self.picker.blockSignals(True)
-        self.picker.clear()
+    def _header_for(self, editing: bool) -> None:
+        for button in (self.back_button, self.new_button, self.more):
+            button.setVisible(editing)
+        self.open_file_button.setVisible(not editing)
+
+    def _show_library(self, starters: bool = False) -> None:
+        """The page of designs: the ones made so far, then Blank and the starting designs."""
+        if getattr(self, "_dirty", False):
+            self._save()
+        self._cancel_rename()
+        self._refresh_sample()
+        self._fill_library()
+        self.editor.setVisible(False)
+        self.library.setVisible(True)
+        self._header_for(False)
+        if starters:
+            QTimer.singleShot(0, self._scroll_to_starters)    # once the layout has placed it
+
+    def _scroll_to_starters(self) -> None:
+        if not sip.isdeleted(self):
+            self.library.verticalScrollBar().setValue(
+                self.start_title.mapTo(self.library.content, QPoint(0, 0)).y())
+
+    def _fill_library(self) -> None:
+        designs = design.list_designs()
+        clear_layout(self.mine_layout)
+        width = round(250 * theme.text_scale())
         for record in designs:
-            self.picker.addItem(record["name"], record["id"])
-        if self._id is not None:
-            index = self.picker.findData(self._id)
-            if index >= 0:
-                self.picker.setCurrentIndex(index)
-        self.picker.blockSignals(blocked)
-        self.picker.setVisible(bool(designs))
-        self.more.setVisible(bool(designs))
+            self.mine_layout.addWidget(self._design_card(record, width))
+        mine = bool(designs)
+        for widget in (self.mine_title, self.mine_row, self.mine_holder):
+            widget.setVisible(mine)
+        for widget in (self.none_title, self.none_note):
+            widget.setVisible(not mine)
+        self.mine_note.setText(t("Click a design to open it. Each one is also saved as a file in "
+                                 "{folder}", folder=str(config.DESIGNS_DIR)))
+        if self._gallery is None:
+            self._gallery = self._starters(self._create)
+            self._gallery_box.layout().addWidget(self._gallery)
+        if not self._files_checked:
+            # Designs made before v0.7.3 get their copy in the Documents folder too
+            self._files_checked = True
+            for record in designs:
+                if not design.file_path(record["name"]).exists():
+                    self._write_file(record["name"], design.load(record["id"]))
+
+    def _open_folder(self) -> None:
+        try:
+            Path(config.DESIGNS_DIR).mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            self.notify(t("Could not open the folder: {message}", message=error), "error", 8000)
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(config.DESIGNS_DIR)))
 
     def _open(self, design_id: int) -> None:
+        if getattr(self, "_dirty", False) and design_id != self._id:
+            self._save()
         loaded = design.load(design_id)
         if loaded is None:
             return
         record = next((d for d in design.list_designs() if d["id"] == design_id), None)
         self._design, self._id = loaded, design_id
         self._name = record["name"] if record else ""
+        self.name_label.setText(self._name)
         self._selected = ""
         self._history, self._position = [], -1
         self._snapshot()
-        self.empty.setVisible(False)
+        self.library.setVisible(False)
         self.editor.setVisible(True)
-        self._fill_picker()
+        self._header_for(True)
         self._refresh_sample()
         self._refresh_use()
         self._draw()
@@ -611,46 +744,46 @@ class DesignPage(Page):
         self.save_status.setText("")
 
     def _touch(self) -> None:
-        """Something changed: redraw soon, remember it for Undo, show it is unsaved."""
+        """Something changed: redraw soon, remember it for Undo, save it a moment later."""
         if self._loading:
             return
         self._dirty = True
-        self.save_status.setText(t("Unsaved changes"))
-        set_tone(self.save_status, "warning")
+        self.save_status.setText(t("Saving..."))
+        set_tone(self.save_status, "muted")
         self._redraw.poke()
         self._remember.poke()
+        self._autosave.poke()
 
     def save(self) -> None:
+        self._save(quiet=False)
+
+    def _save(self, quiet: bool = True) -> None:
+        """Store the design, and its copy in the Documents folder. Autosave is quiet."""
         if self._design is None:
             return
+        self._autosave.cancel()
         self._remember.flush()
-        self._id = design.save(self._design, self._name or t("My design"), self._id)
+        self._name = self._name or t("My design")
+        self._id = design.save(self._design, self._name, self._id)
         self._mark_saved()
         self.save_status.setText(t("Saved"))
         set_tone(self.save_status, "success")
-        self.notify("Design saved", "success")
-        self._refresh_use()
+        if not quiet:
+            self.notify("Design saved", "success")
+        self._write_file(self._name, self._design)
 
-    def _keep_or_drop(self) -> bool:
-        """Before leaving a design with unsaved changes. False means stay."""
-        if self._design is None or not getattr(self, "_dirty", False):
-            return True
-        answer = ChoiceDialog.ask(
-            self, "Unsaved changes", "This design has changes that are not saved yet.",
-            [("save", "Save them", "primary"), ("drop", "Throw them away", "danger"),
-             (None, "Cancel", "secondary")])
-        if answer == "save":
-            self.save()
-        return answer is not None
+    def _write_file(self, name: str, data: dict | None, old_name: str = "") -> None:
+        if data is None:
+            return
+        Task(design.write_file, name, design.export_text(data, name), old_name).start(
+            on_error=self.guard(self._file_failed))
 
-    def _picked(self, index: int) -> None:
-        design_id = self.picker.itemData(index)
-        if design_id == self._id:
-            return
-        if not self._keep_or_drop():
-            self._fill_picker()
-            return
-        self._open(int(design_id))
+    def _file_failed(self, message: str) -> None:
+        # Once is enough: an autosave every second would otherwise repeat it
+        if not getattr(self, "_file_warned", False):
+            self._file_warned = True
+            self.notify(t("The design is saved in the app, but its copy in your Documents "
+                          "folder could not be written: {message}", message=message), "warn", 8000)
 
     def _unique_name(self, name: str) -> str:
         names = {d["name"] for d in design.list_designs()}
@@ -662,67 +795,142 @@ class DesignPage(Page):
         return t("{name} {number}", name=name, number=number)
 
     def _create(self, key: str, name: str) -> None:
-        if not self._keep_or_drop():
-            return
         data = design.starter(key)
-        new_id = design.save(data, self._unique_name(t(name)))
+        name = self._unique_name(t(name))
+        new_id = design.save(data, name)
+        self._write_file(name, data)
         self._open(new_id)
-        self.notify("Click anything in the email to change it", "info", 6000)
+        self.notify("Click anything in the email to change it. Press Rename to give it your own "
+                    "name.", "info", 6000)
 
     def _new_design(self) -> None:
-        holder: dict = {}
+        self._show_library(starters=True)
 
-        def pick(key: str, name: str) -> None:
-            holder["choice"] = (key, name)
-            dialog.accept()
+    # --- the name -------------------------------------------------------------------
+    def _rename_clicked(self) -> None:
+        if not self.name_edit.isHidden():
+            self._finish_rename()
+        else:
+            self._start_rename()
 
-        dialog = StarterDialog(self.window(), self._starters(pick))
-        if dialog.exec() == QDialog.DialogCode.Accepted and holder.get("choice"):
-            self._create(*holder["choice"])
-
-    def _rename(self) -> None:
+    def _start_rename(self) -> None:
         if self._id is None:
+            return
+        self.name_edit.setText(self._name)
+        self.name_label.hide()
+        self.name_edit.show()
+        self.rename_button.setText(t("✓  Save name"))
+        self.name_edit.setFocus()
+        self.name_edit.selectAll()
+
+    def _cancel_rename(self) -> None:
+        if self.name_edit.isHidden():
+            return
+        self.name_edit.hide()
+        self.name_label.show()
+        self.rename_button.setText(t("✎  Rename"))
+
+    def _finish_rename(self) -> None:
+        if self.name_edit.isHidden():
+            return
+        if self._apply_rename(self._id, self.name_edit.text()):
+            self._cancel_rename()
+
+    def _rename_from_library(self, design_id: int) -> None:
+        record = next((d for d in design.list_designs() if d["id"] == design_id), None)
+        if record is None:
             return
         name, ok = QInputDialog.getText(self, t("Rename design"), t("A name for this design"),
-                                        text=self._name)
+                                        text=record["name"])
+        if ok and self._apply_rename(design_id, name):
+            self._fill_library()
+
+    def _apply_rename(self, design_id: int | None, name: str) -> bool:
+        """Rename a design and its file. False when the name cannot be used."""
         name = name.strip()[:80]
-        if ok and name:
+        records = design.list_designs()
+        old = next((d["name"] for d in records if d["id"] == design_id), None)
+        if design_id is None or old is None:
+            return True
+        if not name or name == old:
+            return True
+        if any(d["id"] != design_id and design.file_path(d["name"]) == design.file_path(name)
+               for d in records):
+            self.notify(t("You already have a design called \"{name}\". Pick another name.",
+                          name=name), "warn", 6000)
+            return False
+        design.rename(design_id, name)
+        if design_id == self._id:
             self._name = name
-            design.rename(self._id, name)
-            self._fill_picker()
+            self.name_label.setText(name)
+            data = self._design
+        else:
+            data = design.load(design_id)
+        self._write_file(name, data, old)
+        self.notify("Design renamed", "success")
+        return True
 
-    def _duplicate(self) -> None:
-        if self._design is None:
+    def _duplicate(self, design_id: int | None = None) -> None:
+        """A copy of a design. From the editor the copy opens; from the library it is listed."""
+        editing = design_id is None
+        source_id = self._id if editing else design_id
+        if editing:
+            self._save()
+        data = design.load(source_id) if source_id is not None else None
+        record = next((d for d in design.list_designs() if d["id"] == source_id), None)
+        if data is None or record is None:
             return
-        new_id = design.save(copy.deepcopy(self._design),
-                             self._unique_name(t("{name} copy", name=self._name)))
-        self._open(new_id)
-        self.notify("Copy made. You are now changing the copy", "success")
+        name = self._unique_name(t("{name} copy", name=record["name"]))
+        new_id = design.save(data, name)
+        self._write_file(name, data)
+        if editing:
+            self._open(new_id)
+            self.notify("Copy made. You are now changing the copy", "success")
+        else:
+            self._fill_library()
+            self.notify("Copy made", "success")
 
-    def _delete(self) -> None:
-        if self._id is None:
+    def _use_from_library(self, design_id: int, on: bool) -> None:
+        design.set_active(design_id if on else 0)
+        self.notify("Your emails will be sent with this design" if on else
+                    "Your emails will be sent as plain messages", "success")
+        self._fill_library()
+
+    def _delete(self, design_id: int | None = None) -> None:
+        design_id = self._id if design_id is None else design_id
+        record = next((d for d in design.list_designs() if d["id"] == design_id), None)
+        if record is None:
             return
         if not ConfirmDialog.ask(
                 self, "Delete this design?",
-                t("\"{name}\" will be deleted. Your messages, contacts and sent emails are not "
-                  "touched. If your emails use this design, they go back to plain messages.",
-                  name=self._name), "Delete design", danger=True):
+                t("\"{name}\" will be deleted, and its file moved to the Recycle Bin. Your "
+                  "messages, contacts and sent emails are not touched. If your emails use this "
+                  "design, they go back to plain messages.", name=record["name"]),
+                "Delete design", danger=True):
             return
-        design.delete(self._id)
-        self._id, self._design, self._dirty = None, None, False
+        design.delete(design_id)
+        Task(design.recycle_file, record["name"]).start(on_error=self.guard(self._file_failed))
+        if design_id == self._id:
+            self._autosave.cancel()
+            self._id, self._design, self._dirty = None, None, False
         self.notify("Design deleted", "success")
-        self.load()
+        self._show_library()
 
-    def _export(self) -> None:
-        if self._design is None:
+    def _export(self, design_id: int | None = None) -> None:
+        design_id = self._id if design_id is None else design_id
+        if design_id == self._id and self._design is not None:
+            self._save()
+        record = next((d for d in design.list_designs() if d["id"] == design_id), None)
+        data = design.load(design_id) if record else None
+        if data is None:
             return
         path, _filter = QFileDialog.getSaveFileName(
-            self, t("Save the design to a file"), f"{self._name or 'design'}.hpdesign",
+            self, t("Save the design to a file"), f"{record['name'] or 'design'}.hpdesign",
             t("HomingPigeon designs (*.hpdesign)"))
         if not path:
             return
         try:
-            Path(path).write_text(design.export_text(self._design, self._name), encoding="utf-8")
+            Path(path).write_text(design.export_text(data, record["name"]), encoding="utf-8")
         except OSError as error:
             self.notify(t("Could not save the file: {message}", message=error), "error", 8000)
             return
@@ -730,11 +938,9 @@ class DesignPage(Page):
 
     def _import(self) -> None:
         path, _filter = QFileDialog.getOpenFileName(
-            self, t("Open a design file"), "",
+            self, t("Open a design file"), str(config.DESIGNS_DIR),
             t("HomingPigeon designs (*.hpdesign);;All files (*.*)"))
         if not path:
-            return
-        if not self._keep_or_drop():
             return
 
         def read() -> tuple[str, dict]:
@@ -742,7 +948,10 @@ class DesignPage(Page):
 
         def opened(result: tuple[str, dict]) -> None:
             name, data = result
-            self._open(design.save(data, self._unique_name(name)))
+            name = self._unique_name(name)
+            new_id = design.save(data, name)
+            self._write_file(name, data)
+            self._open(new_id)
             self.notify(t("Opened {name}", name=name), "success")
 
         Task(read).start(on_result=self.guard(opened), on_error=self.guard(
@@ -756,8 +965,8 @@ class DesignPage(Page):
         self.use_box.setChecked(using)
         self.use_box.blockSignals(blocked)
         if using:
-            self.use_note.setText(t("Your emails are sent with this design. Changes are used "
-                                    "once you press Save."))
+            self.use_note.setText(t("Your emails are sent with this design. Changes are saved "
+                                    "as you make them."))
             set_tone(self.use_note, "success")
         else:
             self.use_note.setText(t("Your emails are sent as plain messages. Designs with pictures "
@@ -768,7 +977,7 @@ class DesignPage(Page):
     def _use_changed(self, on: bool) -> None:
         if on:
             if getattr(self, "_dirty", False) or self._id is None:
-                self.save()
+                self._save()
             design.set_active(self._id or 0)
             self.notify("Your emails will be sent with this design", "success")
         else:
@@ -780,7 +989,8 @@ class DesignPage(Page):
     def _refresh_sample(self) -> None:
         """The message, signature and unsubscribe line the canvas shows, from My message."""
         body = db.query_one("SELECT html FROM bodies WHERE enabled = 1 ORDER BY position LIMIT 1")
-        signature = db.query_one("SELECT signature_html FROM template_sets ORDER BY id LIMIT 1")
+        signature = db.query_one("SELECT signature_html, footer_html FROM template_sets "
+                                 "ORDER BY id LIMIT 1")
         identity = composer.SenderIdentity(db.get_setting("sender_name", ""),
                                            db.get_setting("sender_email", "you@example.com"))
         context = self._context()
@@ -790,6 +1000,7 @@ class DesignPage(Page):
                 merge.render(body["html"], context, html=True, rng=random.Random(7)))
             if body else "",
             "signature": composer.text_to_html(signature["signature_html"] or "")
+            + (composer.footer_block(signature["footer_html"]) if signature["footer_html"] else "")
             if signature else "",
             "unsubscribe": composer.unsubscribe_footer(identity)
             if db.get_setting("unsubscribe_note", True) else "",
@@ -1216,7 +1427,8 @@ class DesignPage(Page):
                     db.query("SELECT text FROM subjects WHERE enabled = 1 ORDER BY position")]
         bodies = [r["html"] for r in
                   db.query("SELECT html FROM bodies WHERE enabled = 1 ORDER BY position")]
-        signature = db.query_one("SELECT signature_html FROM template_sets ORDER BY id LIMIT 1")
+        signature = db.query_one("SELECT signature_html, footer_html FROM template_sets "
+                                 "ORDER BY id LIMIT 1")
         return composer.Content(
             subject_variants=subjects or [t("A test of my email design")],
             body_variants=bodies or [t("Your message goes here. Each person gets one of the "
@@ -1227,6 +1439,7 @@ class DesignPage(Page):
             link_text=db.get_setting("link_text", "View our brochure"),
             unsubscribe_note=bool(db.get_setting("unsubscribe_note", True)),
             design=copy.deepcopy(self._design),
+            footer_html=(signature["footer_html"] or "") if signature else "",
         )
 
     def _context(self) -> dict:
@@ -1293,10 +1506,20 @@ class DesignPage(Page):
 
     # --- page hooks ---------------------------------------------------------------------------
     def on_show(self) -> None:
-        if self._design is not None:
+        if not self.editor.isHidden() and self._design is not None:
             self._refresh_sample()
             self._refresh_use()
             self._draw()
+        elif not self.library.isHidden():
+            self._fill_library()
+
+    def hideEvent(self, event):  # noqa: N802 - Qt naming
+        # Leaving the page saves what is waiting to be saved
+        self._autosave.flush()
+        super().hideEvent(event)
+
+    def before_close(self) -> None:
+        self._autosave.flush()
 
     def busy_reason(self) -> str | None:
         if self.busy > 0:

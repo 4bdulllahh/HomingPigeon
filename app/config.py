@@ -5,7 +5,7 @@ from pathlib import Path
 
 APP_NAME = "HomingPigeon"
 APP_TITLE = "HomingPigeon"
-APP_VERSION = "v0.7.2 beta"
+APP_VERSION = "v0.7.3 beta"
 APP_TAGLINE = "Safe, simple email for your business"
 REPO_URL = "https://github.com/4bdulllahh/HomingPigeon"
 
@@ -20,7 +20,24 @@ def _app_data_dir() -> Path:
     return Path(base) / APP_NAME
 
 
+def documents_dir() -> Path:
+    """The user's Documents folder, wherever Windows keeps it (often inside OneDrive)."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            buffer = ctypes.create_unicode_buffer(260)
+            # CSIDL_PERSONAL (5): My Documents, following any redirection
+            if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buffer) == 0 and buffer.value:
+                return Path(buffer.value)
+        except (AttributeError, OSError):
+            pass
+    return Path.home() / "Documents"
+
+
 DATA_DIR = _app_data_dir()
+# A copy of every email design, as a file the user can find, back up or share
+DESIGNS_DIR = documents_dir() / APP_NAME / "Designs"
 DB_PATH = DATA_DIR / "mailer.db"
 SECRETS_PATH = DATA_DIR / "secrets.dat"
 KEYS_DIR = DATA_DIR / "keys"

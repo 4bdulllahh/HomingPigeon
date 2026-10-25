@@ -12,6 +12,7 @@ Safety behaviour that matters more than speed:
 """
 from __future__ import annotations
 
+import dataclasses
 import queue
 import random
 import smtplib
@@ -501,17 +502,9 @@ class SendWorker(threading.Thread):
                 break
 
             context = merge.build_context(contact, columns)
-            local_content = composer.Content(
-                subject_variants=[subject_cycler.next()],
-                body_variants=[body_cycler.next()],
-                signature_html=self.plan.content.signature_html,
-                attach_mode=self.plan.content.attach_mode,
-                attachment_path=self.plan.content.attachment_path,
-                link_url=self.plan.content.link_url,
-                link_text=self.plan.content.link_text,
-                unsubscribe_note=self.plan.content.unsubscribe_note,
-                design=self.plan.content.design,
-            )
+            local_content = dataclasses.replace(
+                self.plan.content, subject_variants=[subject_cycler.next()],
+                body_variants=[body_cycler.next()])
 
             try:
                 message, subject, variant = composer.build_message(

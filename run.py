@@ -151,6 +151,10 @@ def main() -> int:
     theme.apply_preferences()  # theme, text size, contrast and bold text from Settings
     app.setStyleSheet(theme.stylesheet())
 
+    from app.ui import scrolling
+
+    scrolling.install(app, bool(prefs.get("smooth_scroll")))
+
     from app.ui.main_window import MainWindow
 
     window = MainWindow()

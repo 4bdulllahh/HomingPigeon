@@ -1475,3 +1475,64 @@ def test_saving_a_design_drops_unused_pictures_and_deleting_it_stops_using_it():
     assert design.active() is not None
     design.delete(design_id)
     assert design.active_id() == 0 and design.active() is None
+
+
+# --- v0.7.3: the Outlook-style editor, the footer and pictures in messages ---------
+_DOT = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC")
+
+
+def test_a_picture_in_the_signature_travels_inside_the_email():
+    signature = f'<p>Sam<br><img src="data:image/png;base64,{_DOT}" width="120" alt=""></p>'
+    content = composer.Content(["Hi"], ["<p>Hello there</p>"], signature_html=signature,
+                               footer_html="<p>Confidential.</p>", unsubscribe_note=False)
+    message, _subject, _preview = composer.build_message(
+        composer.SenderIdentity("Me", "me@x.com"), "a@b.com", {}, content)
+    html = message.get_body(("html",)).get_content()
+    pictures = [p for p in message.walk() if p.get_content_maintype() == "image"]
+    assert len(pictures) == 1 and "data:image" not in html
+    assert f"cid:{pictures[0]['Content-ID'].strip('<>')}" in html
+    # The footer comes after the signature, in small print
+    assert html.index("Sam") < html.index("Confidential.")
+    assert "font-size:11px" in html[html.index("Sam"):]
+    # The preview keeps the picture in the page so a browser shows it
+    _subject, preview, _text = composer.preview_message(
+        composer.SenderIdentity("Me", "me@x.com"), {}, content)
+    assert "data:image/png;base64," in preview
+
+
+def test_the_footer_goes_inside_a_design_too():
+    from app.core import design
+
+    content = composer.Content(["Hi"], ["<p>Hello</p>"], signature_html="Sam",
+                               footer_html="Registered in England", unsubscribe_note=False,
+                               design=design.starter("blank"))
+    html, _images = composer.assemble("<p>Hello</p>", content, composer.SenderIdentity("Me", "me@x.com"))
+    assert html.index("Sam") < html.index("Registered in England")
+
+
+def test_upgrading_to_v073_adds_the_footer_and_keeps_the_signature(tmp_path):
+    import sqlite3 as sqlite
+
+    path = tmp_path / "v072.db"
+    old = sqlite.connect(path)
+    old.executescript(db._SCHEMA.replace(",\n    footer_html   TEXT DEFAULT ''", ""))
+    old.execute("INSERT INTO schema_info(version) VALUES (4)")
+    old.execute("INSERT INTO template_sets(name, signature_html) VALUES ('Default', 'Sam')")
+    old.commit()
+    old.close()
+
+    db.close()
+    try:
+        db.init(path)
+        record = db.query_one("SELECT * FROM template_sets")
+        assert record["signature_html"] == "Sam" and record["footer_html"] == ""
+        assert db.query_one("SELECT version FROM schema_info")["version"] == db.SCHEMA_VERSION
+    finally:
+        db.close()
+        db.init(os.path.join(tempfile.mkdtemp(), "test.db"))
+
+
+def test_every_language_has_an_example_footer():
+    from app.core import examples
+
+    assert all(v["footer"].strip() for v in examples.EXAMPLES.values())

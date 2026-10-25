@@ -43,7 +43,14 @@ Where each feature lives and how it works. Paths are from the repository root.
 
 ## My message (`app/ui/pages/templates.py`)
 
-- Tabs: Subjects, Message, Signature, Preview & score. All built up front.
+- Tabs: Subjects, Message, Signature, Footer, Preview & score. All built up front.
+- **Formatting (v0.7.3).** Message, Signature and Footer are `RichBox`es with a
+  `RichToolbar` (`app/ui/widgets/rich_text.py`). `editor_html` loads old plain
+  text unchanged; `document_to_html` writes the document back as minimal HTML
+  (`<p>`, `<br>`, `<ul>`, `<strong>`, a `style` only when not the default),
+  because the scorer counts formatting. Pictures are stored as data: URIs and
+  turned into cid: parts at send time (`composer.inline_pictures`). Subjects stay
+  plain text. The footer is sent small and grey (`composer.footer_block`).
 - "Personal touch" buttons show **every** tag and are rebuilt in `on_show()`
   when the tag list changes (`_refresh_tag_bars`), so a new import shows up
   without a restart.
@@ -87,7 +94,14 @@ Where each feature lives and how it works. Paths are from the repository root.
 - The canvas (`EmailCanvas`) draws the design with Qt widgets, not a browser
   engine (too big, and Smart App Control blocks parts of it). It follows the
   HTML closely; "Open in browser" shows the exact email.
-- **Drag and drop (v0.7.2).** The Add panel is a grid of `BlockTile`s with icons
+- **My designs (v0.7.3).** The page opens on a library (`_show_library`): the
+  user's designs as cards, then the starters with Blank first. Edits save a
+  second after the last change (`_autosave`) and on leaving the page or closing
+  the app (`before_close`). Each design is mirrored to
+  `config.DESIGNS_DIR/<name>.hpdesign` on a worker; rename renames the file,
+  delete sends it to the Recycle Bin. Tests point `DESIGNS_DIR` at a temp folder
+  (`tests/conftest.py`).
+- **Drag and drop (v0.7.2).** The Add panel is a list of `BlockRow`s with icons
   from the Fluent icon font (`theme.BLOCK_ICONS`). A tile or a block on the
   canvas starts a `QDrag` (`email_canvas.start_drag`); the canvas surface takes
   the drop, shows a blue line and emits `dropped`, and the page inserts or moves
@@ -212,4 +226,7 @@ See [languages.md](languages.md). Settings → Language; `MainWindow.change_lang
   that ticks itself from real state. My email account (`account.py`): SMTP/IMAP
   with provider presets. Domain check (`deliverability.py`): SPF/DKIM/DMARC.
   Sending options (`campaign.py`): brochure, pacing, warm-up. Settings
-  (`settings.py`): appearance, dates, backup/restore, update check, uninstall.
+  (`settings.py`): appearance, smooth scrolling, dates, backup/restore, update
+  check, uninstall.
+- Scrolling (`app/ui/scrolling.py`): an app-wide event filter animates wheel
+  scrolling and marks a scrollbar "hot" under the mouse so the QSS widens it.

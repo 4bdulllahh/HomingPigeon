@@ -42,10 +42,11 @@ class GuideStep(Card):
             f"background-color: {theme.color('success') if done else theme.color('bg_input')};"
             f"color: {'#ffffff' if done else theme.color('fg')};"
             f"border-radius: {size // 2}px; font-weight: 700;")
-        header.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
-        header.addWidget(subheading(title), 1)
+        header.addWidget(badge, 0, Qt.AlignmentFlag.AlignVCenter)
+        header.addWidget(subheading(title), 1, Qt.AlignmentFlag.AlignVCenter)
         if action:
-            header.addWidget(secondary_button("Open", action, 110), 0, Qt.AlignmentFlag.AlignTop)
+            header.addWidget(secondary_button("Open", action, 110), 0,
+                             Qt.AlignmentFlag.AlignVCenter)
         self.add_layout(header)
 
         body = QVBoxLayout()

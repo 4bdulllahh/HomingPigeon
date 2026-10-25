@@ -6,6 +6,7 @@ skip cleanly if PyQt6 is not installed.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -792,11 +793,11 @@ def test_toolbar_buttons_act_on_the_box_last_typed_in(qt_app, store):
         page._add_body("")
         page._remember_focus(first)
         page._insert(True, "{{Company}}")
-        assert first.get_text() == "{{Company}}"
+        assert first.get_text() == "<p>{{Company}}</p>"
         assert page.body_editors[1].get_text() == ""
         first.editor.selectAll()
-        page._format("bold")
-        assert first.get_text() == "<strong>{{Company}}</strong>"
+        page._toolbars["message"][0].buttons["bold"].click()
+        assert first.get_text() == "<p><strong>{{Company}}</strong></p>"
     finally:
         window.close()
         window.deleteLater()
@@ -952,8 +953,10 @@ def test_the_design_page_builds_edits_and_protects_the_message(qt_app, store):
     try:
         window.show_page("design")
         page = window.page("design")
-        assert page.empty.isVisible() and design.list_designs() == []
+        assert page.library.isVisible() and page.none_title.isVisible()
+        assert design.list_designs() == []
         page._create("announcement", "Announcement")
+        assert page.editor.isVisible() and not page.library.isVisible()
         blocks = page._design["blocks"]
         message = next(b for b in blocks if b["type"] == "message")
         count = len(blocks)
@@ -977,6 +980,58 @@ def test_the_design_page_builds_edits_and_protects_the_message(qt_app, store):
         page._select(quote["id"])
         page._set(quote, "text", "Changed")
         assert page._dirty
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_designs_page_lists_renames_autosaves_and_keeps_a_file(qt_app, store, monkeypatch):
+    from app import config
+    from app.core import design
+    from app.ui.main_window import MainWindow
+    from app.workers import base as workers
+
+    recycled = []
+    monkeypatch.setattr(design, "recycle_file", recycled.append)
+    window = MainWindow()
+    window.resize(1300, 800)
+    window.show()
+    try:
+        window.show_page("design")
+        page = window.page("design")
+        page._create("blank", "Blank")
+        workers.pool().waitForDone(3000)
+        assert (Path(config.DESIGNS_DIR) / "Blank.hpdesign").exists()
+
+        # Renamed in place, beside the Undo buttons; the file follows the name
+        page._rename_clicked()
+        assert not page.name_edit.isHidden()
+        page.name_edit.setText("Spring offer")
+        page._rename_clicked()
+        workers.pool().waitForDone(3000)
+        assert page.name_edit.isHidden() and page.name_label.text() == "Spring offer"
+        assert [d["name"] for d in design.list_designs()] == ["Spring offer"]
+        assert sorted(f.name for f in Path(config.DESIGNS_DIR).iterdir()) == ["Spring offer.hpdesign"]
+
+        # Changes save themselves
+        page._add_block("quote")
+        assert page._dirty
+        page._autosave.flush()
+        assert not page._dirty
+        assert any(b["type"] == "quote" for b in design.load(page._id)["blocks"])
+
+        # New design goes back to the page of designs, which lists this one
+        page._new_design()
+        assert page.library.isVisible() and not page.editor.isVisible()
+        assert page.mine_layout.count() == 1 and page.mine_title.isVisible()
+        page._duplicate(page._id)
+        assert page.mine_layout.count() == 2
+
+        page.notify = lambda *a, **k: None
+        from app.ui.widgets import dialogs
+        monkeypatch.setattr(dialogs.ConfirmDialog, "ask", staticmethod(lambda *a, **k: True))
+        page._delete(design.list_designs()[0]["id"])
+        assert recycled == ["Spring offer"] and page.mine_layout.count() == 1
     finally:
         window.close()
         window.deleteLater()
@@ -1050,6 +1105,65 @@ def test_the_custom_warmup_plan_is_saved(qt_app, store):
         assert page.ramp_editor.ramp() == [10, 20, 30]
         page.save()
         assert warmup.preset() == "custom" and warmup.custom_ramp() == [10, 20, 30]
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+# --- v0.7.3: the Outlook-style editor ------------------------------------------
+def test_the_editor_writes_tidy_email_html(qt_app):
+    from PyQt6.QtGui import QTextCursor
+
+    from app.ui.widgets.rich_text import RichBox
+
+    box = RichBox()
+    assert box.html() == ""
+    typed = "Hi {{FirstName}},\n\nI run a small shop.\nSecond line.\n\n- one\n- two\n\nThanks,\nSam"
+    box.set_html(typed)
+    plain = box.html()
+    # Typed text comes out as plain paragraphs, with no styling the spam score would count
+    assert "style=" not in plain and "<strong>" not in plain
+    assert plain.startswith("<p>Hi {{FirstName}},</p>")
+    assert "<p>I run a small shop.<br>Second line.</p>" in plain
+    assert "<ul>\n  <li>one</li>\n  <li>two</li>\n</ul>" in plain
+    box.set_html(plain)
+    assert box.html() == plain          # reading it back changes nothing
+
+    # Select "small" and change it the way the toolbar does
+    cursor = box.textCursor()
+    start = box.toPlainText().index("small")
+    cursor.setPosition(start)
+    cursor.setPosition(start + len("small"), QTextCursor.MoveMode.KeepAnchor)
+    box.setTextCursor(cursor)
+    box.toggle_bold()
+    box.toggle_italic()
+    box.set_size(18)
+    box.set_colour("#c00000")
+    html = box.html()
+    assert '<strong><em><span style="font-size:18pt;color:#c00000">small</span></em></strong>' in html
+    box.clear_formatting()
+    assert box.html() == plain
+
+
+def test_the_signature_and_footer_are_saved_with_the_message(qt_app, store):
+    from app.core import db
+    from app.ui.main_window import MainWindow
+
+    window = MainWindow()
+    try:
+        window.show_page("templates")
+        page = window.page("templates")
+        page._add_subject("Hello")
+        page._add_body("Hi there, a quick question?")
+        page.signature_box.set_html("Sam Jones\nJones Supplies")
+        page._insert_example_footer()
+        page.save()
+        record = db.query_one("SELECT * FROM template_sets")
+        assert record["signature_html"] == "<p>Sam Jones<br>Jones Supplies</p>"
+        assert "confidential" in record["footer_html"]
+        assert page.current_content().footer_html == record["footer_html"]
+        page.load()
+        assert page.footer_box.html() == record["footer_html"]
     finally:
         window.close()
         window.deleteLater()

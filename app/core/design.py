@@ -20,13 +20,17 @@ import copy
 import html
 import io
 import json
+import os
 import random
 import re
+import sys
+import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from app import config
 from app.core import composer, db, merge
 from app.i18n import t
 
@@ -449,6 +453,11 @@ def starter(key: str, kit: dict | None = None) -> dict:
         return block
 
     footer = {"text": t("[Your company name]") + "\n" + t("[Street, city, country]")}
+
+    def points(title: str, *items: str) -> str:
+        """A bold line and bullet points, as a Text block reads them."""
+        return "\n".join(["<strong>" + title + "</strong>"] + ["- " + i for i in items])
+
     if key == "letter":
         add("logo", align="left", pad_top=24)
         add("message")
@@ -458,6 +467,8 @@ def starter(key: str, kit: dict | None = None) -> dict:
         add("banner", pad_top=36, pad_bottom=36, title=t("[Your big headline]"),
             subtitle=t("[One line that says more]"))
         add("message", pad_top=24)
+        add("text", text=points(t("[What is new]"), t("[First thing, in a few words]"),
+                                t("[Second thing]"), t("[Third thing]")), size=15)
         add("button", label=t("[Find out more]"), pad_top=12, pad_bottom=24)
         add("footer", **footer)
     elif key == "welcome":
@@ -467,6 +478,8 @@ def starter(key: str, kit: dict | None = None) -> dict:
         add("heading", text=t("[Welcome aboard]"), align="center", size=30)
         add("image", width=70, radius=12)
         add("message", align="center")
+        add("text", text=points(t("[Your first three steps]"), t("[Step one]"), t("[Step two]"),
+                                t("[Step three]")), size=15)
         add("button", label=t("[Get started]"), radius=24, size="large", pad_bottom=24)
         add("footer", **footer)
     elif key == "newsletter":
@@ -476,6 +489,10 @@ def starter(key: str, kit: dict | None = None) -> dict:
         add("heading", text=t("[This month's news]"), size=28)
         add("image", radius=10)
         add("message")
+        add("heading", text=t("[In this issue]"), size=20, pad_top=8, pad_bottom=0)
+        add("text", text="\n".join("- <strong>" + name + "</strong> " + t("[one line about it]")
+                                   for name in (t("[First story]"), t("[Second story]"),
+                                                t("[Third story]"))), size=15)
         add("columns", left_title=t("[First title]"), right_title=t("[Second title]"),
             left_text=t("[A sentence or two about it]"),
             right_text=t("[A sentence or two about it]"))
@@ -490,6 +507,8 @@ def starter(key: str, kit: dict | None = None) -> dict:
         add("columns", ratio="33", left_title="", left_text="",
             right_title=t("[Product name]"), right_text=t("[What it does and who it is for]"),
             right_button=t("[See it]"))
+        add("text", text=points(t("[Why customers like it]"), t("[Benefit one]"),
+                                t("[Benefit two]"), t("[Benefit three]")), size=15)
         add("message")
         add("card", title=t("[A special offer for {{Company}}]"),
             text=t("[A few words about it]"), button=t("[Claim it]"))
@@ -501,6 +520,8 @@ def starter(key: str, kit: dict | None = None) -> dict:
         add("heading", text=t("[You are invited]"), align="center", size=32, pad_top=24)
         add("text", text=t("[Date and time]") + "\n" + t("[Place]"), align="center", size=16)
         add("message", align="center")
+        add("text", text=points(t("[What to expect]"), t("[A talk or a demonstration]"),
+                                t("[Food and drinks]"), t("[Time to meet everyone]")), size=15)
         add("button", label=t("[Save my place]"), size="large", pad_bottom=24)
         add("footer", **footer)
     elif key == "action":
@@ -512,6 +533,8 @@ def starter(key: str, kit: dict | None = None) -> dict:
             button=t("[Do it now]"), align="center", card_bg="#ffffff", border="",
             radius=4)
         add("message", align="center", size=13, color="#555555")
+        add("text", text="<em>" + t("[A short line of small print, if you need one]") + "</em>",
+            align="center", size=12, color="#777777")
         add("footer", **footer)
     else:
         add("message", pad_top=24, pad_bottom=24)
@@ -522,7 +545,7 @@ def starter(key: str, kit: dict | None = None) -> dict:
 
 
 # --- pictures -------------------------------------------------------------------
-def prepare_image(path: str | Path) -> dict:
+def prepare_image(path: str | Path, max_width: int = 0) -> dict:
     """Read a picture and shrink it so it travels well by email.
 
     Phone photos are often 4000 pixels wide and several megabytes. Nobody's email
@@ -547,9 +570,10 @@ def prepare_image(path: str | Path) -> dict:
         return _asset(name, "image/gif", data, image.width, image.height)
 
     image = ImageOps.exif_transpose(image)
-    if image.width > MAX_IMAGE_WIDTH:
-        height = round(image.height * MAX_IMAGE_WIDTH / image.width)
-        image = image.resize((MAX_IMAGE_WIDTH, max(1, height)), Image.LANCZOS)
+    widest = min(max_width or MAX_IMAGE_WIDTH, MAX_IMAGE_WIDTH)   # a logo needs far less
+    if image.width > widest:
+        height = round(image.height * widest / image.width)
+        image = image.resize((widest, max(1, height)), Image.LANCZOS)
 
     transparent = image.mode in ("RGBA", "LA") or \
         (image.mode == "P" and "transparency" in image.info)
@@ -1163,6 +1187,61 @@ def save(design: dict, name: str, design_id: int | None = None) -> int:
     db.execute("UPDATE designs SET name = ?, data = ?, updated_at = ? WHERE id = ?",
                (name, data, db.now(), int(design_id)))
     return int(design_id)
+
+
+# --- the copy of each design in the Documents folder -------------------------------
+_UNSAFE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def file_path(name: str) -> Path:
+    """Where a design's copy lives, named after the design.
+
+    shortcut: two names that differ only by characters Windows forbids share a file;
+    add the design's id to the file name if that ever matters.
+    """
+    safe = _UNSAFE.sub("", name).strip(" .")[:80] or "design"
+    return Path(config.DESIGNS_DIR) / f"{safe}.hpdesign"
+
+
+def write_file(name: str, text: str, old_name: str = "") -> Path:
+    """Write a design's copy (``export_text``), replacing the file of its old name.
+
+    Run on a worker. Written to a temporary file first, so an autosave that
+    overlaps another never leaves half a file behind.
+    """
+    path = file_path(name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle, temporary = tempfile.mkstemp(suffix=".tmp", dir=path.parent)
+    with os.fdopen(handle, "w", encoding="utf-8") as stream:
+        stream.write(text)
+    os.replace(temporary, path)
+    if old_name and file_path(old_name) != path:
+        file_path(old_name).unlink(missing_ok=True)
+    return path
+
+
+def recycle_file(name: str) -> None:
+    """Move a deleted design's copy to the Recycle Bin, so it can still be got back."""
+    path = file_path(name)
+    if not path.exists():
+        return
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        class _FileOp(ctypes.Structure):
+            _fields_ = [("hwnd", wintypes.HWND), ("wFunc", wintypes.UINT),
+                        ("pFrom", wintypes.LPCWSTR), ("pTo", wintypes.LPCWSTR),
+                        ("fFlags", ctypes.c_uint16), ("fAnyOperationsAborted", wintypes.BOOL),
+                        ("hNameMappings", ctypes.c_void_p),
+                        ("lpszProgressTitle", wintypes.LPCWSTR)]
+
+        # FO_DELETE with FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI
+        operation = _FileOp(None, 3, str(path) + "\0", None, 0x40 | 0x10 | 0x04 | 0x400,
+                            False, None, None)
+        if ctypes.windll.shell32.SHFileOperationW(ctypes.byref(operation)) == 0:
+            return
+    path.unlink(missing_ok=True)
 
 
 def rename(design_id: int, name: str) -> None:

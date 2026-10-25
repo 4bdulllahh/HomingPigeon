@@ -721,6 +721,10 @@ class MainWindow(QMainWindow):
                 return
             self.stop_sending()
 
+        # A page with changes waiting to be saved (an email design) saves them now
+        for page in self._pages.values():
+            getattr(page, "before_close", lambda: None)()
+
         from app.workers import base as workers
 
         workers.shutdown(2000)

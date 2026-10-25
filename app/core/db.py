@@ -15,7 +15,7 @@ from typing import Any, Iterable, Sequence
 
 from app import config
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 _local = threading.local()
 _db_path: Path | None = None
@@ -93,7 +93,8 @@ CREATE TABLE IF NOT EXISTS template_sets (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     name          TEXT NOT NULL,
     signature_html TEXT DEFAULT '',
-    created_at    TEXT
+    created_at    TEXT,
+    footer_html   TEXT DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS subjects (
@@ -280,6 +281,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # v0.7.2: who was already emailed, by address. Filled from both records, so
         # a contact deleted or re-imported before the update is still remembered.
         backfill_contacted(conn)
+    if row["version"] < 5:
+        # v0.7.3: the footer on My message (legal notice, company details)
+        columns = {r[1] for r in conn.execute("PRAGMA table_info(template_sets)")}
+        if "footer_html" not in columns:
+            conn.execute("ALTER TABLE template_sets ADD COLUMN footer_html TEXT DEFAULT ''")
     if row["version"] < SCHEMA_VERSION:
         conn.execute("UPDATE schema_info SET version = ?", (SCHEMA_VERSION,))
 

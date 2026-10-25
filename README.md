@@ -14,15 +14,15 @@ correctly, cleans your contact list before you send, makes every message slightl
 sends at a human pace, and quietly removes addresses that bounce. It runs on your own computer,
 and your contacts never leave it.
 
-**New in 0.7.2:** **nobody is emailed twice.** The app remembers everyone it has emailed, even
-if you stop and start again, clear your list or import the same sheet again, and **My contacts**
-shows each person's status: not sent yet, sent, replied, bounced, failed or unsubscribed.
-**Start a new campaign** when you do want to email everyone again. The **Email design** editor
-is now drag and drop: drag blocks into the email, drag them around, type straight onto the
-email and drag pictures bigger or smaller. Bounces are caught far more reliably, and an old
-installer now installs the newest version by itself.
+**New in 0.7.3:** **format your emails like in Outlook.** Select words on **My message** and
+make them bold, italic, underlined, bigger, smaller or coloured, add bullet points, numbered
+lists and links, and put your logo in your signature. A new **Footer** adds small print, such as
+your company address, under every email. **Email design** now opens on a page of your designs
+and the starting designs, saves itself as you work, and keeps a copy of each design in your
+Documents folder. Scrollbars are slimmer and scrolling is smooth (you can switch it off in
+Settings).
 
-**Download:** [latest release](../../releases/latest) · **Version:** 0.7.2 (free beta) ·
+**Download:** [latest release](../../releases/latest) · **Version:** 0.7.3 (free beta) ·
 **Works on:** Windows, Mac and Linux · **Languages:** English, العربية, Deutsch, Español,
 Français
 
@@ -57,21 +57,29 @@ Français
   everyone not emailed yet. A short hiccup is retried up to three times. To email everyone again
   with a new message, press **Start a new campaign**; to email one person again, right-click
   them and choose **Send to this person again**.
+- **Formatting like Outlook.** Select some words and change the font, size, colour or
+  highlight, make them bold, italic, underlined or crossed out, add bullet points, numbered
+  lists, indents and links, and line them up left, centre or right. Your signature can carry
+  your logo, and a **Footer** adds small grey print, such as your company address or a
+  confidentiality note, under every email. Paste from Word or Outlook and the formatting comes
+  with it, cleaned up so it does not hurt your spam score.
 - **Several subjects and messages.** Write a few versions of each, use tags like
   `{{FirstName}}` and `{{Company}}`, and the app picks a different combination for each person,
   so hundreds of identical emails never go out. A new one appears at the top, and the tag
   buttons stay at the top of the screen however far you scroll. Already have them in a
   spreadsheet? Import the subjects and messages in one go.
-- **Email designs, as easy as Canva.** Pick a starting design (simple letter, announcement,
-  welcome card, newsletter, product spotlight, event invitation and more), then drag blocks into
-  the email, drag them around to rearrange them, double-click any words to type straight onto
-  the email, and drag the corner of a picture or button to resize it. Add logos, banners, pictures, videos, buttons, social icons, quotes,
-  two columns, highlighted cards, lines and footers; set colours, fades, fonts, rounded corners,
-  shadows, widths and alignment; centre your message or keep it to the left. Undo and redo,
-  check the phone view, keep a brand kit with your logo, colours and font, save several designs
-  and share them as files. Pictures travel inside the email, so you need no website, and your
-  messages still vary from person to person. Plain emails remain the default, because they reach
-  the main inbox best on first contact.
+- **Email designs, as easy as Canva.** The **Email design** page shows all your designs and
+  the starting designs (blank, simple letter, announcement, welcome card, newsletter, product
+  spotlight, event invitation and more). Pick one, then drag blocks into the email, drag them
+  around to rearrange them, double-click any words to type straight onto the email, and drag the
+  corner of a picture or button to resize it. Add logos, banners, pictures, videos, buttons,
+  social icons, quotes, two columns, highlighted cards, lines and footers; set colours, fades,
+  fonts, rounded corners, shadows, widths and alignment. Undo and redo, check the phone view,
+  keep a brand kit with your logo, colours and font. Designs save themselves as you work, can be
+  renamed in place, and each one is also kept as a file in Documents\HomingPigeon\Designs, so
+  you can back it up or share it. Pictures travel inside the email, so you need no website, and
+  your messages still vary from person to person. Plain emails remain the default, because they
+  reach the main inbox best on first contact.
 - **Spam score before you send.** A live preview shows exactly what one contact will receive,
   and the score reads that finished email: subject, message, link, signature and footer
   together. You get a score out of 100, an estimate of whether it lands in the main inbox,
@@ -106,7 +114,7 @@ Français
 - **Work while it works.** Importing a large spreadsheet checks every domain in the background,
   so you can set up your account or write your message at the same time.
 - **Easy to read.** Dark, light or match-your-computer themes, five text sizes, high contrast
-  and bold text, and your choice of date and time format.
+  and bold text, smooth scrolling, and your choice of date and time format.
 - **Backups.** Save everything to one file and restore it later, on this computer or a new one.
 
 ## Screenshots
@@ -115,7 +123,9 @@ Français
 |---|---|
 | ![The Contacts page listing imported contacts with company, contact person, status, source file and extra spreadsheet columns](docs/screenshots/contacts-dark.png) | ![The My message page previewing one personalised email next to its spam score of 97, the estimate that it will land in the main inbox, and advice](docs/screenshots/templates-dark.png) |
 | **My contacts.** Your imported list with each person's status and when they were last emailed, searchable, sortable and filterable. | **My message.** The finished email for a real contact, its spam score, where it will land (main inbox, Promotions or spam) and what to change. |
-| ![The Email design page: block tiles to drag in on the left, a designed email in the middle with the photo selected, showing its move, copy and remove buttons and a resize handle, and the photo's settings on the right](docs/screenshots/design-dark.png) | ![The warm-up section of Sending options with the Very safe, Safe (recommended), Faster and My own plan choices and the next days' limits](docs/screenshots/warmup-dark.png) |
+| ![The My message page with the formatting bar: font, size, bold, italic, underline, strikethrough, colour, highlight, lists, indents, alignment, link, picture and clear, and a message with some words in bold orange](docs/screenshots/message-dark.png) | ![The Email design page opening on the user's designs, marked In use, and the starting designs: Blank, Simple letter, Announcement and Welcome card](docs/screenshots/design-library-dark.png) |
+| **Formatting like Outlook.** Bold, sizes, colours, lists, links and pictures in your message, signature and footer. | **Your designs.** Every design you made and every starting design on one page, each also saved as a file. |
+| ![The Email design page: block list to drag in on the left, a designed email in the middle with the photo selected, showing its move, copy and remove buttons and a resize handle, and the photo's settings on the right](docs/screenshots/design-dark.png) | ![The warm-up section of Sending options with the Very safe, Safe (recommended), Faster and My own plan choices and the next days' limits](docs/screenshots/warmup-dark.png) |
 | **Email design.** Drag blocks in and around, type straight onto the email, drag pictures to resize. | **Warm-up plans.** A safe recommended plan, two others, or your own number for each day. |
 | ![The Sent emails page with a table of every email sent, its outcome and the subject used](docs/screenshots/sent-dark.png) | ![The My inbox page with two replies and one bounce, each labelled](docs/screenshots/inbox-dark.png) |
 | **Sent emails.** Every message that went out, and what came back. Exports to Excel. | **My inbox.** Replies, bounces and opt-outs, readable inside the app. |
@@ -132,7 +142,7 @@ Français
 
 You don't need to know anything about coding.
 
-1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.7.2.zip`**.
+1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.7.3.zip`**.
 2. Right-click the downloaded file → **Extract All...** → **Extract**.
 3. In the folder that opens, double-click **`HomingPigeon Setup.exe`**.
 4. Click **Install**. Setup shows you every step while it works: it downloads what the app needs
