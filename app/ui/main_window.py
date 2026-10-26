@@ -13,7 +13,8 @@ from __future__ import annotations
 
 from typing import Callable
 
-from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
+from PyQt6 import sip
+from PyQt6.QtCore import QEvent, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon, QKeySequence, QPixmap, QShortcut
 from PyQt6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QMainWindow, QPushButton,
                              QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
@@ -201,7 +202,9 @@ class MainWindow(QMainWindow):
         width = min(1280, (available.width() - 80) if available else 1280)
         height = min(920, (available.height() - 60) if available else 920)
         self.resize(width, height)
-        self.setMinimumSize(min(1000, width), min(640, height))
+        # Narrow enough to sit in half a screen. Each page can ask for more: see _fit_page
+        self._least = QSize(min(760, width), min(640, height))
+        self.setMinimumSize(self._least)
 
     def _build(self) -> None:
         central = QWidget()
@@ -213,7 +216,8 @@ class MainWindow(QMainWindow):
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
-        body.addWidget(self._build_sidebar())
+        self.sidebar = self._build_sidebar()
+        body.addWidget(self.sidebar)
 
         self.stack = QStackedWidget()
         self.stack.setProperty("role", "plain")
@@ -393,6 +397,28 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(page)
         return page
 
+    def event(self, event):
+        # A page that grows (a longer label, say) asks the window to lay out again.
+        # Check its width once that layout has worked out its new size.
+        if event.type() == QEvent.Type.LayoutRequest and hasattr(self, "stack"):
+            QTimer.singleShot(0, self._fit_page)
+        return super().event(event)
+
+    def _fit_page(self) -> None:
+        """Never narrower than the page on screen needs.
+
+        A fixed minimum let a page be squeezed below the width of its own
+        buttons, and Qt then drew them on top of one another.
+        """
+        page = self.stack.currentWidget()
+        if page is None or sip.isdeleted(page):
+            return
+        need = self.sidebar.width() + page.minimumSizeHint().width()
+        screen = self.screen().availableGeometry().width() if self.screen() else need
+        width = max(self._least.width(), min(need, screen))
+        if width != self.minimumWidth():
+            self.setMinimumWidth(width)
+
     def show_page(self, key: str) -> None:
         if key not in self._builders:
             return
@@ -409,6 +435,8 @@ class MainWindow(QMainWindow):
         if scroller is not None and self._nav[key].parentWidget() is scroller.widget():
             scroller.ensureWidgetVisible(self._nav[key])
         self.stack.setCurrentWidget(page)
+        self._fit_page()
+        QTimer.singleShot(0, self._fit_page)
         # Soft: remembering the last page is a convenience, and a background
         # import holding the write lock must never stall navigation for it.
         db.set_setting_soft("last_page", key)

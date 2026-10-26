@@ -23,7 +23,7 @@ The direction of imports is one way: `ui` uses `models`, `workers` and `core`;
 | Module | Job |
 |---|---|
 | `db.py` | SQLite schema, migrations, one connection per thread, settings, suppression list, inbox store, sent history (`log_sent`, `sent_message`, `delete_sent`) |
-| `importer.py` | Reads Excel/CSV, guesses the email/company/person columns, validates and dedupes, stores contacts. Also remembers every imported column heading and reads subjects/messages from a spreadsheet (`read_templates`) |
+| `importer.py` | Reads Excel/CSV, guesses the email/company/person columns, validates and dedupes, stores contacts. Also remembers every imported column heading, and reads and writes subjects, messages, signatures and footers as spreadsheets (`read_templates`, `write_templates`) |
 | `merge.py` | `{{Tag}}` merge tags and `{a\|b}` spintax, first-name cleanup |
 | `composer.py` | Builds the MIME message: typed text to HTML, signature, brochure link, optional unsubscribe line and header |
 | `scorer.py` | The spam score: renders the finished email for one contact and checks it, plus checks across every version; estimates Primary / Promotions / Spam |

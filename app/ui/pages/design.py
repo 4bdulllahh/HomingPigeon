@@ -24,7 +24,7 @@ from app.ui.pages.base import Page
 from app.ui.widgets.common import (Card, ChoiceButtons, FormRow, ScrollPage, TabBar, clear_layout,
                                    column, flow_row, ghost_button, heading, hint, muted,
                                    primary_button, row, secondary_button, set_tone, small_button,
-                                   subheading)
+                                   subheading, wrap_row)
 from app.ui.widgets.dialogs import ConfirmDialog, InfoDialog
 from app.ui.widgets.email_canvas import (INLINE, MIME_NEW, EmailCanvas, faded, picture_thumbnail,
                                          snapshot, start_drag)
@@ -420,8 +420,8 @@ class DesignPage(Page):
         self.more.setMenu(menu)
         self.open_file_button = secondary_button("Open a design file...", self._import)
         self.open_file_button.setToolTip(t("Open a design someone saved to a file"))
-        self.root.addWidget(row(heading("Email design"), None, self.back_button, self.new_button,
-                                self.more, self.open_file_button, help_button))
+        self.root.addWidget(row(heading("Email design"), None, wrap_row(
+            self.back_button, self.new_button, self.more, self.open_file_button, help_button)))
         self.root.addWidget(muted(
             "Give your emails your own look: logo, colours, pictures and buttons. Click anything "
             "in the email to change it. Your message still comes from the My message page."))
@@ -473,11 +473,10 @@ class DesignPage(Page):
         self.save_status = muted("", wrap=False)
         save = primary_button("Save", self.save, 120)
         save.setToolTip(t("Save this design now (Ctrl+S). Changes are also saved as you make them."))
-        gap = QWidget()
-        gap.setFixedWidth(round(10 * scale))
-        editor_layout.addWidget(row(self.undo_button, self.redo_button, self.view_choice, gap,
-                                    self.name_label, self.name_edit, self.rename_button, None,
-                                    self.save_status, browser, test, save))
+        editor_layout.addWidget(row(
+            wrap_row(self.undo_button, self.redo_button, self.view_choice, self.name_label,
+                     self.name_edit, self.rename_button),
+            None, wrap_row(self.save_status, browser, test, save)))
         self.size_note = hint("")
         set_tone(self.size_note, "warning")
         self.size_note.setVisible(False)

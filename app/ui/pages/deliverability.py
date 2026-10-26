@@ -8,8 +8,8 @@ from app.i18n import t
 from app.ui import theme
 from app.ui.pages.base import Page
 from app.ui.widgets.common import (Card, FormRow, ScrollPage, Section, StatusRow, TabBar,
-                                   copy_to_clipboard, muted, primary_button, row, set_tone,
-                                   small_button, subheading)
+                                   copy_to_clipboard, flow_row, muted, primary_button, row,
+                                   set_tone, small_button, subheading)
 from app.ui.widgets.inputs import Debouncer, checkbox, combo, line_edit, read_only_box
 from app.workers import jobs
 from app.workers.base import Task
@@ -131,16 +131,12 @@ class DeliverabilityPage(Page):
                           "means its mail starts failing authentication.")
 
         self.spf_boxes: dict[str, object] = {}
-        grid_holder = QWidget()
-        grid_holder.setProperty("role", "plain")
-        grid = QGridLayout(grid_holder)
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setSpacing(4)
-        for index, name in enumerate(dns_tools.SPF_PRESETS):
+        boxes, flow = flow_row(12)
+        for name in dns_tools.SPF_PRESETS:
             box = checkbox(name, False, on_change=lambda _c: self._update_spf())
-            grid.addWidget(box, index // 2, index % 2)
+            flow.addWidget(box)
             self.spf_boxes[name] = box
-        section.add(grid_holder)
+        section.add(boxes)
 
         ip_row = FormRow(
             "Additional IPv4 addresses or ranges (comma separated)",

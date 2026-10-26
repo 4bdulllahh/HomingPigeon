@@ -13,7 +13,7 @@ from app.i18n import t
 from app.ui import theme
 from app.ui.pages.base import Page
 from app.ui.widgets.common import (Card, clear_layout, confirm_button, hint, muted,
-                                   secondary_button, set_tone, subheading)
+                                   secondary_button, set_tone, subheading, wrap_row)
 
 INTRO = (
     "Welcome. This page walks you through everything, in order. Work down the list from the "
@@ -43,7 +43,9 @@ class GuideStep(Card):
             f"color: {'#ffffff' if done else theme.color('fg')};"
             f"border-radius: {size // 2}px; font-weight: 700;")
         header.addWidget(badge, 0, Qt.AlignmentFlag.AlignVCenter)
-        header.addWidget(subheading(title), 1, Qt.AlignmentFlag.AlignVCenter)
+        title_label = subheading(title)
+        title_label.setWordWrap(True)
+        header.addWidget(title_label, 1, Qt.AlignmentFlag.AlignVCenter)
         if action:
             header.addWidget(secondary_button("Open", action, 110), 0,
                              Qt.AlignmentFlag.AlignVCenter)
@@ -90,14 +92,11 @@ class GuidePage(Page):
         card.add(subheading("Opening HomingPigeon next time"))
         card.add(muted(shortcut.how_to_launch()))
 
-        buttons = QHBoxLayout()
-        buttons.setSpacing(10)
-        buttons.addWidget(confirm_button("Put an icon on my Desktop", self._make_shortcut, 260))
-        buttons.addWidget(secondary_button(
-            "Open the app's folder",
-            lambda: shortcut.open_folder(shortcut.app_location()), 190))
-        buttons.addStretch(1)
-        card.add_layout(buttons)
+        card.add(wrap_row(
+            confirm_button("Put an icon on my Desktop", self._make_shortcut, 260),
+            secondary_button("Open the app's folder",
+                             lambda: shortcut.open_folder(shortcut.app_location()), 190),
+            spacing=10))
 
         self.shortcut_status = muted("")
         card.add(self.shortcut_status)

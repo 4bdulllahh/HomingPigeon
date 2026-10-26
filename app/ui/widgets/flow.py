@@ -46,10 +46,23 @@ class FlowLayout(QLayout):
 
     def setGeometry(self, rect: QRect) -> None:
         super().setGeometry(rect)
-        self._arrange(rect, apply=True)
+        height = self._arrange(rect, apply=True)
+        # Qt only asks for the height of one line when space is short, and a page
+        # that cannot scroll then squeezes the wrapped lines on top of each other.
+        # Asking for the real height of the lines at this width stops that.
+        owner = self.parentWidget()
+        if owner is not None and owner.layout() is self and owner.minimumHeight() != height:
+            owner.setMinimumHeight(height)
 
     def sizeHint(self) -> QSize:
-        return self.minimumSize()
+        """Everything on one line: the width a row of buttons would like beside other widgets."""
+        items = [item for item in self._items if not self._hidden(item)]
+        width = sum(item.sizeHint().width() for item in items)
+        width += self._spacing * max(0, len(items) - 1)
+        height = max((item.sizeHint().height() for item in items), default=0)
+        margins = self.contentsMargins()
+        return QSize(width + margins.left() + margins.right(),
+                     height + margins.top() + margins.bottom())
 
     def minimumSize(self) -> QSize:
         size = QSize()
@@ -64,6 +77,11 @@ class FlowLayout(QLayout):
     def spacing(self) -> int:
         return self._spacing
 
+    @staticmethod
+    def _hidden(item) -> bool:
+        widget = item.widget()
+        return widget is not None and not widget.isVisible() and widget.isHidden()
+
     # --- the actual flow ----------------------------------------------------
     def _arrange(self, rect: QRect, apply: bool) -> int:
         margins = self.contentsMargins()
@@ -75,12 +93,16 @@ class FlowLayout(QLayout):
         mirrored = owner is not None and owner.isRightToLeft()
 
         for item in self._items:
-            widget = item.widget()
-            if widget is not None and not widget.isVisible() and widget.isHidden():
+            if self._hidden(item):
                 continue
             hint = item.sizeHint()
+            # Wider than the whole row: as narrow as the row, but never below its minimum
+            if hint.width() > area.width():
+                hint.setWidth(max(area.width(), item.minimumSize().width()))
             next_x = x + hint.width() + self._spacing
-            if next_x - self._spacing > area.right() and line_height > 0:
+            # Not area.right(), which is one pixel short: a row exactly as wide as its
+            # buttons would put the last one on a line of its own
+            if next_x - self._spacing > area.x() + area.width() and line_height > 0:
                 x = area.x()
                 y = y + line_height + self._spacing
                 next_x = x + hint.width() + self._spacing

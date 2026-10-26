@@ -36,8 +36,8 @@ from pathlib import Path
 from typing import Callable
 
 from app import config
-from app.core import shortcut, tls
-from app.services.maintenance import is_newer
+from app.core import db, shortcut, tls
+from app.services.maintenance import is_newer, version_tuple
 
 API_URL = config.REPO_URL.replace("https://github.com/", "https://api.github.com/repos/")
 ASSET_PATTERN = re.compile(r"^HomingPigeon-v[\d.]+\.zip$")
@@ -55,6 +55,7 @@ class Release:
     zip_size: int = 0
     sha256: str = ""     # published by GitHub for each asset; empty on older releases
     notes: str = ""
+    retry: bool = False  # an automatic update to this version was started before and didn't take
 
 
 class UpdateCancelled(Exception):
@@ -66,14 +67,20 @@ def parse_release(data: dict) -> Release:
     release = Release(tag=str(data.get("tag_name") or ""),
                       page_url=str(data.get("html_url") or f"{config.REPO_URL}/releases"),
                       notes=str(data.get("body") or ""))
-    for asset in data.get("assets") or []:
-        if ASSET_PATTERN.match(str(asset.get("name") or "")):
-            release.zip_url = str(asset.get("browser_download_url") or "")
-            release.zip_size = int(asset.get("size") or 0)
-            digest = str(asset.get("digest") or "")
-            if digest.startswith("sha256:"):
-                release.sha256 = digest.split(":", 1)[1].lower()
-            break
+    zips = [asset for asset in data.get("assets") or []
+            if ASSET_PATTERN.match(str(asset.get("name") or ""))]
+    # A release with an older zip attached as well must still install its own
+    # version, or the app updates, is still behind and asks again forever
+    wanted = version_tuple(release.tag)
+    zips.sort(key=lambda asset: (version_tuple(asset["name"]) == wanted,
+                                 version_tuple(asset["name"])), reverse=True)
+    if zips:
+        asset = zips[0]
+        release.zip_url = str(asset.get("browser_download_url") or "")
+        release.zip_size = int(asset.get("size") or 0)
+        digest = str(asset.get("digest") or "")
+        if digest.startswith("sha256:"):
+            release.sha256 = digest.split(":", 1)[1].lower()
     return release
 
 
@@ -96,6 +103,7 @@ def available_update() -> Release | None:
     cleanup()
     release = latest_release()
     if release and is_newer(release.tag, config.APP_VERSION):
+        release.retry = db.get_setting("update_tried") == release.tag
         return release
     return None
 
@@ -190,9 +198,10 @@ def _installer_python() -> Path:
     return target / "pythonw.exe"
 
 
-def start_install(staged: Path) -> None:
+def start_install(staged: Path, tag: str = "") -> None:
     """Hand over to the new installer. The caller then closes the app."""
     python = _installer_python()
+    db.set_setting("update_tried", tag)
     (WORK_DIR / STAMP).write_text(str(time.time()), encoding="utf-8")
     command = [str(python), "-E", "-s", str(staged / "installer" / "setup_app.py"),
                "--update", "--target", str(shortcut.app_location())]

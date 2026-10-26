@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QKeySequence, QShortcut
-from PyQt6.QtWidgets import QFileDialog, QGridLayout, QHBoxLayout, QMenu, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QFileDialog, QGridLayout, QMenu, QVBoxLayout, QWidget
 
 from app.core import db, importer, prefs
 from app.i18n import t
@@ -16,7 +16,7 @@ from app.ui import theme
 from app.ui.pages.base import Page
 from app.ui.widgets.common import (FormRow, MenuButton, ProgressRow, ScrollPage, Section,
                                    TabBar, clear_layout, danger_button, hint, muted,
-                                   primary_button, row, secondary_button, set_tone)
+                                   primary_button, row, secondary_button, set_tone, wrap_row)
 from app.ui.widgets.dialogs import ConfirmDialog
 from app.ui.widgets.inputs import (Debouncer, checkbox, combo, line_edit, read_only_box,
                                    set_combo_values, update_completer)
@@ -338,13 +338,9 @@ class ContactsPage(Page):
         self.clear_button = danger_button("Clear whole list...", self._clear_list, 160)
         export_button = secondary_button("Export...", self._export_contacts, 110)
 
-        controls = QHBoxLayout()
-        controls.setSpacing(8)
-        controls.addWidget(self.search_box, 1)
-        for button in (self.status_button, self.sort_button, self.delete_button,
-                       self.clear_button, export_button):
-            controls.addWidget(button)
-        layout.addLayout(controls)
+        self.search_box.setMinimumWidth(round(280 * theme.text_scale()))
+        layout.addWidget(wrap_row(self.search_box, self.status_button, self.sort_button,
+                                  self.delete_button, self.clear_button, export_button))
 
         self.contacts_summary = muted("", wrap=False)
         layout.addWidget(self.contacts_summary)
@@ -588,12 +584,9 @@ class ContactsPage(Page):
         import_button = secondary_button("Import list...", self._import_suppression, 130)
         export_button = secondary_button("Export", self._export_suppression, 100)
 
-        controls = QHBoxLayout()
-        controls.setSpacing(8)
-        controls.addWidget(self.suppress_box, 1)
-        for button in (add_button, remove_button, import_button, export_button):
-            controls.addWidget(button)
-        layout.addLayout(controls)
+        self.suppress_box.setMinimumWidth(round(320 * theme.text_scale()))
+        layout.addWidget(wrap_row(self.suppress_box, add_button, remove_button, import_button,
+                                  export_button))
 
         self.suppression_model = SimpleTableModel(["Email", "Reason", "Source", "Added"])
         self.suppression_table = DataTable(self.suppression_model, "No suppressed addresses.",

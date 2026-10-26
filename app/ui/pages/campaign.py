@@ -13,7 +13,7 @@ from app.ui.pages.base import Page
 from app.ui import theme
 from app.ui.widgets.common import (ChoiceButtons, FormRow, Section, clear_layout, column,
                                    flow_row, hint, muted, primary_button, row, secondary_button,
-                                   set_tone, small_button)
+                                   set_tone, small_button, wrap_row)
 from app.ui.widgets.inputs import (checkbox, combo, get_text, line_edit, radio, set_text,
                                    spin_box, text_box)
 from app.ui.widgets.range_slider import RangeSlider
@@ -54,8 +54,8 @@ class RampEditor(QWidget):
 
         self.days_holder, self.days_layout = flow_row(6)
         layout.addWidget(self.days_holder)
-        layout.addWidget(row(small_button("+ Add a day", self._add_day),
-                             small_button("Remove the last day", self._remove_day), None))
+        layout.addWidget(wrap_row(small_button("+ Add a day", self._add_day),
+                                  small_button("Remove the last day", self._remove_day)))
         self.boxes: list = []
         self.set_ramp(ramp)
 
@@ -221,8 +221,7 @@ class CampaignPage(Page):
         presets = [hint("Presets:", wrap=False)]
         for label, low, high in DELAY_PRESETS:
             presets.append(secondary_button(label, lambda l=low, h=high: self._set_delay(l, h), 110))
-        presets.append(None)
-        section.add(row(*presets))
+        section.add(wrap_row(*presets))
 
         self.pace_note = hint("")
         section.add(self.pace_note)
@@ -336,9 +335,9 @@ class CampaignPage(Page):
         self.manual_cap_row.add(self.manual_cap_box)
         section.add(self.manual_cap_row)
 
-        section.add(row(
+        section.add(wrap_row(
             secondary_button("Reset warm-up to day 1", self._reset_warmup, 200),
-            secondary_button("Skip ahead a week", self._skip_warmup, 175), None))
+            secondary_button("Skip ahead a week", self._skip_warmup, 175)))
         section.add(hint("Only skip ahead if this address has already been sending normal "
                          "business email in volume for a while."))
         return section

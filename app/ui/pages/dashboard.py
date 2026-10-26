@@ -135,7 +135,9 @@ class DashboardPage(Page):
 
         text = QVBoxLayout()
         text.setSpacing(2)
-        text.addWidget(subheading(label))
+        title = subheading(label)
+        title.setWordWrap(True)
+        text.addWidget(title)
         if detail:
             text.addWidget(muted(detail))
         layout.addLayout(text, 1)

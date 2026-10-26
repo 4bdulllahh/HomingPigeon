@@ -434,34 +434,55 @@ def merge_tag_names() -> list[str]:
     return list(BUILTIN_TAGS) + extra_columns()
 
 
-# --- Subjects and messages from a spreadsheet -------------------------------
-# A quick start for My message: one column of subject lines, one of messages,
-# and optionally a signature. Every sheet in the file is read, so subjects and
-# messages can also sit on separate sheets.
+# --- Subjects, messages, signatures and footers from a spreadsheet ----------
+# My message imports and exports each kind on its own tab. Every sheet in the
+# file is read, so the kinds can also sit on separate sheets.
+KINDS = ("subject", "body", "signature", "footer")
+# What each kind is called on screen, and the heading an exported sheet gets
+KIND_HEADINGS = {"subject": "Subject", "body": "Message", "signature": "Signature",
+                 "footer": "Footer"}
+
+
 @dataclass
 class TemplateSheet:
     subjects: list[str] = field(default_factory=list)
     bodies: list[str] = field(default_factory=list)
-    signature: str = ""
+    signatures: list[str] = field(default_factory=list)
+    footers: list[str] = field(default_factory=list)
+
+    def items(self, kind: str) -> list[str]:
+        return {"subject": self.subjects, "body": self.bodies, "signature": self.signatures,
+                "footer": self.footers}[kind]
+
+    @property
+    def signature(self) -> str:
+        return self.signatures[0] if self.signatures else ""
 
 
 # Column headings recognised in every app language, so a German user's sheet
-# headed Betreff / Nachricht / Signatur imports just like an English one
-_SUBJECT_HEADINGS = ("subject", "betreff", "asunto", "objet", "موضوع")
-_SIGNATURE_HEADINGS = ("signature", "sign off", "signatur", "firma", "توقيع")
-_BODY_HEADINGS = ("message", "body", "bodies", "email", "content", "text", "template",
-                  "nachricht", "inhalt", "mensaje", "cuerpo", "texte", "contenu", "رسالة",
-                  "نص")
+# headed Betreff / Nachricht / Signatur imports just like an English one. Short
+# words must be a whole word of the heading ("pie" is Spanish for footer, and
+# also the end of the French "copie"); longer ones may sit inside a word.
+_HEADINGS = {
+    "subject": ("subject", "subj", "headline", "title", "titel", "titre", "título", "titulo",
+                "betreff", "asunto", "objet", "موضوع"),
+    "footer": ("footer", "fußzeile", "fusszeile", "pie", "pied", "disclaimer", "small print",
+               "haftungsausschluss", "تذييل"),
+    "signature": ("signature", "sign off", "signoff", "regards", "signatur", "unterschrift",
+                  "firma", "توقيع"),
+    "body": ("message", "body", "bodies", "email", "e mail", "content", "text", "template", "copy",
+             "letter", "nachricht", "inhalt", "mensaje", "cuerpo", "carta", "correo", "texte",
+             "contenu", "lettre", "courriel", "رسالة", "نص", "محتوى"),
+}
 
 
 def _template_role(header: str) -> str | None:
     name = re.sub(r"[^\w ]", " ", str(header).lower())
-    if any(word in name for word in _SUBJECT_HEADINGS):
-        return "subject"
-    if any(word in name for word in _SIGNATURE_HEADINGS):
-        return "signature"
-    if any(word in name for word in _BODY_HEADINGS):
-        return "body"
+    words = name.split()
+    for role in ("subject", "footer", "signature", "body"):
+        for hint in _HEADINGS[role]:
+            if (hint in words) if len(hint) < 5 and " " not in hint else (hint in name):
+                return role
     return None
 
 
@@ -476,12 +497,13 @@ def _cell_text(value: Any) -> str:
     return "" if text.lower() in {"nan", "none"} else text
 
 
-def read_templates(path: str | Path) -> TemplateSheet:
-    """Subjects, messages and a signature from a spreadsheet, by column heading.
+def read_templates(path: str | Path, single: str = "subject") -> TemplateSheet:
+    """Subjects, messages, signatures and footers from a spreadsheet, by column heading.
 
     Headings containing "subject" are subjects; "message", "body" or "email"
-    are messages; "signature" is the signature. A sheet with none of those
-    headings is read as subjects in the first column and messages in the second.
+    are messages; "signature" and "footer" are those. A sheet with none of those
+    headings is read as subjects in the first column and messages in the second,
+    and a sheet with a single column as ``single``, the kind being imported.
     """
     result = TemplateSheet()
     for sheet in list_sheets(path):
@@ -492,24 +514,49 @@ def read_templates(path: str | Path) -> TemplateSheet:
         if not any(roles.values()):
             columns = list(df.columns)
             roles = {column: None for column in columns}
-            if columns:
+            if len(columns) == 1:
+                roles[columns[0]] = single
+            elif columns:
                 roles[columns[0]] = "subject"
-            if len(columns) > 1:
                 roles[columns[1]] = "body"
         for column, role in roles.items():
-            if role is None:
+            # An "Email" column full of addresses is a contact list, not messages
+            if role is None or _email_density(df[column]) > 0.5:
                 continue
+            found = result.items(role)
             for value in df[column]:
                 text = _cell_text(value)
-                if not text:
-                    continue
-                if role == "subject" and text not in result.subjects:
-                    result.subjects.append(text)
-                elif role == "body" and text not in result.bodies:
-                    result.bodies.append(text)
-                elif role == "signature" and not result.signature:
-                    result.signature = text
+                if text and text not in found:
+                    found.append(text)
     return result
+
+
+def _save_sheet(path: Path, df: pd.DataFrame, widths: tuple[int, ...]) -> Path:
+    """An .xlsx with wide, wrapped columns, so long messages are readable in Excel."""
+    from openpyxl.styles import Alignment
+    from openpyxl.utils import get_column_letter
+
+    sheet_name = str(df.columns[0])[:31] if len(df.columns) == 1 else t("My message")[:31]
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+        sheet = writer.sheets[sheet_name]
+        for index, width in enumerate(widths, start=1):
+            sheet.column_dimensions[get_column_letter(index)].width = width
+        for row in sheet.iter_rows(min_row=2):
+            for cell in row:
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+        sheet.freeze_panes = "A2"
+    return path
+
+
+def write_templates(path: str | Path, kind: str, items: list[str]) -> Path:
+    """One kind from My message, one per row, to share with someone else.
+
+    Messages keep their formatting as the HTML the app saves, so importing the
+    file into HomingPigeon gives back exactly the same message.
+    """
+    df = pd.DataFrame({t(KIND_HEADINGS[kind]): list(items)})
+    return _save_sheet(Path(path), df, (60 if kind == "subject" else 100,))
 
 
 def write_template_sample(path: str | Path, subjects: list[str], bodies: list[str],
@@ -525,16 +572,4 @@ def write_template_sample(path: str | Path, subjects: list[str], bodies: list[st
         t("Message"): bodies + [""] * (rows - len(bodies)),
         t("Signature"): [signature] + [""] * (rows - 1),
     })
-    from openpyxl.styles import Alignment
-
-    sheet_name = t("My message")[:31]
-    with pd.ExcelWriter(path, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name=sheet_name)
-        sheet = writer.sheets[sheet_name]
-        for letter, width in (("A", 50), ("B", 90), ("C", 40)):
-            sheet.column_dimensions[letter].width = width
-        for row in sheet.iter_rows(min_row=2):
-            for cell in row:
-                cell.alignment = Alignment(wrap_text=True, vertical="top")
-        sheet.freeze_panes = "A2"
-    return path
+    return _save_sheet(path, df, (50, 90, 40))

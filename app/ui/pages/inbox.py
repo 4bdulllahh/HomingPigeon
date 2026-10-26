@@ -15,7 +15,7 @@ from app.models.table_model import SimpleTableModel
 from app.ui import theme
 from app.ui.pages.base import Page
 from app.ui.widgets.common import (ChoiceButtons, StatTile, TabBar, muted, primary_button,
-                                   secondary_button, set_tone, subheading)
+                                   secondary_button, set_tone, subheading, wrap_row)
 from app.ui.widgets.inputs import checkbox
 from app.ui.widgets.tables import DataTable
 from app.workers import jobs
@@ -74,22 +74,14 @@ class InboxPage(Page):
             "Reads your mailbox so you can see what came back. Bounced addresses and people "
             "who ask to be taken off are dropped from future sends automatically.")
 
-        holder = QWidget()
-        holder.setProperty("role", "plain")
-        controls = QHBoxLayout(holder)
-        controls.setContentsMargins(0, 0, 0, 0)
-        controls.setSpacing(12)
         self.sync_button = primary_button("Check inbox now", self._sync, 180)
-        controls.addWidget(self.sync_button)
         self.auto_sync = checkbox(
             t("Check automatically every {auto_sync_minutes} minutes",
               auto_sync_minutes=AUTO_SYNC_MINUTES),
             bool(db.get_setting("auto_imap_sync", True)), on_change=self._toggle_auto)
-        controls.addWidget(self.auto_sync)
         self.sync_status = muted("", wrap=False)
-        controls.addWidget(self.sync_status)
-        controls.addStretch(1)
-        self.root.addWidget(holder)
+        self.root.addWidget(wrap_row(self.sync_button, self.auto_sync, self.sync_status,
+                                     spacing=12))
 
         tiles_holder = QWidget()
         tiles_holder.setProperty("role", "plain")

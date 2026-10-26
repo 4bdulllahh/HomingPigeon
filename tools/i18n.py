@@ -48,7 +48,7 @@ SKIP_NAMES = {
     "DATE_FORMATS", "STATUS_ICONS", "ICONS", "BLACKLISTS", "DNSBLS", "COMMON_SELECTORS",
     "hard_markers", "soft_markers", "SKIP_IN_PYTHON", "__all__", "FONTS", "QUICK_COLOURS", "LINKS_EXAMPLE",
     "DELAY_SUBJECTS", "AUTO_REPLY_SUBJECTS", "HARD_MARKERS", "SOFT_MARKERS", "JUNK_NAMES",
-    "BLOCK_ICONS", "INLINE", "RESIZE", "BUTTON_SIZES", "QUICK_STYLE", "QUICK_PAGE",
+    "BLOCK_ICONS", "INLINE", "RESIZE", "BUTTON_SIZES", "QUICK_STYLE", "QUICK_PAGE", "_HEADINGS",
 }
 
 # Strings that pass every test below but are still not wording: folder names,

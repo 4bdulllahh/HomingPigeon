@@ -1201,3 +1201,107 @@ def test_smooth_scrolling_ignores_the_window_and_scrolls_the_page(qt_app, store)
     finally:
         window.close()
         window.deleteLater()
+
+
+# --- v0.7.5: narrow windows, popups, importing one kind at a time --------------
+class _BigScreen:
+    """The offscreen test screen is 800 pixels wide; a real monitor is wider."""
+
+    def availableGeometry(self):
+        from PyQt6.QtCore import QRect
+
+        return QRect(0, 0, 1920, 1040)
+
+
+def test_send_buttons_never_overlap_in_a_narrow_window(qt_app, store):
+    from PyQt6.QtTest import QTest
+
+    from app.ui.main_window import MainWindow
+
+    qt_app.setStyleSheet(theme.stylesheet())
+    window = MainWindow()
+    window.screen = lambda: _BigScreen()
+    window.resize(760, 640)
+    window.show()
+    try:
+        window.show_page("send")
+        QTest.qWait(100)   # the window widens once the page has worked out its size
+        page = window.page("send")
+        # The window may not be squeezed below what the page on screen needs
+        assert window.width() >= window.sidebar.width() + page.minimumSizeHint().width()
+        widgets = [page.start_button, page.pause_button, page.stop_button, page.state_label,
+                   page.new_campaign_button]
+        boxes = [w.geometry().translated(w.parentWidget().mapTo(window, w.pos()) - w.pos())
+                 for w in widgets]
+        for index, box in enumerate(boxes):
+            for other in boxes[index + 1:]:
+                assert not box.intersects(other)
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_every_popup_can_be_resized_and_maximised(qt_app):
+    from PyQt6.QtCore import Qt
+
+    from app.ui.widgets.dialogs import ConfirmDialog, InfoDialog
+
+    for dialog in (ConfirmDialog(None, "Title", "Message"),
+                   InfoDialog(None, "Title", "Intro", [("Section", ["Point"])])):
+        assert dialog.isSizeGripEnabled()
+        assert dialog.windowFlags() & Qt.WindowType.WindowMaximizeButtonHint
+        dialog.deleteLater()
+
+
+def test_the_import_popup_adds_only_what_is_chosen(qt_app, store):
+    from app.ui.main_window import MainWindow
+    from app.ui.pages import templates
+
+    window = MainWindow()
+    try:
+        window.show_page("templates")
+        page = window.page("templates")
+        dialog = templates.ImportDialog(page, "body", ["<p>One</p>", "Two"], "x.xlsx")
+        assert page.body_editors == []
+        dialog._cards[1][1].setFocus()
+        dialog._focused = dialog._cards[1][1]
+        dialog._insert("{{Company}}")
+        dialog._add(dialog._cards[1])
+        assert len(page.body_editors) == 1 and "{{Company}}" in page.body_editors[0].get_text()
+        assert dialog.rest.isEnabled()
+        dialog._add_rest()
+        assert len(page.body_editors) == 2 and not dialog.rest.isEnabled()
+        assert len(dialog.added) == 2
+        dialog.deleteLater()
+
+        subjects = templates.ImportDialog(page, "subject", ["Hello {{Company}}"], "x.xlsx")
+        subjects._add(subjects._cards[0])
+        assert [e.get_text() for e in page.subject_editors] == ["Hello {{Company}}"]
+        subjects.deleteLater()
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_a_file_with_messages_too_opens_only_subjects_and_says_so(qt_app, store, monkeypatch):
+    from PyQt6.QtWidgets import QLabel
+
+    from app.core import importer
+    from app.ui.main_window import MainWindow
+    from app.ui.pages import templates
+
+    opened = []
+    monkeypatch.setattr(templates.ImportDialog, "exec", lambda self: opened.append(self) or 0)
+    window = MainWindow()
+    try:
+        window.show_page("templates")
+        page = window.page("templates")
+        sheet = importer.TemplateSheet(subjects=["S1"], bodies=["B1"])
+        page._sheet_ready("subject", sheet, "both.xlsx")
+        assert [opened[0].kind, len(opened[0]._cards)] == ["subject", 1]
+        notes = [label.text() for label in opened[0].findChildren(QLabel)]
+        assert any("Message tab" in text for text in notes)
+        opened[0].deleteLater()
+    finally:
+        window.close()
+        window.deleteLater()

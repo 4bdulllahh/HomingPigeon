@@ -54,12 +54,22 @@ Where each feature lives and how it works. Paths are from the repository root.
 - "Personal touch" buttons show **every** tag and are rebuilt in `on_show()`
   when the tag list changes (`_refresh_tag_bars`), so a new import shows up
   without a restart.
-- **Import from a spreadsheet** (`_import_sheet`, `importer.read_templates`):
-  headings containing "subject" are subjects; "message", "body", "email",
-  "content", "text" or "template" are messages; "signature" is the signature.
-  No recognised headings: first column subjects, second messages. Every sheet in
-  the workbook is read. If the user already has text, they choose Add or
-  Replace. Unknown tags are reported in the toast.
+- **Import and export, one kind per tab** (`_sheet_buttons`, `_import_sheet`,
+  `_export_sheet`, `ImportDialog`, `importer.read_templates`,
+  `importer.write_templates`). Kinds are `importer.KINDS`: subject, body,
+  signature, footer. Headings are matched against `importer._HEADINGS` in every
+  app language (short words as whole words, so the French "copie" is not the
+  Spanish footer "pie"). No recognised headings: first column subjects, second
+  messages, or a single column is the kind being imported. Columns that are
+  mostly email addresses are skipped. Every sheet in the workbook is read.
+- `ImportDialog` lists every item found, each in its own editable box, with the
+  tags and (except for subjects) the formatting bar in a `StickyBar`. Nothing
+  reaches the page until "Add to My message" (`take_import`); a signature or
+  footer asks before replacing one. Kinds found for other tabs are named in a
+  note at the top. Unknown tags are reported in the toast afterwards.
+- Export writes one column headed with the kind's name in the app's language.
+  Messages, signatures and footers are saved as the app's HTML, so importing
+  the file gives back exactly the same formatting.
 - **Get a blank sheet** (`importer.write_template_sample`) saves an .xlsx with
   Subject / Message / Signature columns pre-filled with the built-in examples.
 - **Unsubscribe switch** on the Signature tab saves `unsubscribe_note`

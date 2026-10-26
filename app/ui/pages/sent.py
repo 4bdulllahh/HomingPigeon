@@ -23,8 +23,8 @@ from app.models.sent_model import FILTERS, SentModel, outcome_of
 from app.ui import theme
 from app.ui.pages.base import Page
 from app.ui.widgets.common import (ChoiceButtons, StatTile, copy_to_clipboard, danger_button,
-                                   hint, muted, primary_button, secondary_button)
-from app.ui.widgets.dialogs import ConfirmDialog
+                                   hint, muted, primary_button, secondary_button, wrap_row)
+from app.ui.widgets.dialogs import ConfirmDialog, resizable
 from app.ui.widgets.inputs import Debouncer, line_edit
 from app.ui.widgets.tables import DataTable
 from app.workers.base import Task
@@ -54,12 +54,6 @@ class SentPage(Page):
             tiles.addWidget(tile, 1)
         self.root.addWidget(tiles_holder)
 
-        controls_holder = QWidget()
-        controls_holder.setProperty("role", "plain")
-        controls = QHBoxLayout(controls_holder)
-        controls.setContentsMargins(0, 0, 0, 0)
-        controls.setSpacing(8)
-
         self.search_box = line_edit(
             "Search by email, company, person or subject. Filters as you type")
         self.search_box.setClearButtonEnabled(True)
@@ -67,14 +61,13 @@ class SentPage(Page):
         self._search_debounce.connect(self._apply_search)
         self.search_box.textChanged.connect(lambda _t: self._search_debounce.poke())
         self.search_box.returnPressed.connect(self._search_debounce.flush)
-        controls.addWidget(self.search_box, 1)
+        self.search_box.setMinimumWidth(round(280 * theme.text_scale()))
         self.delete_button = danger_button("Delete selected", self._delete_selected, 150)
         self.delete_button.setEnabled(False)
         self.clear_button = danger_button("Clear history...", self._clear_history, 150)
-        controls.addWidget(self.delete_button)
-        controls.addWidget(self.clear_button)
-        controls.addWidget(secondary_button("Export to Excel...", self._export, 170))
-        self.root.addWidget(controls_holder)
+        self.root.addWidget(wrap_row(
+            self.search_box, self.delete_button, self.clear_button,
+            secondary_button("Export to Excel...", self._export, 170)))
 
         self.filters = ChoiceButtons(FILTERS, "all", on_change=self._apply_filter)
         self.root.addWidget(self.filters)
@@ -279,6 +272,7 @@ class SentEmailDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(t("Sent email"))
         self.setModal(True)
+        resizable(self)
         scale = theme.text_scale()
         self.setMinimumWidth(round(600 * scale))
         self.resize(round(760 * scale), round(720 * scale))

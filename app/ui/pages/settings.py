@@ -20,7 +20,7 @@ from app.ui import scrolling, theme
 from app.ui.pages.base import Page
 from app.ui.widgets.common import (Card, ChoiceButtons, Section, confirm_button, danger_button,
                                    muted, open_url, primary_button, row, secondary_button,
-                                   separator, set_tone, subheading)
+                                   separator, set_tone, subheading, wrap_row)
 from app.ui.widgets.dialogs import ChoiceDialog, ConfirmDialog
 from app.ui.widgets.inputs import checkbox
 from app.workers import jobs
@@ -209,9 +209,9 @@ class SettingsPage(Page):
             "Save a copy of everything to a file you choose. A USB stick or cloud folder is "
             "ideal. Email passwords aren't included in backups; you type them in again after "
             "restoring.")
-        self._put(control, row(
+        self._put(control, wrap_row(
             primary_button("Back up my information...", self._backup, 230),
-            secondary_button("Restore from a backup...", self._restore, 215), None))
+            secondary_button("Restore from a backup...", self._restore, 215)))
 
         control = self._setting(
             section, "Saved passwords",
@@ -278,16 +278,16 @@ class SettingsPage(Page):
                                   app_version=config.APP_VERSION), first=True)
         self.update_button = primary_button("Check for updates", self._check_updates, 190)
         self.update_status = muted("", wrap=False)
-        self._put(control, row(self.update_button, self.update_status, None))
+        self._put(control, wrap_row(self.update_button, self.update_status))
         self.download_button = confirm_button("Update now", None, 200)
         self.download_button.setVisible(False)
         self._put(control, self.download_button)
 
         control = self._setting(section, "Need a hand?")
-        self._put(control, row(
+        self._put(control, wrap_row(
             secondary_button("Open the setup guide", lambda: self.go("guide"), 200),
             secondary_button("Report a problem or suggest an idea",
-                             lambda: open_url(f"{config.REPO_URL}/issues/new"), 300), None))
+                             lambda: open_url(f"{config.REPO_URL}/issues/new"), 300)))
         return section
 
     def _check_updates(self) -> None:
@@ -338,11 +338,10 @@ class SettingsPage(Page):
                 f"uninstall. To remove it, close the app and delete its folder: "
                 f"{shortcut.app_location()}\n\nYour saved information is kept separately; you "
                 f"can delete it here."))
-            card.add(row(
+            card.add(wrap_row(
                 secondary_button("Open the app's folder",
                                  lambda: shortcut.open_folder(shortcut.app_location()), 200),
-                danger_button("Delete my saved information...", self._delete_data_only, 270),
-                None))
+                danger_button("Delete my saved information...", self._delete_data_only, 270)))
         return card
 
     def _uninstall(self) -> None:

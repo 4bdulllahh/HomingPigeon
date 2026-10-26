@@ -11,6 +11,7 @@ from app.services import updater
 from app.ui import theme
 from app.ui.widgets.common import (ProgressRow, confirm_button, open_url, secondary_button,
                                    set_tone)
+from app.ui.widgets.dialogs import resizable
 from app.workers import jobs
 
 
@@ -23,12 +24,15 @@ class UpdateDialog(QDialog):
         super().__init__(window)
         self.window_ = window
         self.release = release
-        self.automatic = updater.can_update_itself(release)
+        # Offered again after an update to this version already ran: install it by hand
+        # rather than repeat an automatic update that did not take
+        self.automatic = updater.can_update_itself(release) and not release.retry
         self.worker: jobs.UpdateDownloadWorker | None = None
 
         scale = theme.text_scale()
         self.setWindowTitle(t("Update available"))
         self.setModal(True)
+        resizable(self)
         self.setMinimumWidth(round(520 * scale))
 
         pad = round(22 * scale)
@@ -45,6 +49,10 @@ class UpdateDialog(QDialog):
             how = ("Updating takes a minute or two. HomingPigeon closes, installs the new "
                    "version and opens again by itself. Your contacts, templates and settings "
                    "are kept.")
+        elif release.retry:
+            how = ("The last update to this version did not finish. Update now opens the "
+                   "download page: download the zip, open it and run HomingPigeon Setup. Your "
+                   "contacts, templates and settings are kept.")
         else:
             how = ("Update now opens the download page. Your contacts, templates and settings "
                    "are kept when you install the new version.")
@@ -126,7 +134,7 @@ class UpdateDialog(QDialog):
         self.worker = None
         self._say("Installing. HomingPigeon will close now and open again in a minute or two.")
         try:
-            updater.start_install(staged)
+            updater.start_install(staged, self.release.tag)
         except OSError as error:
             self._on_failed(str(error))
             return

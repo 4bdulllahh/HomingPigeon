@@ -946,6 +946,39 @@ def test_the_blank_sheet_reads_back_in(tmp_path):
     assert sheet.subjects == ["S1", "S2"] and sheet.bodies == ["B1"] and sheet.signature == "Sig"
 
 
+# --- v0.7.5: importing and exporting each kind on its own -------------------
+def test_footers_and_every_signature_are_read_by_heading(tmp_path):
+    path = tmp_path / "all.xlsx"
+    pd.DataFrame({
+        "Email subject": ["Hi"], "E-Mail text": ["Body"], "Email signature": ["Sam"],
+        "Email footer": ["Acme Ltd"], "Copie": ["not a footer"],
+    }).to_excel(path, index=False)
+    sheet = importer.read_templates(path)
+    assert sheet.subjects == ["Hi"] and sheet.bodies == ["Body"]
+    assert sheet.signatures == ["Sam"] and sheet.footers == ["Acme Ltd"]
+
+
+def test_a_single_unheaded_column_is_the_kind_being_imported(tmp_path):
+    path = tmp_path / "one.csv"
+    pd.DataFrame({"Whatever": ["First", "Second"]}).to_csv(path, index=False)
+    assert importer.read_templates(path, single="body").bodies == ["First", "Second"]
+    assert importer.read_templates(path).subjects == ["First", "Second"]
+
+
+def test_a_column_of_email_addresses_is_never_read_as_messages(tmp_path):
+    path = tmp_path / "contacts.xlsx"
+    pd.DataFrame({"Email": ["a@x.com", "b@y.com"], "Message": ["Hello", ""]}).to_excel(
+        path, index=False)
+    assert importer.read_templates(path).bodies == ["Hello"]
+
+
+@pytest.mark.parametrize("kind", importer.KINDS)
+def test_an_exported_kind_imports_back_exactly(tmp_path, kind):
+    items = ["<p>Hi {{FirstName}},<br><b>bold</b> line</p>", "{Hi|Hello} there\nSecond line"]
+    path = importer.write_templates(tmp_path / f"{kind}.xlsx", kind, items)
+    assert importer.read_templates(path).items(kind) == items
+
+
 # --- v0.6.2: the permanent sent history -------------------------------------
 def _sent_contact(email: str) -> int:
     return db.execute("INSERT INTO contacts(email, company, person, valid, imported_at) "
@@ -1078,7 +1111,11 @@ def test_the_send_worker_saves_a_copy_of_every_email_it_sends(monkeypatch):
         smtp=sender.SmtpSettings("smtp.example.com", 587, "u", "p"),
         delay_min_s=0, delay_max_s=0)
     worker = sender.SendWorker(plan, queue.Queue())
-    worker.run()
+    # start(), as the Send page does: in v0.7.2 to v0.7.4 a field named _started
+    # hid threading.Thread's own, and start() failed before sending anything
+    worker.start()
+    worker.join(timeout=30)
+    assert not worker.is_alive()
 
     row = db.query_one("SELECT id, status, subject, from_addr FROM sent_log "
                        "WHERE email = 'worker@example.com'")

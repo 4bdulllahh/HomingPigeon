@@ -255,7 +255,7 @@ class SendWorker(threading.Thread):
         self.sent = 0
         self.failed = 0
         self.skipped = 0
-        self._started = db.now()
+        self._began = db.now()   # not _started: threading.Thread uses that name itself
 
     # -- control -------------------------------------------------------------
     def request_stop(self) -> None:
@@ -401,7 +401,7 @@ class SendWorker(threading.Thread):
             return 0.0
         row = db.query_one(
             "SELECT COUNT(*) AS n FROM campaign_recipients WHERE campaign_id = ? "
-            "AND status = 'bounced' AND sent_at >= ?", (self.plan.campaign_id, self._started))
+            "AND status = 'bounced' AND sent_at >= ?", (self.plan.campaign_id, self._began))
         late = row["n"] if row else 0
         return min(1.0, (self.failed + late) / attempted)
 

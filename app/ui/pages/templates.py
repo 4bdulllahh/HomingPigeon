@@ -10,17 +10,17 @@ from pathlib import Path
 from PyQt6 import sip
 from PyQt6.QtCore import QEvent, Qt, QTimer
 from PyQt6.QtGui import QKeySequence, QShortcut
-from PyQt6.QtWidgets import QFileDialog, QSplitter, QTextBrowser, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QDialog, QFileDialog, QSplitter, QTextBrowser, QVBoxLayout, QWidget
 
 from app.core import composer, db, design, examples, importer, merge, scorer
 from app.i18n import t
 from app.ui import theme
 from app.ui.pages.base import Page
 from app.ui.widgets.common import (Card, ScrollPage, StickyBar, TabBar, body, clear_layout,
-                                   column, danger_button, heading, hint, muted, primary_button,
-                                   row, secondary_button, separator, set_tone, small_button,
-                                   subheading)
-from app.ui.widgets.dialogs import ChoiceDialog, InfoDialog
+                                   column, danger_button, flow_row, heading, hint, muted,
+                                   primary_button, row, secondary_button, separator, set_tone,
+                                   small_button, subheading, wrap_row)
+from app.ui.widgets.dialogs import ConfirmDialog, InfoDialog, resizable
 from app.ui.widgets import rich_text
 from app.ui.widgets.inputs import Debouncer, checkbox, get_text, set_text, text_box
 from app.ui.widgets.rich_text import RichBox, RichToolbar
@@ -128,12 +128,16 @@ PAGE_HELP_SECTIONS = [
         "is missing.",
     ]),
     ("Set it all up from a spreadsheet", [
-        "Press \"Import from a spreadsheet\" at the top of the page to bring in subjects and "
-        "messages in one go.",
+        "Each tab has its own Import button: Import subjects on the Subjects tab, Import "
+        "messages on the Message tab, and the same for the signature and the footer.",
         "Put subject lines in a column headed Subject and messages in a column headed Message, "
-        "one per row. A column headed Signature is optional.",
+        "one per row. Columns headed Signature and Footer work too.",
+        "A window opens with everything found in the file. Change any of them there, then press "
+        "\"Add to My message\" under the ones you want.",
         "In Excel, press Alt+Enter inside a cell to start a new line in a message.",
         "Not sure of the layout? \"Get a blank sheet\" saves one ready to fill in.",
+        "Export saves what is on that tab to a spreadsheet, to keep or to give to someone else. "
+        "Formatting is kept.",
     ]),
     ("The unsubscribe line", [
         "The Signature tab has a switch for the small unsubscribe line at the bottom of every "
@@ -234,6 +238,193 @@ SCORE_HELP_SECTIONS = [
 SCORE_HELP_FOOTER = (
     "This is a guide based on what mail filters are known to react to, not a guarantee. "
     "Re-run the check after any change. The score updates as you type.")
+
+
+# Import and export, one kind per tab. The kinds are importer.KINDS.
+IMPORT_LABELS = {"subject": "Import subjects from a spreadsheet...",
+                 "body": "Import messages from a spreadsheet...",
+                 "signature": "Import a signature from a spreadsheet...",
+                 "footer": "Import a footer from a spreadsheet..."}
+EXPORT_LABELS = {"subject": "Export subjects...", "body": "Export messages...",
+                 "signature": "Export signature...", "footer": "Export footer..."}
+ALSO_FOUND = {
+    "subject": "This file also has subject lines. To bring them in, open the Subjects tab and "
+               "press Import subjects.",
+    "body": "This file also has messages. To bring them in, open the Message tab and press "
+            "Import messages.",
+    "signature": "This file also has a signature. To bring it in, open the Signature tab and "
+                 "press Import a signature.",
+    "footer": "This file also has a footer. To bring it in, open the Footer tab and press "
+              "Import a footer.",
+}
+NOTHING_FOUND = {"subject": "No subject lines found", "body": "No messages found",
+                 "signature": "No signature found", "footer": "No footer found"}
+NOTHING_TO_EXPORT = {"subject": "There are no subject lines to export yet",
+                     "body": "There are no messages to export yet",
+                     "signature": "There is no signature to export yet",
+                     "footer": "There is no footer to export yet"}
+REPLACE_TITLES = {"signature": "Replace your signature?", "footer": "Replace your footer?"}
+FOUND_TITLES = {"subject": "{count} subject lines found in {name}",
+                "body": "{count} messages found in {name}",
+                "signature": "{count} signatures found in {name}",
+                "footer": "{count} footers found in {name}"}
+NUMBERED = {"subject": "Subject {number}", "body": "Message {number}",
+            "signature": "Signature {number}", "footer": "Footer {number}"}
+TAB_OF = {"subject": "Subjects", "body": "Message", "signature": "Signature", "footer": "Footer"}
+
+
+def tag_buttons(layout, names: list[str], insert) -> None:
+    """One button per tag: the built-in ones, then every column of the spreadsheet."""
+    label = hint("Personal touch:", wrap=False)
+    label.setToolTip(t("Filled in for each person from your contact list"))
+    layout.addWidget(label)
+    for tag in names:
+        snippet = "{{" + tag + "}}"
+        button = small_button(snippet, lambda s=snippet: insert(s))
+        button.setToolTip(t(TAG_HELP.get(tag, t("The {tag} column from your contact list",
+                                                tag=tag))))
+        layout.addWidget(button)
+    mix = small_button("{Hi|Hello}", lambda: insert("{Hi|Hello}"))
+    mix.setToolTip(t("Mix words: each person gets one of the choices at random. "
+                     "Change them to your own, separated by |"))
+    layout.addWidget(mix)
+
+
+class ImportDialog(QDialog):
+    """Everything found in a spreadsheet, to touch up and add to My message one at a time.
+
+    Nothing reaches the page until "Add to My message" is pressed under an item.
+    The personal-touch tags and the formatting bar stay pinned to the top while
+    the list scrolls, and act on the box last clicked into.
+    """
+
+    def __init__(self, page: "TemplatesPage", kind: str, items: list[str], name: str,
+                 note: str = ""):
+        super().__init__(page.window())
+        self.page = page
+        self.kind = kind
+        self.added: list[str] = []
+        self._cards: list[tuple[QWidget, object, object, object]] = []
+        self._focused = None
+        self._bars: list[RichToolbar] = []
+
+        self.setWindowTitle(t(IMPORT_LABELS[kind]).rstrip("."))
+        self.setModal(True)
+        resizable(self)
+        scale = theme.text_scale()
+        owner = page.window()
+        self.resize(max(round(640 * scale), round(owner.width() * 0.8)),
+                    max(round(520 * scale), round(owner.height() * 0.85)))
+
+        pad = round(20 * scale)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(pad, pad, pad, pad)
+        layout.setSpacing(round(10 * scale))
+        layout.addWidget(subheading(t(FOUND_TITLES[kind], count=len(items), name=name)))
+        layout.addWidget(muted(
+            "Check each one and change it here if you like: add a personal touch such as "
+            "{{FirstName}}, or make words bold. Then press \"Add to My message\" under the ones "
+            "you want. Nothing is added until you do."))
+        if note:
+            other = muted(note)
+            set_tone(other, "warning")
+            layout.addWidget(other)
+
+        self.scroll = ScrollPage(margins=(0, 0, round(8 * scale), 0), spacing=round(10 * scale))
+        self.scroll.add(StickyBar(self.scroll, self._tools))
+        for index, text in enumerate(items, start=1):
+            self.scroll.add(self._card(index, text))
+        self.scroll.add_stretch()
+        layout.addWidget(self.scroll, 1)
+
+        close = secondary_button("Close", self.accept, 120)
+        self.rest = primary_button("Add all the rest", self._add_rest, 180)
+        if kind in ("subject", "body"):
+            self.rest.setToolTip(t("Add every one not added yet, as it is now"))
+            layout.addWidget(row(None, wrap_row(self.rest, close)))
+        else:
+            layout.addWidget(row(None, close))
+
+    # -- the pinned tools --
+    def _tools(self) -> QWidget:
+        container, flow = flow_row(4)
+        tag_buttons(flow, importer.merge_tag_names(), self._insert)
+        if self.kind == "subject":
+            return container
+        bar = RichToolbar(self._rich_target, on_picture=self.page._add_picture)
+        self._bars.append(bar)
+        return column(container, bar)
+
+    def _target(self):
+        if self._focused is not None and not sip.isdeleted(self._focused):
+            return self._focused
+        return self._cards[0][1] if self._cards else None
+
+    def _rich_target(self) -> RichBox | None:
+        target = self._target()
+        return target if isinstance(target, RichBox) else None
+
+    def _insert(self, snippet: str) -> None:
+        editor = self._target()
+        if editor is not None:
+            editor.insertPlainText(snippet)
+            editor.setFocus()
+
+    def _sync(self, box: RichBox) -> None:
+        if self._rich_target() is box:
+            for bar in self._bars:
+                bar.sync(box)
+
+    def eventFilter(self, obj, event):  # noqa: N802 - Qt naming
+        if event.type() == QEvent.Type.FocusIn:
+            self._focused = obj
+            if isinstance(obj, RichBox):
+                self._sync(obj)
+        return False
+
+    # -- one card per item found --
+    def _card(self, index: int, text: str) -> QWidget:
+        card = Card(kind="card", padding=10)
+        status = hint("", wrap=False)
+        card.add(row(subheading(t(NUMBERED[self.kind], number=index)), status, None))
+        if self.kind == "subject":
+            editor = text_box("", lines=2)
+            set_text(editor, text)
+        else:
+            editor = RichBox("", kind="message" if self.kind == "body" else self.kind,
+                             lines=10 if self.kind == "body" else 6)
+            editor.set_html(text)
+            editor.cursorPositionChanged.connect(lambda box=editor: self._sync(box))
+        editor.installEventFilter(self)
+        card.add(editor)
+        add = primary_button("Add to My message", None, 190)
+        entry = (card, editor, add, status)
+        add.clicked.connect(lambda _checked=False: self._add(entry))
+        card.add(row(add, None))
+        self._cards.append(entry)
+        return card
+
+    def _add(self, entry) -> bool:
+        _card, editor, button, status = entry
+        text = get_text(editor) if self.kind == "subject" else editor.html()
+        if not text.strip():
+            status.setText(t("Empty, so nothing was added"))
+            set_tone(status, "warning")
+            return False
+        if not self.page.take_import(self.kind, text):
+            return False
+        self.added.append(text)
+        button.setEnabled(False)
+        button.setText(t("Added"))
+        status.setText(t("Added to My message"))
+        set_tone(status, "success")
+        self.rest.setEnabled(any(entry[2].isEnabled() for entry in self._cards))
+        return True
+
+    def _add_rest(self) -> None:
+        for entry in self._cards:
+            if entry[2].isEnabled():
+                self._add(entry)
 
 
 class VariantEditor(Card):
@@ -350,12 +541,9 @@ class TemplatesPage(Page):
 
         help_button = secondary_button("?  How to write your email", self._explain_page)
         help_button.setToolTip(t("A short guide to this page, in plain English"))
-        import_button = secondary_button("Import from a spreadsheet...", self._import_sheet)
-        import_button.setToolTip(t("Bring in subject lines and messages from an Excel or CSV file"))
         sample_button = secondary_button("Get a blank sheet...", self._save_sample_sheet)
         sample_button.setToolTip(t("Save a spreadsheet laid out ready for you to fill in"))
-        self.scroll.add(row(heading("My message"), None, import_button, sample_button,
-                            help_button))
+        self.scroll.add(row(heading("My message"), None, wrap_row(sample_button, help_button)))
         self.scroll.add(muted(
             "Write what you want to say. Give the app a few versions of your subject and "
             "message and it mixes them, so every person gets a slightly different email. "
@@ -407,8 +595,6 @@ class TemplatesPage(Page):
         self._focused[editor.multiline] = editor
 
     def _tag_bar(self, multiline: bool) -> QWidget:
-        from app.ui.widgets.common import flow_row
-
         container, layout = flow_row(4)
         self._tag_layouts.setdefault(multiline, []).append(layout)
         self._fill_layout(layout, multiline, importer.merge_tag_names())
@@ -419,22 +605,9 @@ class TemplatesPage(Page):
             self._fill_layout(layout, multiline, names)
 
     def _fill_layout(self, layout, multiline: bool, names: list[str]) -> None:
-        """One button per tag: the built-in ones, then every column of the spreadsheet."""
         clear_layout(layout)
         self._tag_names = list(names)
-        label = hint("Personal touch:", wrap=False)
-        label.setToolTip(t("Filled in for each person from your contact list"))
-        layout.addWidget(label)
-        for tag in names:
-            snippet = "{{" + tag + "}}"
-            button = small_button(snippet, lambda s=snippet: self._insert(multiline, s))
-            button.setToolTip(t(TAG_HELP.get(tag, t("The {tag} column from your contact list",
-                                                    tag=tag))))
-            layout.addWidget(button)
-        mix = small_button("{Hi|Hello}", lambda: self._insert(multiline, "{Hi|Hello}"))
-        mix.setToolTip(t("Mix words: each person gets one of the choices at random. "
-                       "Change them to your own, separated by |"))
-        layout.addWidget(mix)
+        tag_buttons(layout, names, lambda snippet: self._insert(multiline, snippet))
 
     def _refresh_tag_bars(self) -> None:
         """A new import adds columns; show them without needing a restart."""
@@ -517,11 +690,12 @@ class TemplatesPage(Page):
         layout.addWidget(muted(
             "The subject is the line people see in their inbox before they open your email. "
             "Write 3 or more and each person gets one of them."))
+        layout.addWidget(self._sheet_buttons("subject"))
         # The tags and the Add button stay in view while the list scrolls
         self._subjects_sticky = StickyBar(self.scroll, lambda: column(
             self._tag_bar(False),
-            row(primary_button("+ Add a subject line", self._new_subject, 190),
-                secondary_button("Show me an example", self._example_subjects, 190), None)))
+            wrap_row(primary_button("+ Add a subject line", self._new_subject, 190),
+                     secondary_button("Show me an example", self._example_subjects, 190))))
         layout.addWidget(self._subjects_sticky)
 
         self.subjects_list, self.subjects_layout = self._list_holder()
@@ -576,11 +750,12 @@ class TemplatesPage(Page):
             "an empty line between paragraphs. Write 2 or 3 versions. Your signature (and the "
             "unsubscribe line, if it is switched on in the Signature tab) is added at the bottom "
             "for you."))
+        layout.addWidget(self._sheet_buttons("body"))
         self._bodies_sticky = StickyBar(self.scroll, lambda: column(
             self._tag_bar(True),
             self._toolbar("message"),
-            row(primary_button("+ Add a message", self._new_body, 190),
-                secondary_button("Show me an example", self._example_body, 190), None)))
+            wrap_row(primary_button("+ Add a message", self._new_body, 190),
+                     secondary_button("Show me an example", self._example_body, 190))))
         layout.addWidget(self._bodies_sticky)
 
         self.bodies_list, self.bodies_layout = self._list_holder()
@@ -636,6 +811,7 @@ class TemplatesPage(Page):
             "your name, job title, company, phone number and address each on its own line. Use "
             "the picture button to add your logo. A real signature helps your email reach the "
             "inbox."))
+        layout.addWidget(self._sheet_buttons("signature"))
 
         layout.addWidget(StickyBar(self.scroll, lambda: self._toolbar("signature")))
         self.signature_box = RichBox(
@@ -693,6 +869,7 @@ class TemplatesPage(Page):
             "Small print added under your signature in every email, such as your company's "
             "registered address or a note that the email is confidential. It is sent in small "
             "grey writing. Leave it empty if you do not need one."))
+        layout.addWidget(self._sheet_buttons("footer"))
         layout.addWidget(StickyBar(self.scroll, lambda: self._toolbar("footer")))
         self.footer_box = RichBox(
             "For example: Jones Supplies Ltd, 12 Mill Street, Leeds, UK. This email and any "
@@ -730,78 +907,96 @@ class TemplatesPage(Page):
         self.notify(t("{count} example messages added. Replace the [square brackets] with your own "
                       "words", count=len(bodies)), "info", 6000)
 
-    # --- import from a spreadsheet ------------------------------------------
-    def _import_sheet(self) -> None:
+    # --- import and export, one kind per tab ---------------------------------
+    def _sheet_buttons(self, kind: str) -> QWidget:
+        bring_in = secondary_button(IMPORT_LABELS[kind], lambda: self._import_sheet(kind))
+        bring_in.setToolTip(t("Choose an Excel or CSV file. You see everything in it and pick "
+                              "what to add"))
+        save = secondary_button(EXPORT_LABELS[kind], lambda: self._export_sheet(kind))
+        save.setToolTip(t("Save these to a spreadsheet, to keep or to give to someone else"))
+        return wrap_row(bring_in, save)
+
+    def _import_sheet(self, kind: str) -> None:
         path, _filter = QFileDialog.getOpenFileName(
-            self, t("Choose a spreadsheet of subjects and messages"), "",
+            self, t("Choose a spreadsheet"), "",
             t("Spreadsheets (*.xlsx *.xls *.csv);;All files (*.*)"))
         if not path:
             return
         self.notify("Reading the spreadsheet...", "info", 2000)
-        Task(importer.read_templates, Path(path)).start(
-            on_result=self.guard(self._sheet_ready),
+        Task(importer.read_templates, Path(path), kind).start(
+            on_result=self.guard(lambda sheet: self._sheet_ready(kind, sheet, Path(path).name)),
             on_error=self.guard(
                 lambda message: self.notify(t("Could not read that file: {message}",
                                               message=message), "error", 8000)))
 
-    def _sheet_ready(self, sheet: importer.TemplateSheet) -> None:
-        if not sheet.subjects and not sheet.bodies:
+    def _sheet_ready(self, kind: str, sheet: importer.TemplateSheet, name: str) -> None:
+        # The other kinds in the file are left for their own tab, and the user is told so
+        note = " ".join(t(ALSO_FOUND[other]) for other in importer.KINDS
+                        if other != kind and sheet.items(other))
+        items = sheet.items(kind)
+        if not items:
             InfoDialog.show_for(
-                self, "Nothing found to import",
-                "No subject lines or messages were found in that file.",
+                self, NOTHING_FOUND[kind], note,
                 [("How to lay out the sheet", [
                     "Put subject lines in a column headed Subject, one per row.",
                     "Put messages in a column headed Message, one per row.",
-                    "A column headed Signature is optional.",
+                    "Columns headed Signature and Footer work the same way.",
                     "Press \"Get a blank sheet\" for a file that is ready to fill in.",
                 ])])
             return
 
-        found = []
-        if sheet.subjects:
-            found.append(t("{count} subject line(s)", count=len(sheet.subjects)))
-        if sheet.bodies:
-            found.append(t("{count} message(s)", count=len(sheet.bodies)))
-        if sheet.signature:
-            found.append(t("a signature"))
-        summary = t("Found {things}.", things=", ".join(found))
-
-        mode = "add"
-        if any(e.get_text().strip() for e in self.subject_editors + self.body_editors):
-            mode = ChoiceDialog.ask(
-                self, "Import subjects and messages",
-                summary + "\n\n" + t("You already have some written. What should happen to "
-                                     "them?"),
-                [("add", "Keep mine and add these", "primary"),
-                 ("replace", "Replace mine with these", "danger"),
-                 (None, "Cancel", "secondary")])
-            if mode is None:
-                return
-
-        if mode == "replace":
-            if sheet.subjects:
-                for editor in list(self.subject_editors):
-                    self._remove_subject(editor)
-            if sheet.bodies:
-                for editor in list(self.body_editors):
-                    self._remove_body(editor)
-
-        for text in sheet.subjects:
-            self._add_subject(text)
-        for text in sheet.bodies:
-            self._add_body(text)
-        if sheet.signature and (mode == "replace" or not self._signature_text().strip()):
-            self.signature_box.set_html(sheet.signature)
-        self._content_changed()
-
-        unknown = sorted({tag for text in sheet.subjects + sheet.bodies
+        dialog = ImportDialog(self, kind, items, name, note)
+        dialog.exec()
+        added = dialog.added
+        if not added:
+            return
+        self.tabs.set(TAB_OF[kind])
+        unknown = sorted({tag for text in added
                           for tag in merge.unresolved_tags(text, importer.merge_tag_names())})
-        message = summary + " " + t("Check them over, then press Save.")
+        message = t("{count} added. Check them over, then press Save.", count=len(added))
         if unknown:
             message += " " + t("Some tags do not match a column in your contacts: {tags}",
                                tags=", ".join("{{" + tag + "}}" for tag in unknown))
         self.notify(message, "warn" if unknown else "success", 9000)
-        self.tabs.set("Subjects" if sheet.subjects else "Message")
+
+    def take_import(self, kind: str, text: str) -> bool:
+        """Put one item from the import window into the page. False if the user said no."""
+        if kind == "subject":
+            self._add_subject(text)
+        elif kind == "body":
+            self._add_body(text)
+        else:
+            box = self.signature_box if kind == "signature" else self.footer_box
+            if not box.is_empty() and not ConfirmDialog.ask(
+                    self, REPLACE_TITLES[kind],
+                    "You already have one. Replace it with this one?", "Replace"):
+                return False
+            box.set_html(text)
+        self._content_changed()
+        return True
+
+    def _export_sheet(self, kind: str) -> None:
+        if kind == "subject":
+            items = [editor.get_text() for editor in self.subject_editors]
+        elif kind == "body":
+            items = [editor.get_text() for editor in self.body_editors]
+        else:
+            items = [self._signature_text() if kind == "signature" else self._footer_text()]
+        items = [text for text in items if text.strip()]
+        if not items:
+            self.notify(NOTHING_TO_EXPORT[kind], "warn", 5000)
+            return
+        path, _filter = QFileDialog.getSaveFileName(
+            self, t(EXPORT_LABELS[kind]).rstrip("."),
+            t(importer.KIND_HEADINGS[kind]) + ".xlsx", t("Excel (*.xlsx)"))
+        if not path:
+            return
+        Task(importer.write_templates, path, kind, items).start(
+            on_result=self.guard(lambda saved: self.notify(
+                t("Saved {name}. Anyone with HomingPigeon can bring it in with the Import button "
+                  "on this tab", name=Path(saved).name), "success", 8000)),
+            on_error=self.guard(lambda message: self.notify(
+                t("Could not save the sheet: {message}", message=message), "error", 8000)))
 
     def _save_sample_sheet(self) -> None:
         path, _filter = QFileDialog.getSaveFileName(
@@ -829,14 +1024,14 @@ class TemplatesPage(Page):
         next_button = secondary_button("Next contact", self._next_contact, 140)
         next_button.setToolTip(t("Another recipient, with a different subject and message "
                                "drawn from your lists"))
-        layout.addWidget(row(
+        layout.addWidget(wrap_row(
             primary_button("Refresh preview", self.refresh_preview, 160),
             next_button,
-            secondary_button("Open in browser", self._open_in_browser, 160), None))
+            secondary_button("Open in browser", self._open_in_browser, 160)))
 
-        self.preview_contact = muted("", wrap=False)
+        self.preview_contact = muted("")
         layout.addWidget(self.preview_contact)
-        self.preview_variant = hint("", wrap=False)
+        self.preview_variant = hint("")
         layout.addWidget(self.preview_variant)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)

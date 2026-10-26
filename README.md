@@ -14,6 +14,13 @@ correctly, cleans your contact list before you send, makes every message slightl
 sends at a human pace, and quietly removes addresses that bounce. It runs on your own computer,
 and your contacts never leave it.
 
+**New in 0.7.5:** **import and export on every My message tab.** Bring subjects, messages, a
+signature or a footer in from a spreadsheet, check and touch up each one in a window with the
+formatting bar and personal touches, and add the ones you want. Export them to give to
+someone else. Also: **Start Emailing works again** (since 0.7.2 it stopped with
+"'str' object has no attribute 'is_set'"), nothing overlaps in a smaller window, every popup
+can be resized or maximised, and updates always go straight to the newest version.
+
 **New in 0.7.4:** a fix: smooth scrolling no longer shows "Something went wrong" messages.
 
 **New in 0.7.3:** **format your emails like in Outlook.** Select words on **My message** and
@@ -24,7 +31,7 @@ and the starting designs, saves itself as you work, and keeps a copy of each des
 Documents folder. Scrollbars are slimmer and scrolling is smooth (you can switch it off in
 Settings).
 
-**Download:** [latest release](../../releases/latest) · **Version:** 0.7.4 (free beta) ·
+**Download:** [latest release](../../releases/latest) · **Version:** 0.7.5 (free beta) ·
 **Works on:** Windows, Mac and Linux · **Languages:** English, العربية, Deutsch, Español,
 Français
 
@@ -144,7 +151,7 @@ Français
 
 You don't need to know anything about coding.
 
-1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.7.4.zip`**.
+1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.7.5.zip`**.
 2. Right-click the downloaded file → **Extract All...** → **Extract**.
 3. In the folder that opens, double-click **`HomingPigeon Setup.exe`**.
 4. Click **Install**. Setup shows you every step while it works: it downloads what the app needs

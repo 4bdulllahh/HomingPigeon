@@ -13,7 +13,7 @@ from app.ui import theme
 from app.ui.pages.base import Page
 from app.ui.widgets.common import (Card, Section, StatTile, clear_layout, confirm_button,
                                    danger_button, hint, muted, secondary_button, set_tone,
-                                   small_button)
+                                   small_button, wrap_row)
 from app.ui.widgets.dialogs import ConfirmDialog
 from app.ui.widgets.inputs import text_box
 from app.ui.widgets.range_slider import format_seconds
@@ -46,13 +46,15 @@ class SendPage(Page):
 
     def _build(self) -> None:
         self.add_header("Send", "Checks everything first, then sends at your chosen pace.")
+        # Scrolls on a small window rather than squeezing the checklist lines together
+        body = self.scroll_body(spacing=round(10 * theme.text_scale()))
 
         self.preflight = Section("Before you send")
         self.checks_layout = QVBoxLayout()
         self.checks_layout.setContentsMargins(0, 0, 0, 0)
         self.checks_layout.setSpacing(3)
         self.preflight.add_layout(self.checks_layout)
-        self.root.addWidget(self.preflight)
+        body.add(self.preflight)
 
         tiles_holder = QWidget()
         tiles_holder.setProperty("role", "plain")
@@ -65,38 +67,29 @@ class SendPage(Page):
         self.tile_next = StatTile("Next email in", "-")
         for tile in (self.tile_queue, self.tile_sent, self.tile_failed, self.tile_next):
             tiles.addWidget(tile, 1)
-        self.root.addWidget(tiles_holder)
+        body.add(tiles_holder)
 
-        controls_holder = QWidget()
-        controls_holder.setProperty("role", "plain")
-        controls = QHBoxLayout(controls_holder)
-        controls.setContentsMargins(0, 0, 0, 0)
-        controls.setSpacing(8)
+        # One row that wraps, so a narrow window moves buttons onto a new line instead
+        # of drawing them on top of each other
         self.start_button = confirm_button("Start Emailing", self._start, 220)
         self.pause_button = secondary_button("Pause", self._toggle_pause, 120)
         self.stop_button = danger_button("Stop", self._stop, 120)
         self.pause_button.setEnabled(False)
         self.stop_button.setEnabled(False)
-        controls.addWidget(self.start_button)
-        controls.addWidget(self.pause_button)
-        controls.addWidget(self.stop_button)
         self.state_label = muted("Idle", wrap=False)
-        controls.addWidget(self.state_label)
-        controls.addStretch(1)
         self.campaign_label = hint("", wrap=False)
-        controls.addWidget(self.campaign_label)
         self.new_campaign_button = secondary_button("Start a new campaign", self._new_campaign)
         self.new_campaign_button.setToolTip(t(
             "Email everyone on My contacts once more, for example with a new offer. People who "
             "bounced or unsubscribed are always left out."))
-        controls.addWidget(self.new_campaign_button)
-        self.root.addWidget(controls_holder)
+        body.add(wrap_row(self.start_button, self.pause_button, self.stop_button,
+                          self.state_label, self.campaign_label, self.new_campaign_button))
 
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
         self.progress.setTextVisible(False)
-        self.root.addWidget(self.progress)
+        body.add(self.progress)
 
         console = Card(kind="console", padding=10)
         header = QHBoxLayout()
@@ -110,7 +103,8 @@ class SendPage(Page):
         self.console.setReadOnly(True)
         self.console.setMaximumBlockCount(MAX_LOG_BLOCKS)
         console.add(self.console, 1)
-        self.root.addWidget(console, 1)
+        console.setMinimumHeight(round(220 * theme.text_scale()))
+        body.add(console, 1)
 
     # --- preflight ----------------------------------------------------------
     def _gather_checks(self) -> list[tuple[str, bool, str]]:
@@ -179,8 +173,9 @@ class SendPage(Page):
             set_tone(text, "muted" if ok else "bright")
             line.addWidget(text)
             if not ok and fix:
-                line.addWidget(hint(t("Fix: {fix}", fix=fix), wrap=False))
-            line.addStretch(1)
+                line.addWidget(hint(t("Fix: {fix}", fix=fix)), 1)
+            else:
+                line.addStretch(1)
             self.checks_layout.addWidget(holder)
 
     # --- console ------------------------------------------------------------

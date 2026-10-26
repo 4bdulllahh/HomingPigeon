@@ -142,9 +142,15 @@ def newest_release(timeout: float = 10) -> dict | None:
             data = json.loads(response.read().decode("utf-8"))
     except Exception:  # noqa: BLE001 - offline, rate limited, no releases yet
         return None
-    for asset in data.get("assets") or []:
+    wanted = version_tuple(data.get("tag_name"))
+    zips = [asset for asset in data.get("assets") or []
+            if RELEASE_ZIP.match(str(asset.get("name") or ""))]
+    # The zip of the release's own version first, should an older one be attached too
+    zips.sort(key=lambda asset: (version_tuple(asset["name"]) == wanted,
+                                 version_tuple(asset["name"])), reverse=True)
+    for asset in zips[:1]:
         digest = str(asset.get("digest") or "")
-        if RELEASE_ZIP.match(str(asset.get("name") or "")) and digest.startswith("sha256:"):
+        if digest.startswith("sha256:"):
             return {"version": str(data.get("tag_name") or "").lstrip("v"),
                     "url": str(asset.get("browser_download_url") or ""),
                     "sha256": digest.split(":", 1)[1].lower(),

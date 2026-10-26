@@ -57,6 +57,13 @@ then set the server to `localhost`, port `1025`, security "None (testing only)".
 
 ## Known traps
 
+- **Never name a field on a `threading.Thread` subclass after one of Thread's
+  own** (`_started`, `_name`, `_target`, `_args`...). v0.7.2 to v0.7.4 could not
+  send at all because of `_started`. Tests start workers with `start()`.
+- **Rows of buttons are `wrap_row()`, not `row(..., None)`.** A fixed row
+  cannot get narrower than its buttons, and the window then has to grow. The
+  window's minimum width follows the page on screen (`MainWindow._fit_page`).
+
 - **Refresh and text size rebuild pages.** Any `Task` callback that closes over
   a page must be wrapped in `page.guard(...)`, or it writes into a deleted
   widget and looks like a crash.

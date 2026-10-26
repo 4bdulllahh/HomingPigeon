@@ -2,6 +2,44 @@
 
 Newest first. Add to the top when you change something.
 
+## v0.7.5 beta
+
+- **Start Emailing works again.** v0.7.2 gave `SendWorker` a field named
+  `_started` (when sending began). `threading.Thread` already uses that name
+  for an Event, so `start()` failed with "'str' object has no attribute
+  'is_set'" before anything was sent, on every campaign since v0.7.2. Renamed
+  to `_began`. The worker test now calls `start()`, as the Send page does,
+  instead of `run()`.
+- **Nothing overlaps in a narrow window.** The window had a fixed minimum of
+  1000px, which overrode the width each page needs, so buttons with a minimum
+  width were drawn on top of each other. `MainWindow._fit_page` now sets the
+  minimum width from the page on screen (re-checked on every layout request),
+  with 760px as the floor. Rows of buttons are `wrap_row()` (a `FlowLayout`) and
+  carry on onto a new line instead. `FlowLayout` now reports its one-line width
+  as its size hint, pins its owner's minimum height to the wrapped height, and
+  no longer wraps a row that exactly fits (it compared with `rect.right()`,
+  one pixel short). `ScrollPage` shows a horizontal scroll bar only if
+  something cannot get narrower, instead of cutting off the right-hand side.
+  Section titles, guide step titles, form labels and the Send checklist wrap.
+  The Send page scrolls rather than squeezing the checklist.
+- **Every popup can be resized and maximised** (`dialogs.resizable`: a size
+  grip and a maximise button), including the update and sent email popups.
+- **Import and export on each My message tab.** Subjects, Message, Signature
+  and Footer each have "Import ... from a spreadsheet" and "Export ...". Import
+  opens `ImportDialog`: every item found, each editable with the tags and the
+  formatting bar pinned at the top, and "Add to My message" under each. A file
+  that also holds other kinds says which tab to import them from.
+  `importer.read_templates` now also reads footers and every signature, knows
+  more heading words (`_HEADINGS`, short words matched as whole words), skips
+  columns of email addresses, and reads a single unheaded column as the kind
+  being imported. `importer.write_templates` exports one kind per sheet, with
+  messages as the app's HTML so formatting survives the round trip.
+- **Updates.** The zip is chosen by the release's own version, so a release
+  with an older zip attached as well can no longer install the old one and ask
+  again forever (app and installer). If an automatic update to a version was
+  started (`update_tried` setting) and the app is still older, the popup sends
+  the user to the download page instead of repeating it.
+
 ## v0.7.4 beta
 
 - **Smooth scrolling no longer shows "Something went wrong".** An

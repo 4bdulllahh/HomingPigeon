@@ -10,6 +10,12 @@ from app.ui import theme
 from app.ui.widgets.common import danger_button, primary_button, secondary_button
 
 
+def resizable(dialog: QDialog) -> None:
+    """Let a popup be dragged bigger from its corner, or maximised, like any window."""
+    dialog.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
+    dialog.setSizeGripEnabled(True)
+
+
 class ConfirmDialog(QDialog):
     def __init__(self, parent: QWidget | None, title: str, message: str,
                  confirm_text: str = "Continue", cancel_text: str = "Cancel",
@@ -18,6 +24,7 @@ class ConfirmDialog(QDialog):
         title, message = t(title), t(message)
         self.setWindowTitle(t(title))
         self.setModal(True)
+        resizable(self)
         self.setMinimumWidth(round(460 * theme.text_scale()))
 
         pad = round(22 * theme.text_scale())
@@ -61,6 +68,7 @@ class ChoiceDialog(QDialog):
         title, message = t(title), t(message)
         self.setWindowTitle(t(title))
         self.setModal(True)
+        resizable(self)
         self.setMinimumWidth(round(500 * theme.text_scale()))
         self.result_value: str | None = None
 
@@ -111,6 +119,7 @@ class InfoDialog(QDialog):
         title, intro, footer = t(title), t(intro), t(footer)
         self.setWindowTitle(t(title))
         self.setModal(True)
+        resizable(self)
         scale = theme.text_scale()
         self.setMinimumWidth(round(560 * scale))
         self.resize(round(620 * scale), round(620 * scale))

@@ -150,6 +150,14 @@ def flow_row(spacing: int = 8) -> tuple[QWidget, FlowLayout]:
     return container, layout
 
 
+def wrap_row(*widgets: QWidget, spacing: int = 8) -> QWidget:
+    """A row of buttons that carries on onto a second line in a narrow window."""
+    container, layout = flow_row(spacing)
+    for widget in widgets:
+        layout.addWidget(widget)
+    return container
+
+
 class Card(QFrame):
     """A padded panel. ``kind`` picks the border: plain, danger or tinted."""
 
@@ -180,6 +188,7 @@ class Section(Card):
         super().__init__(parent, kind=kind, padding=18)
         title_label = QLabel(t(title))
         title_label.setProperty("role", "section-title")
+        title_label.setWordWrap(True)
         self.layout_.addWidget(title_label)
         if description:
             note = muted(description)
@@ -209,7 +218,9 @@ class FormRow(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(3)
-        layout.addWidget(field_label(label))
+        title = field_label(label)
+        title.setWordWrap(True)
+        layout.addWidget(title)
         self.input_area = QWidget()
         self.input_area.setProperty("role", "plain")
         self.input_layout = QVBoxLayout(self.input_area)
@@ -630,7 +641,9 @@ class ScrollPage(QScrollArea):
         super().__init__(parent)
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Only ever needed if something on the page cannot get any narrower; better a
+        # scroll bar than the right-hand side of the page cut off
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.verticalScrollBar().setSingleStep(24)
 
         self.content = QWidget()

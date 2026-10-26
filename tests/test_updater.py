@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from app import config
+from app.core import db
 from app.services import updater
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -53,6 +54,13 @@ class FakeReply(io.BytesIO):
         self.close()
 
 
+@pytest.fixture(scope="module", autouse=True)
+def temp_db(tmp_path_factory):
+    db.init(str(tmp_path_factory.mktemp("updater") / "test.db"))
+    yield
+    db.close()
+
+
 @pytest.fixture
 def work_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(updater, "WORK_DIR", tmp_path / "update")
@@ -66,6 +74,33 @@ def test_release_finds_the_zip_and_its_checksum():
     assert release.zip_size == 1234
     assert release.sha256 == "abc123"
     assert "What's new" in release.notes
+
+
+def test_a_release_with_an_older_zip_attached_installs_its_own_version(monkeypatch):
+    data = github_reply(digest="sha256:NEW")
+    older = {"name": "HomingPigeon-v9.9.8.zip", "size": 1,
+             "browser_download_url": "https://example.invalid/HomingPigeon-v9.9.8.zip",
+             "digest": "sha256:OLD"}
+    data["assets"].insert(0, older)
+    release = updater.parse_release(data)
+    assert release.zip_url.endswith("HomingPigeon-v9.9.9.zip") and release.sha256 == "new"
+
+    setup = load_setup()
+    import json
+
+    reply = json.dumps(data).encode()
+    monkeypatch.setattr(setup.urllib.request, "urlopen", lambda *_a, **_k: FakeReply(reply))
+    assert setup.newest_release()["url"].endswith("HomingPigeon-v9.9.9.zip")
+
+
+def test_an_update_that_did_not_take_is_offered_as_a_download(monkeypatch, work_dir):
+    newer = updater.parse_release(github_reply())
+    monkeypatch.setattr(updater, "latest_release", lambda: newer)
+    db.set_setting("update_tried", "")
+    assert not updater.available_update().retry
+    db.set_setting("update_tried", "v9.9.9")
+    assert updater.available_update().retry
+    db.set_setting("update_tried", "")
 
 
 def test_release_without_its_zip_yet_falls_back_to_the_page():
