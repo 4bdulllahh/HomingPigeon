@@ -229,82 +229,57 @@ def main() -> int:
     from app.ui.main_window import MainWindow
 
     OUT.mkdir(parents=True, exist_ok=True)
+    prefs_appearance = [None]
 
     def settle(ms: int = 600) -> None:
         end = datetime.now() + timedelta(milliseconds=ms)
         while datetime.now() < end:
             app.processEvents()
 
-    shots = [("dashboard", "home", None), ("guide", "start-here", None),
-             ("contacts", "contacts", "My contacts"), ("templates", "message", "Message"),
-             ("templates", "templates", "Preview & score"),
-             ("design", "design-library", None), ("design", "design", None), ("campaign", "warmup", None),
-             ("send", "send", None), ("sent", "sent", None), ("inbox", "inbox", None),
-             ("deliverability", "deliverability", "SPF generator"), ("settings", "settings", None)]
-    for appearance in ("Dark", "Light"):
-        db.set_setting("appearance", appearance)
-        theme.apply_preferences()
-        app.setStyleSheet(theme.stylesheet())
-        window = MainWindow()
-        window.resize(*SIZE)
-        window.show()
-        settle(1200)
-        for key, name, tab in shots if appearance == "Dark" else shots[:1]:
-            if name == "design-library":
-                # Switched on only now, so the My message shot shows the plain email
-                from app.core import design
-
-                design.set_active(design_id)
-            window.show_page(key)
-            if tab:
-                window.page(key).tabs.set(tab)
-            page = window.page(key)
-            if name == "design":
-                page._open(design_id)
-                settle(800)
-                # The picture, so the shot shows its resize handle and the toolbar
-                picture = next(b for b in page._design["blocks"] if b["type"] == "image")
-                page._select(picture["id"])
-            elif key == "campaign":
-                settle(400)
-                scroll = page.findChild(QScrollArea)
-                scroll.verticalScrollBar().setValue(scroll.verticalScrollBar().maximum())
-            settle(2500 if tab else 600)
-            if name == "design-library":
-                # The real folder is a temp one; show where it goes on a user's PC
-                page.mine_note.setText(page.mine_note.text().replace(
-                    str(config.DESIGNS_DIR), r"C:\Users\Jamie\Documents\HomingPigeon\Designs"))
-            elif name == "message":
-                # Some formatting, so the shot shows what the toolbar does
-                box = page.body_editors[0].editor
-                box.setTextCursor(box.document().find("a few samples"))
-                box.toggle_bold()
-                box.set_colour("#d9622b")
-                cursor = box.textCursor()
-                cursor.clearSelection()
-                box.setTextCursor(cursor)
+    # (page, file name, tab, appearance): the eight README pictures
+    shots = [("dashboard", "home", None, "Dark"), ("contacts", "contacts", "My contacts", "Dark"),
+             ("templates", "spam-score", "Preview & score", "Dark"), ("design", "design", None, "Dark"),
+             ("campaign", "warmup", None, "Dark"), ("send", "send", None, "Dark"),
+             ("settings", "themes", None, "midnight")]
+    window = None
+    for key, name, tab, appearance in shots:
+        if window is None or appearance != prefs_appearance[0]:
+            if window is not None:
+                window.close()
                 settle(200)
-            path = OUT / f"{name}-{appearance.lower()}.png"
-            window.grab().save(str(path))
-            print(f"saved {path.relative_to(ROOT)}")
+            db.set_setting("appearance", appearance)
+            prefs_appearance[0] = appearance
+            theme.apply_preferences()
+            app.setStyleSheet(theme.stylesheet())
+            window = MainWindow()
+            window.resize(*SIZE)
+            window.show()
+            settle(1200)
+        if name == "design":
+            # Switched on only now, so the score shot shows the plain email
+            from app.core import design
 
-        if appearance == "Dark":
-            from app.services import updater
-            from app.ui.widgets.update_dialog import UpdateDialog
-
-            release = updater.Release(
-                tag="v0.7.3", page_url=f"{config.REPO_URL}/releases",
-                notes="* Faster imports\n* A new template for follow-ups\n* Fixes for the inbox")
-            updater.can_update_itself = lambda _release=None: True   # show the installed wording
-            dialog = UpdateDialog(window, release)
-            dialog.show()
-            settle()
-            path = OUT / "update-popup.png"
-            dialog.grab().save(str(path))
-            print(f"saved {path.relative_to(ROOT)}")
-            dialog.close()
-        window.close()
-        settle(200)
+            design.set_active(design_id)
+        window.show_page(key)
+        if tab:
+            window.page(key).tabs.set(tab)
+        page = window.page(key)
+        if name == "design":
+            page._open(design_id)
+            settle(800)
+            # The picture, so the shot shows its resize handle and the toolbar
+            picture = next(b for b in page._design["blocks"] if b["type"] == "image")
+            page._select(picture["id"])
+        elif key == "campaign":
+            settle(400)
+            scroll = page.findChild(QScrollArea)
+            scroll.verticalScrollBar().setValue(scroll.verticalScrollBar().maximum())
+        settle(2500 if tab else 600)
+        path = OUT / f"{name}.png"
+        window.grab().save(str(path))
+        print(f"saved {path.relative_to(ROOT)}")
+    window.close()
+    settle(200)
 
     # The same app in other languages: Arabic reads right to left
     from app import i18n
@@ -312,7 +287,7 @@ def main() -> int:
     db.set_setting("appearance", "Dark")
     theme.apply_preferences()
     app.setStyleSheet(theme.stylesheet())
-    for code, key, name in (("ar", "dashboard", "home-arabic"), ("de", "settings", "settings-german")):
+    for code, key, name in (("ar", "dashboard", "home-arabic"),):
         i18n.set_language(code)
         app.setLayoutDirection(Qt.LayoutDirection.RightToLeft if i18n.is_rtl()
                                else Qt.LayoutDirection.LeftToRight)
