@@ -70,7 +70,7 @@ class AccountPage(Page):
 
     def _build(self) -> None:
         self.add_header(
-            "Email account",
+            "My email account",
             t("Your password is encrypted on this computer using {backend_name} and never "
               "leaves it.", backend_name=credentials.backend_name()))
         area = self.scroll_body()

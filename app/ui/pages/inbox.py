@@ -16,7 +16,8 @@ from app.ui import theme
 from app.ui.pages.base import Page
 from app.ui.widgets.common import (ChoiceButtons, StatTile, TabBar, muted, primary_button,
                                    secondary_button, set_tone, subheading, wrap_row)
-from app.ui.widgets.inputs import checkbox
+from app.ui.widgets.date_range import DateRange
+from app.ui.widgets.inputs import Debouncer, checkbox, line_edit
 from app.ui.widgets.tables import DataTable
 from app.workers import jobs
 from app.workers.base import Task
@@ -64,6 +65,7 @@ class InboxPage(Page):
         super().__init__(window)
         self._syncing = False
         self._filter = "all"
+        self._dates: tuple = (None, None)
         self._shown: list = []
         self._reading = False
         self._build()
@@ -124,7 +126,17 @@ class InboxPage(Page):
         # The filter row must get the spare width, not a stretch item: its
         # flow layout wraps to the width it is given, and a hungry stretch
         # next to it squeezed all five buttons into a vertical stack.
-        bar_layout.addWidget(ChoiceButtons(FILTERS, self._filter, on_change=self._set_filter), 1)
+        self.search_box = line_edit("Search by sender or subject. Filters as you type")
+        self.search_box.setClearButtonEnabled(True)
+        self._search_debounce = Debouncer(220, self)
+        self._search_debounce.connect(self._load_messages)
+        self.search_box.textChanged.connect(lambda _text: self._search_debounce.poke())
+        self.search_box.setMaximumWidth(round(420 * scale))
+        layout.addWidget(self.search_box)
+
+        filters = ChoiceButtons(FILTERS, self._filter, on_change=self._set_filter)
+        filters.add_extra(DateRange(on_change=self._set_dates))
+        bar_layout.addWidget(filters, 1)
         bar_layout.addWidget(secondary_button("Mark all as read", self._mark_all_read, 160), 0,
                              Qt.AlignmentFlag.AlignTop)
         layout.addWidget(bar)
@@ -163,6 +175,11 @@ class InboxPage(Page):
 
     def _set_filter(self, key: str) -> None:
         self._filter = key
+        self._load_messages()
+        self._show_selected()
+
+    def _set_dates(self, start, end) -> None:
+        self._dates = (start, end)
         self._load_messages()
         self._show_selected()
 
@@ -303,7 +320,9 @@ class InboxPage(Page):
     # --- data ---------------------------------------------------------------
     def _load_messages(self, keep_row: int = -1) -> None:
         kind = None if self._filter == "all" else self._filter
-        self._shown = db.inbox_messages(kind)
+        since, before = prefs.date_bounds(*self._dates)
+        search = self.search_box.text().strip() if hasattr(self, "search_box") else ""
+        self._shown = db.inbox_messages(kind, search=search, since=since, before=before)
         rows, tones = [], []
         for message in self._shown:
             unread = not message["seen"]
@@ -328,8 +347,8 @@ class InboxPage(Page):
 
         self.messages_table.set_empty_message(
             "No messages yet. Press 'Check inbox now' once your email account is connected."
-            if self._filter == "all" else
-            "Nothing of this kind yet. Try 'Everything'.")
+            if self._filter == "all" and not search and not self._dates[0] else
+            "Nothing matches. Try 'Everything', clear the search or pick other dates.")
 
     def _load(self) -> None:
         self._refresh_unread()

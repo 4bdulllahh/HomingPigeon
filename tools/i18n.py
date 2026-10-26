@@ -34,7 +34,7 @@ TEXT_FILES = sorted(
     + [ROOT / "app" / "core" / name for name in (
         "sender.py", "imap_sync.py", "importer.py", "dns_tools.py", "warmup.py",
         "credentials.py", "exporter.py", "prefs.py", "shortcut.py", "scorer.py", "db.py",
-        "design.py")]
+        "design.py", "themes.py")]
     + list((ROOT / "app" / "services").glob("*.py"))
     + list((ROOT / "app" / "workers").glob("*.py"))
 )
@@ -48,7 +48,7 @@ SKIP_NAMES = {
     "DATE_FORMATS", "STATUS_ICONS", "ICONS", "BLACKLISTS", "DNSBLS", "COMMON_SELECTORS",
     "hard_markers", "soft_markers", "SKIP_IN_PYTHON", "__all__", "FONTS", "QUICK_COLOURS", "LINKS_EXAMPLE",
     "DELAY_SUBJECTS", "AUTO_REPLY_SUBJECTS", "HARD_MARKERS", "SOFT_MARKERS", "JUNK_NAMES",
-    "BLOCK_ICONS", "INLINE", "RESIZE", "BUTTON_SIZES", "QUICK_STYLE", "QUICK_PAGE", "_HEADINGS",
+    "BLOCK_ICONS", "COLOURS", "DIRECTIONS", "PLACES", "INLINE", "RESIZE", "BUTTON_SIZES", "QUICK_STYLE", "QUICK_PAGE", "_HEADINGS",
 }
 
 # Strings that pass every test below but are still not wording: folder names,
@@ -59,6 +59,7 @@ IGNORE = {
     "db.init() must be called before db.connect()", "CryptProtectData failed",
     "CryptUnprotectData failed", "Start HomingPigeon - Mac.command",
     "Start HomingPigeon - Linux.sh", "Arial", "DejaVuSans-Bold.ttf", "DejaVuSans.ttf",
+    "AND received_at >= ?", "AND received_at < ?", "Cambria",
 }
 
 # Calls whose string arguments are identifiers, SQL, styles or file names

@@ -308,6 +308,8 @@ class MainWindow(QMainWindow):
             item_layout.addWidget(button)
             self._nav[key] = button
         item_layout.addStretch(1)
+        self._nav_layout = item_layout
+        self.apply_nav_order()
 
         scroller.setWidget(items)
         self._nav_scroll = scroller
@@ -322,6 +324,16 @@ class MainWindow(QMainWindow):
         layout.addWidget(settings)
         self._nav[key] = settings
         return sidebar
+
+    def apply_nav_order(self) -> None:
+        """Put the sidebar in the order chosen in Settings, without the pages switched off."""
+        order = prefs.ordered([item[0] for item in NAV_ITEMS], prefs.get("nav_order"))
+        hidden = prefs.hidden_pages()
+        for index, key in enumerate(order):
+            button = self._nav[key]
+            self._nav_layout.removeWidget(button)
+            self._nav_layout.insertWidget(index, button)
+            button.setVisible(key not in hidden)
 
     def _paint_refresh_button(self) -> None:
         button = getattr(self, "refresh_button", None)
@@ -575,8 +587,19 @@ class MainWindow(QMainWindow):
 
     def change_appearance(self, mode: str) -> None:
         db.set_setting("appearance", mode)
-        theme.set_appearance(mode)
-        self.apply_theme()
+        self.show_theme(lambda: theme.set_appearance(mode))
+
+    def show_theme(self, choose: Callable[[], None], font: str | None = None) -> None:
+        """Switch theme. A new font changes widths as well as colours, so that rebuilds.
+
+        ``font`` is the font before the change, when the change was already previewed.
+        """
+        font = font or theme.ui_family()
+        choose()
+        if theme.ui_family() != font and not self.busy_page_reason():
+            self._rebuild()
+        else:
+            self.apply_theme()
 
     def change_contrast(self, enabled: bool) -> None:
         db.set_setting("high_contrast", enabled)

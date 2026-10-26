@@ -27,7 +27,7 @@ class DeliverabilityPage(Page):
         self._results: list[dns_tools.CheckResult] = []
 
         self.add_header(
-            "Deliverability",
+            "Domain check",
             "SPF, DKIM and DMARC are DNS records that prove your mail is really from you. Without "
             "them, bulk email is filtered as spam no matter how good the content is.")
 

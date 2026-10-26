@@ -54,8 +54,9 @@ Where each feature lives and how it works. Paths are from the repository root.
 - "Personal touch" buttons show **every** tag and are rebuilt in `on_show()`
   when the tag list changes (`_refresh_tag_bars`), so a new import shows up
   without a restart.
-- **Import and export, one kind per tab** (`_sheet_buttons`, `_import_sheet`,
-  `_export_sheet`, `ImportDialog`, `importer.read_templates`,
+- **Import and export** (v0.8: one pair at the top of the page, acting on the open
+  tab through `KIND_OF`; `_paint_sheet_buttons` greys them out on Preview & score)
+  (`_import_sheet`, `_export_sheet`, `ImportDialog`, `importer.read_templates`,
   `importer.write_templates`). Kinds are `importer.KINDS`: subject, body,
   signature, footer. Headings are matched against `importer._HEADINGS` in every
   app language (short words as whole words, so the French "copie" is not the
@@ -65,7 +66,9 @@ Where each feature lives and how it works. Paths are from the repository root.
 - `ImportDialog` lists every item found, each in its own editable box, with the
   tags and (except for subjects) the formatting bar in a `StickyBar`. Nothing
   reaches the page until "Add to My message" (`take_import`); a signature or
-  footer asks before replacing one. Kinds found for other tabs are named in a
+  footer asks before replacing one. `take_import` returns an undo function and
+  the button turns into **Undo**, which takes the item back out (or puts the old
+  signature or footer back). Kinds found for other tabs are named in a
   note at the top. Unknown tags are reported in the toast afterwards.
 - Export writes one column headed with the kind's name in the app's language.
   Messages, signatures and footers are saved as the app's HTML, so importing
@@ -74,6 +77,10 @@ Where each feature lives and how it works. Paths are from the repository root.
   Subject / Message / Signature columns pre-filled with the built-in examples.
 - **Unsubscribe switch** on the Signature tab saves `unsubscribe_note`
   immediately.
+- **Preview & score** also has **View on a phone** (`composer.phone_page`: the
+  email in an iframe inside a drawn phone, written to the temp folder and opened
+  in the browser) and **Send me a test** (the previewed subject and message to
+  the user's own address, `sender.send_test`).
 - Typed text becomes HTML in `composer.text_to_html`; a message already
   containing `<p>`/`<br>` is left alone.
 
@@ -204,6 +211,8 @@ See [languages.md](languages.md). Settings → Language; `MainWindow.change_lang
 
 - Reads `sent_log` (see [data.md](data.md)). Filters: all, sent with no reply,
   replied, bounced, failed. Search covers address, company, person, subject.
+- **Dates** (`DateRange`, `SentModel.set_dates`): only emails sent between two
+  days, kept while switching filters. The tiles and Export to Excel follow it.
 - Tiles: emails sent, replied, bounced, failed.
 - **Double-click** (or right-click, "See the email that was sent") opens
   `SentEmailDialog`: To, From, Company, Sent, Outcome, attachment, error, and
@@ -229,6 +238,8 @@ See [languages.md](languages.md). Settings → Language; `MainWindow.change_lang
   Out-of-office answers (`is_auto_reply`) are stored as `autoreply` and do not
   count as replies. Replies from known contacts set `replied_at`. Everything read
   is stored in `inbox_messages` for reading.
+- The Inbox tab has a search box (sender name, address, subject) and a date
+  range next to the kind buttons; both go to `db.inbox_messages`.
 
 ## Other pages
 
@@ -236,7 +247,9 @@ See [languages.md](languages.md). Settings → Language; `MainWindow.change_lang
   that ticks itself from real state. My email account (`account.py`): SMTP/IMAP
   with provider presets. Domain check (`deliverability.py`): SPF/DKIM/DMARC.
   Sending options (`campaign.py`): brochure, pacing, warm-up. Settings
-  (`settings.py`): appearance, smooth scrolling, dates, backup/restore, update
-  check, uninstall.
+  (`settings.py`): language, themes (`app/core/themes.py`, the theme maker in
+  `widgets/theme_editor.py`), text size, menu order and hidden pages, smooth
+  scrolling, dates, backup/restore, update check, uninstall.
+- My contacts has a date range on the imported date (`ContactsModel.set_dates`).
 - Scrolling (`app/ui/scrolling.py`): an app-wide event filter animates wheel
   scrolling and marks a scrollbar "hot" under the mouse so the QSS widens it.

@@ -435,13 +435,24 @@ def save_message(folder: str, uid: int, *, from_name: str, from_email: str, subj
     )
 
 
-def inbox_messages(kind: str | None = None, limit: int = INBOX_KEEP) -> list[sqlite3.Row]:
+def inbox_messages(kind: str | None = None, limit: int = INBOX_KEEP, search: str = "",
+                   since: str | None = None, before: str | None = None) -> list[sqlite3.Row]:
+    """Newest first. ``since`` and ``before`` are ISO text, as prefs.date_bounds() gives."""
+    clause, params = "WHERE 1 = 1", []
     if kind:
-        return query(
-            "SELECT * FROM inbox_messages WHERE kind = ? "
-            "ORDER BY received_at DESC, id DESC LIMIT ?", (kind, limit))
-    return query("SELECT * FROM inbox_messages ORDER BY received_at DESC, id DESC LIMIT ?",
-                 (limit,))
+        clause += " AND kind = ?"
+        params.append(kind)
+    if search:
+        clause += " AND (from_name LIKE ? OR from_email LIKE ? OR subject LIKE ?)"
+        params += [f"%{search}%"] * 3
+    if since:
+        clause += " AND received_at >= ?"
+        params.append(since)
+    if before:
+        clause += " AND received_at < ?"
+        params.append(before)
+    return query(f"SELECT * FROM inbox_messages {clause} "
+                 "ORDER BY received_at DESC, id DESC LIMIT ?", (*params, limit))
 
 
 def inbox_unseen() -> int:

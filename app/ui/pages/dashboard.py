@@ -75,9 +75,9 @@ class DashboardPage(Page):
         layout.setContentsMargins(0, 0, 0, 0)
         from app.ui.widgets.common import heading
 
-        layout.addWidget(heading("Dashboard"))
+        layout.addWidget(heading("Home"))
         layout.addStretch(1)
-        layout.addWidget(secondary_button("Setup guide", lambda: self.go("guide"), 140))
+        layout.addWidget(secondary_button("Start here", lambda: self.go("guide"), 140))
         return holder
 
     # --- refresh ------------------------------------------------------------

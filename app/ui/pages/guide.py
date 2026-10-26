@@ -65,7 +65,7 @@ class GuideStep(Card):
 class GuidePage(Page):
     def __init__(self, window):
         super().__init__(window)
-        self.add_header("Setup guide")
+        self.add_header("Start here")
         area = self.scroll_body()
         area.add(muted(INTRO))
 

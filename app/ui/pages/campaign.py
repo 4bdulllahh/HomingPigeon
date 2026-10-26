@@ -105,7 +105,7 @@ class CampaignPage(Page):
         self.load()
 
     def _build(self) -> None:
-        self.add_header("Campaign settings",
+        self.add_header("Sending options",
                         "How the emails are paced and what goes out with them.")
         area = self.scroll_body()
 

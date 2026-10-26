@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QColorDialog, QFil
                              QListWidgetItem, QMenu, QPushButton, QSplitter, QVBoxLayout, QWidget)
 
 from app import config
-from app.core import composer, credentials, db, design, importer, merge, prefs, scorer, sender
+from app.core import composer, db, design, importer, merge, prefs, scorer, sender
 from app.i18n import t
 from app.ui import theme
 from app.ui.pages.base import Page
@@ -1466,29 +1466,18 @@ class DesignPage(Page):
     def _send_test(self) -> None:
         if self._design is None:
             return
-        email = db.get_setting("sender_email", "")
-        host = db.get_setting("smtp_host", "")
-        password = credentials.load_secret(credentials.SMTP_PASSWORD)
-        if not (email and host and password):
+        settings = sender.saved_settings()
+        if settings is None:
             self.notify("Finish setting up your email account first", "warn")
             self.go("account")
             return
-        try:
-            port = int(db.get_setting("smtp_port", 587))
-        except (TypeError, ValueError):
-            port = 587
-        settings = sender.SmtpSettings(
-            host=host, port=port, username=db.get_setting("smtp_username", "") or email,
-            password=password, security=db.get_setting("smtp_security", "auto"))
+        email = db.get_setting("sender_email", "")
         identity = composer.SenderIdentity(db.get_setting("sender_name", ""), email,
                                            db.get_setting("reply_to", ""))
         content, context = self._preview_content(), self._context()
 
         def send() -> tuple[bool, str]:
-            message, subject, _variant = composer.build_message(identity, email, context, content)
-            del message["Subject"]
-            message["Subject"] = t("Test: {subject}", subject=subject)
-            return sender.send_one(settings, message)
+            return sender.send_test(settings, identity, context, content)
 
         def done(result: tuple[bool, str]) -> None:
             self.busy -= 1

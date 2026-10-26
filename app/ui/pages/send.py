@@ -45,7 +45,7 @@ class SendPage(Page):
         self._build()
 
     def _build(self) -> None:
-        self.add_header("Send", "Checks everything first, then sends at your chosen pace.")
+        self.add_header("Send emails", "Checks everything first, then sends at your chosen pace.")
         # Scrolls on a small window rather than squeezing the checklist lines together
         body = self.scroll_body(spacing=round(10 * theme.text_scale()))
 

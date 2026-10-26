@@ -540,6 +540,10 @@ class ChoiceButtons(QWidget):
     def get(self) -> str:
         return self.value
 
+    def add_extra(self, widget: QWidget) -> None:
+        """Another control at the end of the row, wrapping with the buttons."""
+        self._layout.addWidget(widget)
+
 
 class TabBar(QWidget):
     """Tabs as a row of real buttons, with the pages in a card underneath.

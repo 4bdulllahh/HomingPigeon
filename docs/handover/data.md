@@ -70,7 +70,9 @@ user ticks "delete my data" in Settings.
 | `warmup_enabled`, `manual_daily_cap`, `provider_limit*` | Daily cap |
 | `warmup_preset`, `warmup_ramp` | Warm-up plan: `very_safe`, `safe` (default), `faster` or `custom`, and the custom list of daily caps (v0.7.1) |
 | `design_id`, `brand_kit` | The design emails are sent with (0 = plain) and the brand kit (v0.7.1) |
-| `appearance`, `text_size`, `high_contrast`, `bold_text`, `date_format`, `time_format`, `start_page`, `last_page` | Look and feel (`app/core/prefs.py`) |
+| `appearance`, `text_size`, `high_contrast`, `bold_text`, `date_format`, `time_format`, `start_page`, `last_page` | Look and feel (`app/core/prefs.py`). `appearance` is Dark, Light, System, a key of `themes.PRESETS`, or `custom:` plus a theme name |
+| `custom_themes` | The user's own themes, a list of theme dicts (`app/core/themes.py`). Damaged entries are skipped when read |
+| `nav_order`, `nav_hidden` | Sidebar order and hidden pages, lists of page keys. `[]` is the original order (`prefs.ordered`) |
 | `contacts_sort` | Remembered sort on My contacts |
 | `auto_imap_sync` | Check the inbox in the background (default on). The timer is on `MainWindow` |
 | `imap_folder_marks` | `{folder: [uidvalidity, last uid]}` for the inbox and the Junk folder (v0.7.2) |

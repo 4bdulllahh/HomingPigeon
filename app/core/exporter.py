@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from app import config
-from app.core import db
+from app.core import db, prefs
 from app.i18n import t
 
 STATUS_LABELS = {
@@ -87,21 +87,22 @@ def export_campaign(campaign_id: int | None = None, path: str | Path | None = No
     return path
 
 
-def sent_dataframe() -> pd.DataFrame:
+def sent_dataframe(start=None, end=None) -> pd.DataFrame:
     """One row per email the app actually attempted, newest first.
 
     Written to match the user's own lead spreadsheet: their columns are carried
     through unchanged, with the outcome added beside them, so the result can be
     pasted back into the master file.
     """
+    dates, values = prefs.date_clause("s.sent_at", start, end)
     rows = db.query(
         "SELECT s.email, s.company, s.person, s.extra_json, s.status, s.attempts, "
         "s.subject AS subject_used, s.sent_at, s.last_error, "
         "COALESCE(s.replied_at, c.replied_at) AS replied_at, "
         "COALESCE(s.bounced_at, c.bounced_at) AS bounced_at "
         "FROM sent_log s LEFT JOIN contacts c ON c.email = s.email "
-        "WHERE s.status IN ('sent', 'failed', 'bounced') "
-        "ORDER BY s.sent_at IS NULL, s.sent_at DESC, s.id DESC"
+        f"WHERE s.status IN ('sent', 'failed', 'bounced'){dates} "
+        "ORDER BY s.sent_at IS NULL, s.sent_at DESC, s.id DESC", values
     )
 
     records = []
@@ -135,9 +136,9 @@ def sent_dataframe() -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
-def export_sent(path: str | Path | None = None) -> Path:
-    """Save the sent log as a spreadsheet."""
-    df = sent_dataframe()
+def export_sent(path: str | Path | None = None, start=None, end=None) -> Path:
+    """Save the sent log as a spreadsheet, only the days from ``start`` to ``end`` if given."""
+    df = sent_dataframe(start, end)
     if path is None:
         config.ensure_dirs()
         stamp = datetime.now().strftime("%Y-%m-%d_%H%M")

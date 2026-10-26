@@ -1,25 +1,27 @@
 """My message: several subjects and bodies, a signature, a live preview and the spam score."""
 from __future__ import annotations
 
+import dataclasses
 import random
 
 import tempfile
 import webbrowser
 from pathlib import Path
+from typing import Callable
 
 from PyQt6 import sip
 from PyQt6.QtCore import QEvent, Qt, QTimer
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import QDialog, QFileDialog, QSplitter, QTextBrowser, QVBoxLayout, QWidget
 
-from app.core import composer, db, design, examples, importer, merge, scorer
+from app.core import composer, db, design, examples, importer, merge, scorer, sender
 from app.i18n import t
 from app.ui import theme
 from app.ui.pages.base import Page
 from app.ui.widgets.common import (Card, ScrollPage, StickyBar, TabBar, body, clear_layout,
                                    column, danger_button, flow_row, heading, hint, muted,
-                                   primary_button, row, secondary_button, separator, set_tone,
-                                   small_button, subheading, wrap_row)
+                                   primary_button, restyle, row, secondary_button, separator,
+                                   set_tone, small_button, subheading, wrap_row)
 from app.ui.widgets.dialogs import ConfirmDialog, InfoDialog, resizable
 from app.ui.widgets import rich_text
 from app.ui.widgets.inputs import Debouncer, checkbox, get_text, set_text, text_box
@@ -128,16 +130,18 @@ PAGE_HELP_SECTIONS = [
         "is missing.",
     ]),
     ("Set it all up from a spreadsheet", [
-        "Each tab has its own Import button: Import subjects on the Subjects tab, Import "
-        "messages on the Message tab, and the same for the signature and the footer.",
+        "The Import button at the top brings in whatever the open tab holds: subjects on the "
+        "Subjects tab, messages on the Message tab, and the same for the signature and the "
+        "footer.",
         "Put subject lines in a column headed Subject and messages in a column headed Message, "
         "one per row. Columns headed Signature and Footer work too.",
         "A window opens with everything found in the file. Change any of them there, then press "
-        "\"Add to My message\" under the ones you want.",
+        "\"Add to My message\" under the ones you want. Added one by mistake? Press Undo under "
+        "it.",
         "In Excel, press Alt+Enter inside a cell to start a new line in a message.",
         "Not sure of the layout? \"Get a blank sheet\" saves one ready to fill in.",
-        "Export saves what is on that tab to a spreadsheet, to keep or to give to someone else. "
-        "Formatting is kept.",
+        "Export, next to it, saves what is on the open tab to a spreadsheet, to keep or to give "
+        "to someone else. Formatting is kept.",
     ]),
     ("The unsubscribe line", [
         "The Signature tab has a switch for the small unsubscribe line at the bottom of every "
@@ -271,6 +275,7 @@ FOUND_TITLES = {"subject": "{count} subject lines found in {name}",
 NUMBERED = {"subject": "Subject {number}", "body": "Message {number}",
             "signature": "Signature {number}", "footer": "Footer {number}"}
 TAB_OF = {"subject": "Subjects", "body": "Message", "signature": "Signature", "footer": "Footer"}
+KIND_OF = {tab: kind for kind, tab in TAB_OF.items()}
 
 
 def tag_buttons(layout, names: list[str], insert) -> None:
@@ -305,6 +310,7 @@ class ImportDialog(QDialog):
         self.kind = kind
         self.added: list[str] = []
         self._cards: list[tuple[QWidget, object, object, object]] = []
+        self._undo: dict[object, tuple[Callable[[], None], str]] = {}   # button -> undo, text
         self._focused = None
         self._bars: list[RichToolbar] = []
 
@@ -399,10 +405,16 @@ class ImportDialog(QDialog):
         card.add(editor)
         add = primary_button("Add to My message", None, 190)
         entry = (card, editor, add, status)
-        add.clicked.connect(lambda _checked=False: self._add(entry))
+        add.clicked.connect(lambda _checked=False: self._press(entry))
         card.add(row(add, None))
         self._cards.append(entry)
         return card
+
+    def _press(self, entry) -> None:
+        if entry[2] in self._undo:
+            self._take_back(entry)
+        else:
+            self._add(entry)
 
     def _add(self, entry) -> bool:
         _card, editor, button, status = entry
@@ -411,19 +423,35 @@ class ImportDialog(QDialog):
             status.setText(t("Empty, so nothing was added"))
             set_tone(status, "warning")
             return False
-        if not self.page.take_import(self.kind, text):
+        undo = self.page.take_import(self.kind, text)
+        if undo is None:
             return False
         self.added.append(text)
-        button.setEnabled(False)
-        button.setText(t("Added"))
-        status.setText(t("Added to My message"))
-        set_tone(status, "success")
-        self.rest.setEnabled(any(entry[2].isEnabled() for entry in self._cards))
+        self._undo[button] = (undo, text)
+        self._paint(entry, added=True)
         return True
+
+    def _take_back(self, entry) -> None:
+        """Undo: the item comes back out of My message and can be added again."""
+        undo, text = self._undo.pop(entry[2])
+        undo()
+        self.added.remove(text)
+        self._paint(entry, added=False)
+
+    def _paint(self, entry, added: bool) -> None:
+        _card, editor, button, status = entry
+        editor.setReadOnly(added)
+        button.setText(t("Undo") if added else t("Add to My message"))
+        button.setProperty("kind", "secondary" if added else "primary")
+        restyle(button)
+        button.setToolTip(t("Take this back out of My message") if added else "")
+        status.setText(t("Added to My message") if added else "")
+        set_tone(status, "success" if added else None)
+        self.rest.setEnabled(any(other[2] not in self._undo for other in self._cards))
 
     def _add_rest(self) -> None:
         for entry in self._cards:
-            if entry[2].isEnabled():
+            if entry[2] not in self._undo:
                 self._add(entry)
 
 
@@ -543,7 +571,13 @@ class TemplatesPage(Page):
         help_button.setToolTip(t("A short guide to this page, in plain English"))
         sample_button = secondary_button("Get a blank sheet...", self._save_sample_sheet)
         sample_button.setToolTip(t("Save a spreadsheet laid out ready for you to fill in"))
-        self.scroll.add(row(heading("My message"), None, wrap_row(sample_button, help_button)))
+        # One pair for the whole page; they work on whichever tab is open
+        self.import_button = secondary_button(
+            "Import...", lambda: self._import_sheet(KIND_OF[self.tabs.current()]))
+        self.export_button = secondary_button(
+            "Export...", lambda: self._export_sheet(KIND_OF[self.tabs.current()]))
+        self.scroll.add(row(heading("My message"), None, wrap_row(
+            self.import_button, self.export_button, sample_button, help_button)))
         self.scroll.add(muted(
             "Write what you want to say. Give the app a few versions of your subject and "
             "message and it mixes them, so every person gets a slightly different email. "
@@ -576,6 +610,7 @@ class TemplatesPage(Page):
         self._score_debounce.connect(self.refresh_preview)
 
         self.tabs.set("Subjects")
+        self._paint_sheet_buttons()
         self.load()
 
     def _explain_page(self) -> None:
@@ -690,7 +725,6 @@ class TemplatesPage(Page):
         layout.addWidget(muted(
             "The subject is the line people see in their inbox before they open your email. "
             "Write 3 or more and each person gets one of them."))
-        layout.addWidget(self._sheet_buttons("subject"))
         # The tags and the Add button stay in view while the list scrolls
         self._subjects_sticky = StickyBar(self.scroll, lambda: column(
             self._tag_bar(False),
@@ -750,7 +784,6 @@ class TemplatesPage(Page):
             "an empty line between paragraphs. Write 2 or 3 versions. Your signature (and the "
             "unsubscribe line, if it is switched on in the Signature tab) is added at the bottom "
             "for you."))
-        layout.addWidget(self._sheet_buttons("body"))
         self._bodies_sticky = StickyBar(self.scroll, lambda: column(
             self._tag_bar(True),
             self._toolbar("message"),
@@ -811,7 +844,6 @@ class TemplatesPage(Page):
             "your name, job title, company, phone number and address each on its own line. Use "
             "the picture button to add your logo. A real signature helps your email reach the "
             "inbox."))
-        layout.addWidget(self._sheet_buttons("signature"))
 
         layout.addWidget(StickyBar(self.scroll, lambda: self._toolbar("signature")))
         self.signature_box = RichBox(
@@ -869,7 +901,6 @@ class TemplatesPage(Page):
             "Small print added under your signature in every email, such as your company's "
             "registered address or a note that the email is confidential. It is sent in small "
             "grey writing. Leave it empty if you do not need one."))
-        layout.addWidget(self._sheet_buttons("footer"))
         layout.addWidget(StickyBar(self.scroll, lambda: self._toolbar("footer")))
         self.footer_box = RichBox(
             "For example: Jones Supplies Ltd, 12 Mill Street, Leeds, UK. This email and any "
@@ -908,13 +939,14 @@ class TemplatesPage(Page):
                       "words", count=len(bodies)), "info", 6000)
 
     # --- import and export, one kind per tab ---------------------------------
-    def _sheet_buttons(self, kind: str) -> QWidget:
-        bring_in = secondary_button(IMPORT_LABELS[kind], lambda: self._import_sheet(kind))
-        bring_in.setToolTip(t("Choose an Excel or CSV file. You see everything in it and pick "
-                              "what to add"))
-        save = secondary_button(EXPORT_LABELS[kind], lambda: self._export_sheet(kind))
-        save.setToolTip(t("Save these to a spreadsheet, to keep or to give to someone else"))
-        return wrap_row(bring_in, save)
+    def _paint_sheet_buttons(self) -> None:
+        """Import and Export say which kind they handle, and rest on Preview & score."""
+        kind = KIND_OF.get(self.tabs.current())
+        for button, labels in ((self.import_button, IMPORT_LABELS),
+                               (self.export_button, EXPORT_LABELS)):
+            button.setEnabled(kind is not None)
+            button.setToolTip(t(labels[kind]).rstrip(".") if kind else
+                              t("Open the Subjects, Message, Signature or Footer tab first"))
 
     def _import_sheet(self, kind: str) -> None:
         path, _filter = QFileDialog.getOpenFileName(
@@ -959,21 +991,33 @@ class TemplatesPage(Page):
                                tags=", ".join("{{" + tag + "}}" for tag in unknown))
         self.notify(message, "warn" if unknown else "success", 9000)
 
-    def take_import(self, kind: str, text: str) -> bool:
-        """Put one item from the import window into the page. False if the user said no."""
-        if kind == "subject":
-            self._add_subject(text)
-        elif kind == "body":
-            self._add_body(text)
+    def take_import(self, kind: str, text: str) -> Callable[[], None] | None:
+        """Put one item from the import window into the page.
+
+        Returns what puts the page back as it was, for Undo, or None if the user said no.
+        """
+        if kind in ("subject", "body"):
+            editor = (self._add_subject if kind == "subject" else self._add_body)(text)
+            remove = self._remove_subject if kind == "subject" else self._remove_body
+            editors = self.subject_editors if kind == "subject" else self.body_editors
+
+            def undo() -> None:
+                if editor in editors:
+                    remove(editor)
         else:
             box = self.signature_box if kind == "signature" else self.footer_box
             if not box.is_empty() and not ConfirmDialog.ask(
                     self, REPLACE_TITLES[kind],
                     "You already have one. Replace it with this one?", "Replace"):
-                return False
+                return None
+            before = "" if box.is_empty() else box.html()
             box.set_html(text)
+
+            def undo() -> None:
+                box.set_html(before)
+                self._content_changed()
         self._content_changed()
-        return True
+        return undo
 
     def _export_sheet(self, kind: str) -> None:
         if kind == "subject":
@@ -1024,10 +1068,17 @@ class TemplatesPage(Page):
         next_button = secondary_button("Next contact", self._next_contact, 140)
         next_button.setToolTip(t("Another recipient, with a different subject and message "
                                "drawn from your lists"))
+        phone_button = secondary_button("View on a phone", self._open_on_phone, 160)
+        phone_button.setToolTip(t("Opens your browser with the email shown inside a phone, the "
+                                  "way most people will read it"))
+        test_button = secondary_button("Send me a test", self._send_test, 160)
+        test_button.setToolTip(t("Sends this email to your own address, so you can see it in "
+                                 "your real inbox and on your phone"))
         layout.addWidget(wrap_row(
             primary_button("Refresh preview", self.refresh_preview, 160),
             next_button,
-            secondary_button("Open in browser", self._open_in_browser, 160)))
+            secondary_button("Open in browser", self._open_in_browser, 160),
+            phone_button, test_button))
 
         self.preview_contact = muted("")
         layout.addWidget(self.preview_contact)
@@ -1220,13 +1271,47 @@ class TemplatesPage(Page):
         self.findings_area.add_stretch()
 
     def _open_in_browser(self) -> None:
+        self._show_in_browser("homingpigeon_preview.html", lambda: self._preview_html)
+
+    def _open_on_phone(self) -> None:
+        self._show_in_browser("homingpigeon_phone_preview.html", lambda: composer.phone_page(
+            self._preview_html, self.preview_subject.text(),
+            self._identity().name or self._identity().email))
+
+    def _show_in_browser(self, name: str, page: Callable[[], str]) -> None:
         if not self._preview_html:
             self.refresh_preview()
             self.notify("Building the preview. Press again in a moment", "info", 3000)
             return
-        path = Path(tempfile.gettempdir()) / "homingpigeon_preview.html"
-        path.write_text(self._preview_html, encoding="utf-8")
+        path = Path(tempfile.gettempdir()) / name
+        path.write_text(page(), encoding="utf-8")
         webbrowser.open(path.as_uri())
+
+    def _send_test(self) -> None:
+        """The email on screen, to the user's own address."""
+        content = self.current_content()
+        if not content.subject_variants or not content.body_variants:
+            self.notify("Add at least one subject and one body", "warn")
+            return
+        settings = sender.saved_settings()
+        if settings is None:
+            self.notify("Finish setting up your email account first", "warn")
+            self.go("account")
+            return
+        # The same subject and message as the preview, not a random pair
+        content = dataclasses.replace(
+            content,
+            subject_variants=[content.subject_variants[
+                self._subject_pick % len(content.subject_variants)]],
+            body_variants=[content.body_variants[self._body_pick % len(content.body_variants)]])
+        identity = self._identity()
+        context = merge.build_context(self._sample_contact(), importer.extra_columns())
+        self.notify(t("Sending a test to {email}...", email=identity.email), "info", 3000)
+        Task(sender.send_test, settings, identity, context, content).start(
+            on_result=self.guard(lambda result: self.notify(
+                result[1], "success" if result[0] else "error", 8000)),
+            on_error=self.guard(lambda message: self.notify(
+                t("Could not send the test: {message}", message=message), "error", 8000)))
 
     # --- persistence --------------------------------------------------------
     def _content_changed(self) -> None:
@@ -1236,6 +1321,7 @@ class TemplatesPage(Page):
             self._score_debounce.poke()
 
     def _tab_changed(self, name: str) -> None:
+        self._paint_sheet_buttons()
         if name == "Preview & score":
             self.refresh_preview()
 

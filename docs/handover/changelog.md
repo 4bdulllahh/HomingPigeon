@@ -2,6 +2,47 @@
 
 Newest first. Add to the top when you change something.
 
+## v0.8.0 beta
+
+- **Themes.** Settings, Theme now offers Dark, Light, Match my computer and eight
+  ready-made themes (`themes.PRESETS`: Midnight, Ocean, Forest, Sunset, Graphite,
+  Rose, Paper, Sand). A theme is six colours (background, sidebar, cards, text,
+  main colour, second button colour), an optional gradient (two colours, a
+  direction, and where: sidebar, main buttons, page background) and a font from
+  `themes.FONTS`. `theme.derive()` works out every other token from those, and
+  the gradient goes in as `fill_sidebar`, `fill_primary` and `fill_page`, used
+  only in `background` rules. Dark and Light are unchanged; High contrast still
+  overrides any theme.
+- **Make my own theme** (`app/ui/widgets/theme_editor.py`). The whole app is the
+  preview: every change is painted with `theme.use_theme()`, Cancel puts the
+  saved theme back. `themes.readability_problems()` warns about hard-to-read
+  colours but never blocks. Saved in the `custom_themes` setting; the
+  Appearance value is `custom:` plus the name. Change, delete, save to a
+  `.hptheme` file and load one (`themes.write_file` / `read_file`, validated,
+  64 KB limit). A font change rebuilds the window like a text size change
+  (`MainWindow.show_theme`).
+- **Menu order.** Settings, Menu on the left: drag pages into any order, untick
+  one to hide it. Home cannot be hidden. Settings `nav_order` and `nav_hidden`,
+  applied by `MainWindow.apply_nav_order()` without a rebuild. "Reset appearance
+  settings" resets the menu too.
+- **Date filters.** `DateRange` (`app/ui/widgets/date_range.py`): a button with
+  quick picks (today, last 7 and 30 days, this month, this year). On Sent emails
+  (by sent date; the tiles, the summary and Export to Excel follow it), My inbox
+  (by received date) and My contacts (by imported date). It stays set while the
+  other filter buttons change. `prefs.date_clause()` builds the SQL.
+- **My message.** Import and Export moved to the top of the page, next to "Get a
+  blank sheet", and work on whichever tab is open (greyed out on Preview &
+  score). The import window has Undo under each added item (`take_import`
+  returns the undo). Preview & score has **View on a phone**
+  (`composer.phone_page`, opened in the browser) and **Send me a test**
+  (`sender.send_test` with `sender.saved_settings`, shared with Email design).
+- **My inbox** has a search box (sender or subject).
+- **Page titles match the sidebar**: Home, Start here, My email account, Domain
+  check, My contacts, Sending options, Send emails.
+- **Tables fill their width after a rebuild.** `DataTable` measures again once
+  the layout settles; after a font or text size change the last column of the
+  Home activity table used to stop short.
+
 ## v0.7.5 beta
 
 - **Start Emailing works again.** v0.7.2 gave `SendWorker` a field named

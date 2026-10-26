@@ -27,7 +27,7 @@ from enum import Enum
 from pathlib import Path
 
 from app import config
-from app.core import composer, db, merge, prefs, tls, warmup
+from app.core import composer, credentials, db, merge, prefs, tls, warmup
 from app.i18n import t
 
 
@@ -170,6 +170,32 @@ def test_connection(settings: SmtpSettings) -> tuple[bool, str]:
                        host=settings.host, port=settings.port)
     except Exception as error:  # noqa: BLE001 - surfaced to the user verbatim
         return False, friendly_smtp_error(error, settings)
+
+
+def saved_settings() -> SmtpSettings | None:
+    """The account saved on My email account, or None until it is fully set up."""
+    email = db.get_setting("sender_email", "")
+    host = db.get_setting("smtp_host", "")
+    password = credentials.load_secret(credentials.SMTP_PASSWORD)
+    if not (email and host and password):
+        return None
+    try:
+        port = int(db.get_setting("smtp_port", 587))
+    except (TypeError, ValueError):
+        port = 587
+    return SmtpSettings(host=host, port=port,
+                        username=db.get_setting("smtp_username", "") or email,
+                        password=password, security=db.get_setting("smtp_security", "auto"))
+
+
+def send_test(settings: SmtpSettings, identity: composer.SenderIdentity, context: dict,
+              content: composer.Content) -> tuple[bool, str]:
+    """One email to the user's own address, with "Test:" in front of the subject."""
+    message, subject, _variant = composer.build_message(identity, identity.email, context,
+                                                        content)
+    del message["Subject"]
+    message["Subject"] = t("Test: {subject}", subject=subject)
+    return send_one(settings, message)
 
 
 def send_one(settings: SmtpSettings, message) -> tuple[bool, str]:

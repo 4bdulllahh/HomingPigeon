@@ -10,10 +10,14 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtWidgets import QFileDialog, QPushButton, QVBoxLayout, QWidget
+from PyQt6 import sip
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QIcon
+from PyQt6.QtWidgets import (QAbstractItemView, QFileDialog, QListWidget, QListWidgetItem,
+                             QPushButton, QVBoxLayout, QWidget)
 
 from app import config
-from app.core import credentials, db, prefs, shortcut
+from app.core import credentials, db, prefs, shortcut, themes
 from app.i18n import t
 from app.services import maintenance
 from app.ui import scrolling, theme
@@ -94,10 +98,23 @@ class SettingsPage(Page):
     def _appearance_section(self) -> Section:
         section = Section("Appearance and reading")
 
-        control = self._setting(section, "Theme",
-                                "Dark is easy on the eyes; Light suits bright rooms.", first=True)
-        self._put(control, ChoiceButtons(prefs.THEMES, prefs.get("appearance"),
-                                         on_change=self.window_.change_appearance))
+        control = self._setting(
+            section, "Theme",
+            "Pick a ready-made theme, or make your own with your colours, a gradient and a font.",
+            first=True)
+        self.theme_holder = QWidget()
+        self.theme_holder.setProperty("role", "plain")
+        QVBoxLayout(self.theme_holder).setContentsMargins(0, 0, 0, 0)
+        self._put(control, self.theme_holder)
+        self.edit_theme_button = secondary_button("Change this theme...", self._edit_theme)
+        self.delete_theme_button = danger_button("Delete this theme", self._delete_theme)
+        self.share_theme_button = secondary_button("Save theme to a file...", self._share_theme)
+        self.share_theme_button.setToolTip(t("Give your theme to someone else"))
+        self._put(control, wrap_row(
+            primary_button("Make my own theme...", self._new_theme),
+            self.edit_theme_button, self.delete_theme_button, self.share_theme_button,
+            secondary_button("Load a theme from a file...", self._load_theme)))
+        self._fill_themes()
 
         control = self._setting(section, "Text size",
                                 "Makes everything in the app bigger: text, buttons and boxes.")
@@ -124,12 +141,167 @@ class SettingsPage(Page):
         self._put(control, self.smooth_box)
 
         control = self._setting(
+            section, "Menu on the left",
+            "Drag the pages into the order you like. Untick a page you never use to hide it. "
+            "Home is always shown.")
+        self.menu_list = QListWidget()
+        self.menu_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.menu_list.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.menu_list.setMaximumWidth(round(420 * theme.text_scale()))
+        self._fill_menu_list()
+        self.menu_list.model().rowsMoved.connect(lambda *_args: self._menu_changed())
+        self.menu_list.itemChanged.connect(lambda _item: self._menu_changed())
+        self._put(control, self.menu_list)
+        self._put(control, secondary_button("Put the menu back the way it was",
+                                            self._reset_menu))
+
+        control = self._setting(
             section, "Start over",
-            "Put the theme, text size and reading options back to how they were when you "
-            "installed the app.")
+            "Put the theme, text size, reading options and menu back to how they were when "
+            "you installed the app. Themes you made are kept.")
         self._put(control, secondary_button("Reset appearance settings",
                                             self._reset_appearance, 230))
         return section
+
+    # --- themes -------------------------------------------------------------
+    def _fill_themes(self) -> None:
+        layout = self.theme_holder.layout()
+        while layout.count():
+            layout.takeAt(0).widget().deleteLater()
+        options = list(prefs.THEMES) + [(key, spec["name"]) for key, spec in themes.PRESETS.items()]
+        options += [(themes.custom_key(spec["name"]), spec["name"])
+                    for spec in themes.custom_themes()]
+        self.theme_choice = ChoiceButtons(options, prefs.get("appearance"),
+                                          on_change=self._choose_theme)
+        layout.addWidget(self.theme_choice)
+        self._paint_theme_buttons()
+
+    def _paint_theme_buttons(self) -> None:
+        mine = str(prefs.get("appearance")).startswith(themes.CUSTOM_PREFIX)
+        self.edit_theme_button.setEnabled(mine)
+        self.delete_theme_button.setEnabled(mine)
+        self.share_theme_button.setEnabled(themes.find(prefs.get("appearance")) is not None)
+
+    def _choose_theme(self, key: str) -> None:
+        self.window_.change_appearance(key)
+        if not sip.isdeleted(self):
+            self._paint_theme_buttons()
+
+    def _new_theme(self) -> None:
+        from app.ui.widgets.theme_editor import ThemeEditor
+
+        ThemeEditor(self.window_, on_saved=lambda _key: self._fill_themes()).exec()
+
+    def _edit_theme(self) -> None:
+        from app.ui.widgets.theme_editor import ThemeEditor
+
+        spec = themes.find(prefs.get("appearance"))
+        if spec is not None:
+            ThemeEditor(self.window_, spec, on_saved=lambda _key: self._fill_themes()).exec()
+
+    def _delete_theme(self) -> None:
+        spec = themes.find(prefs.get("appearance"))
+        if spec is None or not ConfirmDialog.ask(
+                self, "Delete this theme?",
+                t("Delete {name}? The app goes back to the Dark theme.", name=spec["name"]),
+                "Delete", danger=True):
+            return
+        themes.delete_custom(spec["name"])
+        db.set_setting("appearance", "Dark")
+        self._fill_themes()
+        self._choose_theme("Dark")
+
+    def _share_theme(self) -> None:
+        spec = themes.find(prefs.get("appearance"))
+        if spec is None:
+            return
+        path, _filter = QFileDialog.getSaveFileName(
+            self, t("Save theme to a file"), t(spec["name"]) + themes.FILE_SUFFIX,
+            t("HomingPigeon theme (*.hptheme)"))
+        if not path:
+            return
+        try:
+            saved = themes.write_file(path, dict(spec, name=t(spec["name"])))
+        except (OSError, ValueError) as error:
+            self.notify(t("Could not save the theme: {message}", message=error), "error", 8000)
+            return
+        self.notify(t("Saved {name}. Anyone with HomingPigeon can load it in Settings.",
+                      name=saved.name), "success", 8000)
+
+    def _load_theme(self) -> None:
+        path, _filter = QFileDialog.getOpenFileName(
+            self, t("Load a theme from a file"), "",
+            t("HomingPigeon theme (*.hptheme);;All files (*.*)"))
+        if not path:
+            return
+        try:
+            spec = themes.read_file(path)
+        except OSError as error:
+            self.notify(t("Could not open the file: {message}", message=error), "error", 8000)
+            return
+        except ValueError as error:
+            self.notify(str(error), "error", 8000)
+            return
+        if any(mine["name"].casefold() == spec["name"].casefold()
+               for mine in themes.custom_themes()) and not ConfirmDialog.ask(
+                self, "Replace the theme?",
+                t("You already have a theme called {name}. Replace it?", name=spec["name"]),
+                "Replace"):
+            return
+        themes.save_custom(spec)
+        key = themes.custom_key(spec["name"])
+        db.set_setting("appearance", key)
+        self._fill_themes()
+        window = self.window_
+        self._choose_theme(key)
+        window.notify(t("Theme {name} added and switched on.", name=spec["name"]),
+                      "success", 6000)
+
+    # --- menu order ---------------------------------------------------------
+    def _fill_menu_list(self) -> None:
+        from app.ui.main_window import NAV_ITEMS
+
+        items = {item[0]: item for item in NAV_ITEMS}
+        hidden = prefs.hidden_pages()
+        blocked = self.menu_list.blockSignals(True)
+        self.menu_list.clear()
+        for key in prefs.ordered(list(items), prefs.get("nav_order")):
+            _key, icon_name, label, _subtitle = items[key]
+            entry = QListWidgetItem(QIcon(theme.icon_pixmap(theme.icon(icon_name), theme.px(18))),
+                                    t(label))
+            entry.setData(Qt.ItemDataRole.UserRole, key)
+            flags = (entry.flags() | Qt.ItemFlag.ItemIsDragEnabled) & ~Qt.ItemFlag.ItemIsDropEnabled
+            if key in prefs.ALWAYS_SHOWN:
+                flags &= ~Qt.ItemFlag.ItemIsUserCheckable
+            else:
+                flags |= Qt.ItemFlag.ItemIsUserCheckable
+                entry.setCheckState(Qt.CheckState.Unchecked if key in hidden
+                                    else Qt.CheckState.Checked)
+            entry.setFlags(flags)
+            self.menu_list.addItem(entry)
+        self.menu_list.setFixedHeight(
+            self.menu_list.sizeHintForRow(0) * self.menu_list.count()
+            + 2 * self.menu_list.frameWidth() + 4)
+        self.menu_list.blockSignals(blocked)
+
+    def _menu_changed(self) -> None:
+        order, hidden = [], []
+        for index in range(self.menu_list.count()):
+            entry = self.menu_list.item(index)
+            key = entry.data(Qt.ItemDataRole.UserRole)
+            order.append(key)
+            if key not in prefs.ALWAYS_SHOWN and entry.checkState() == Qt.CheckState.Unchecked:
+                hidden.append(key)
+        db.set_setting("nav_order", order)
+        db.set_setting("nav_hidden", hidden)
+        self.window_.apply_nav_order()
+
+    def _reset_menu(self) -> None:
+        db.set_setting("nav_order", [])
+        db.set_setting("nav_hidden", [])
+        self._fill_menu_list()
+        self.window_.apply_nav_order()
+        self.notify("The menu is back in its original order.", "success")
 
     @staticmethod
     def _smooth_changed(on: bool) -> None:
@@ -137,7 +309,8 @@ class SettingsPage(Page):
         scrolling.set_smooth(bool(on))
 
     def _reset_appearance(self) -> None:
-        for key in ("appearance", "text_size", "high_contrast", "bold_text", "smooth_scroll"):
+        for key in ("appearance", "text_size", "high_contrast", "bold_text", "smooth_scroll",
+                    "nav_order", "nav_hidden"):
             db.set_setting(key, prefs.DEFAULTS[key])
         scrolling.set_smooth(prefs.DEFAULTS["smooth_scroll"])
         theme.set_appearance(prefs.DEFAULTS["appearance"])

@@ -24,6 +24,7 @@ from app.ui import theme
 from app.ui.pages.base import Page
 from app.ui.widgets.common import (ChoiceButtons, StatTile, copy_to_clipboard, danger_button,
                                    hint, muted, primary_button, secondary_button, wrap_row)
+from app.ui.widgets.date_range import DateRange
 from app.ui.widgets.dialogs import ConfirmDialog, resizable
 from app.ui.widgets.inputs import Debouncer, line_edit
 from app.ui.widgets.tables import DataTable
@@ -70,6 +71,9 @@ class SentPage(Page):
             secondary_button("Export to Excel...", self._export, 170)))
 
         self.filters = ChoiceButtons(FILTERS, "all", on_change=self._apply_filter)
+        # Separate from the buttons, so the dates stay while switching between them
+        self.dates = DateRange(on_change=self._apply_dates)
+        self.filters.add_extra(self.dates)
         self.root.addWidget(self.filters)
 
         self.summary = muted("", wrap=False)
@@ -105,12 +109,20 @@ class SentPage(Page):
         self.model.set_filter(key)
         self._update_summary()
 
+    def _apply_dates(self, start, end) -> None:
+        self.model.set_dates(start, end)
+        self._update_summary()
+
     def _update_summary(self) -> None:
-        counts = self.model.counts()
+        counts = self.model.counts(*self.model.dates())
         chosen = dict(FILTERS).get(self.filters.get(), "All")
         text = t("{attempted:,} emails sent in total", attempted=counts['attempted'])
         if self.filters.get() != "all":
             text += t("  ·  showing: {chosen}", chosen=chosen)
+        start, end = self.model.dates()
+        if start:
+            text += t("  ·  from {start} to {end}", start=prefs.format_date(start),
+                      end=prefs.format_date(end))
         if self.model.search_text():
             text += t("  ·  matching “{search_text}”", search_text=self.model.search_text())
         self.summary.setText(t(text))
@@ -248,9 +260,13 @@ class SentPage(Page):
         from app.core import exporter
 
         self.notify("Building the spreadsheet...", "info", 2000)
-        Task(exporter.export_sent, path).start(
-            on_result=lambda saved: self.notify(t("Saved to {name}",
-                                                  name=Path(saved).name), "success"),
+        start, end = self.model.dates()
+        Task(exporter.export_sent, path, start, end).start(
+            on_result=lambda saved: self.notify(
+                t("Saved to {name}, only {start} to {end} as picked above",
+                  name=Path(saved).name, start=prefs.format_date(start),
+                  end=prefs.format_date(end)) if start else
+                t("Saved to {name}", name=Path(saved).name), "success", 7000),
             on_error=lambda message: self.notify(t("Export failed: {message}",
                                                    message=message), "error"))
 

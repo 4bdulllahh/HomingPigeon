@@ -5,12 +5,13 @@ format_date() or format_time(), so the Settings choice applies everywhere.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 from app.core import db
 
 # --- Appearance ---------------------------------------------------------------
 THEMES = [("Dark", "Dark"), ("Light", "Light"), ("System", "Match my computer")]
+# The ready-made and home-made themes are in app.core.themes
 
 # (key, label, scale). Scale multiplies every widget and font in the app.
 TEXT_SIZES = [
@@ -45,7 +46,42 @@ DEFAULTS = {
     "time_format": DEFAULT_TIME_FORMAT,
     "start_page": "dashboard",
     "language": "",          # "" until chosen: the computer's own language, if supported
+    "nav_order": [],         # sidebar page keys in the user's order; [] is the original order
+    "nav_hidden": [],        # sidebar pages the user switched off
 }
+
+# Pages that can be moved but never hidden: without them there is no way back
+ALWAYS_SHOWN = {"dashboard"}
+
+
+def ordered(default_keys: list[str], saved) -> list[str]:
+    """The sidebar order: the saved keys that still exist, then any page added since."""
+    saved = [key for key in (saved or []) if key in default_keys]
+    return list(dict.fromkeys(saved)) + [key for key in default_keys if key not in saved]
+
+
+def hidden_pages() -> set[str]:
+    return set(get("nav_hidden") or []) - ALWAYS_SHOWN
+
+
+def date_bounds(start: date | None, end: date | None) -> tuple[str | None, str | None]:
+    """ISO text to compare stored timestamps against: from the start of ``start`` up to,
+    but not including, the day after ``end``. Either end may be open."""
+    return (start.isoformat() if start else None,
+            (end + timedelta(days=1)).isoformat() if end else None)
+
+
+def date_clause(column: str, start: date | None, end: date | None) -> tuple[str, list]:
+    """' AND column >= ? AND column < ?' for whichever ends are set, with the values."""
+    low, high = date_bounds(start, end)
+    clause, params = "", []
+    if low:
+        clause += f" AND {column} >= ?"
+        params.append(low)
+    if high:
+        clause += f" AND {column} < ?"
+        params.append(high)
+    return clause, params
 
 
 def get(key: str):

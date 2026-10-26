@@ -1305,3 +1305,149 @@ def test_a_file_with_messages_too_opens_only_subjects_and_says_so(qt_app, store,
     finally:
         window.close()
         window.deleteLater()
+
+
+# --- v0.8: themes, menu order, date filters, import undo ------------------------
+def test_every_ready_made_theme_builds_a_full_stylesheet(qt_app):
+    from app.core import themes
+
+    try:
+        for key, spec in themes.PRESETS.items():
+            theme.set_appearance(key)
+            assert set(theme.derive(spec)) >= set(theme.DARK), key
+            sheet = theme.stylesheet()
+            assert "None" not in sheet
+            if spec["gradient"]:
+                assert "qlineargradient" in sheet, key
+    finally:
+        theme.set_appearance("Dark")
+
+
+def test_import_undo_takes_the_item_back_out(qt_app, store):
+    from app.ui.main_window import MainWindow
+    from app.ui.pages import templates
+
+    window = MainWindow()
+    try:
+        window.show_page("templates")
+        page = window.page("templates")
+        dialog = templates.ImportDialog(page, "subject", ["One", "Two"], "x.xlsx")
+        dialog._press(dialog._cards[0])
+        dialog._press(dialog._cards[1])
+        assert [e.get_text() for e in page.subject_editors] == ["One", "Two"]
+        dialog._press(dialog._cards[0])   # Undo
+        assert [e.get_text() for e in page.subject_editors] == ["Two"]
+        assert dialog.added == ["Two"] and dialog.rest.isEnabled()
+        dialog._press(dialog._cards[0])   # and add it again
+        assert sorted(e.get_text() for e in page.subject_editors) == ["One", "Two"]
+        dialog.deleteLater()
+
+        page.signature_box.set_html("<p>Old</p>")
+        signatures = templates.ImportDialog(page, "signature", ["<p>New</p>"], "x.xlsx")
+        from app.ui.widgets.dialogs import ConfirmDialog
+        ConfirmDialog.ask, real = (lambda *a, **k: True), ConfirmDialog.ask
+        try:
+            signatures._press(signatures._cards[0])
+        finally:
+            ConfirmDialog.ask = real
+        assert "New" in page.signature_box.html()
+        signatures._press(signatures._cards[0])
+        assert "Old" in page.signature_box.html()
+        signatures.deleteLater()
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_import_and_export_follow_the_open_tab(qt_app, store):
+    from app.ui.main_window import MainWindow
+
+    window = MainWindow()
+    try:
+        window.show_page("templates")
+        page = window.page("templates")
+        page.tabs.set("Message")
+        assert page.import_button.isEnabled() and "message" in page.import_button.toolTip()
+        page.tabs.set("Preview & score")
+        assert not page.import_button.isEnabled() and not page.export_button.isEnabled()
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_sent_log_date_filter(qt_app, store):
+    from datetime import date, timedelta
+
+    from app.models.sent_model import SentModel
+
+    _record_send("today@example.com", "sent")
+    db.execute("UPDATE sent_log SET sent_at = '2020-01-05T10:00:00' WHERE email = ?",
+               ("today@example.com",))
+    _record_send("now@example.com", "sent")
+    model = SentModel()
+    model.reload()
+    model.set_dates(date(2020, 1, 5), date(2020, 1, 5))
+    assert [model.email_at(r) for r in range(model.rowCount())] == ["today@example.com"]
+    assert model.counts(*model.dates())["attempted"] == 1
+    # The dates stay while another filter button is pressed
+    model.set_filter("replied")
+    model.set_filter("all")
+    assert model.rowCount() == 1
+    model.set_dates(date.today() - timedelta(days=1), date.today())
+    assert [model.email_at(r) for r in range(model.rowCount())] == ["now@example.com"]
+
+
+def test_inbox_search_and_dates(store):
+    for uid, (name, subject, when) in enumerate([
+            ("Sam", "Re: hello", "2026-10-01T09:00:00"),
+            ("Ana", "Out of office", "2026-10-20T09:00:00")], start=1):
+        db.save_message("INBOX", uid, from_name=name, from_email=f"{name}@x.example",
+                        subject=subject, body="", received_at=when, kind="reply", known=True)
+    assert [m["from_name"] for m in db.inbox_messages(search="office")] == ["Ana"]
+    assert [m["from_name"] for m in db.inbox_messages(since="2026-10-01",
+                                                      before="2026-10-02")] == ["Sam"]
+
+
+def test_menu_order_and_hidden_pages_apply_to_the_sidebar(qt_app, store):
+    from app.ui.main_window import MainWindow
+
+    db.set_setting("nav_order", ["send", "dashboard"])
+    db.set_setting("nav_hidden", ["guide", "dashboard"])
+    window = MainWindow()
+    try:
+        layout = window._nav_layout
+        assert layout.itemAt(0).widget() is window._nav["send"]
+        assert window._nav["guide"].isHidden()
+        assert not window._nav["dashboard"].isHidden()
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_phone_preview_keeps_the_email_inside_its_frame():
+    from app.core import composer
+
+    page = composer.phone_page('<p class="x">Hi & bye</p>', "Subject <b>", "Jamie")
+    assert 'srcdoc="&lt;p class=&quot;x&quot;&gt;Hi &amp; bye&lt;/p&gt;"' in page
+    assert "Subject &lt;b&gt;" in page
+
+
+def test_making_a_theme_from_a_ready_made_one_leaves_it_alone(qt_app, store):
+    from app.core import themes
+    from app.ui.main_window import MainWindow
+    from app.ui.widgets.theme_editor import ThemeEditor
+
+    before = [list(spec["gradient"]) for spec in themes.PRESETS.values()]
+    theme.set_appearance("midnight")
+    window = MainWindow()
+    try:
+        editor = ThemeEditor(window)
+        editor._set_stop(0, "#000000")
+        editor.reject()
+        assert [spec["gradient"] for spec in themes.PRESETS.values()] == before
+        theme.set_appearance("custom:Gone")
+        assert theme.is_dark()
+    finally:
+        theme.set_appearance("Dark")
+        window.close()
+        window.deleteLater()

@@ -14,7 +14,7 @@ import json
 
 from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt, pyqtSignal
 
-from app.core import db, merge
+from app.core import db, merge, prefs
 from app.i18n import t
 from app.ui import theme
 
@@ -86,6 +86,7 @@ class SentModel(QAbstractTableModel):
         self._columns = list(BASE_COLUMNS)
         self._search = ""
         self._filter = "all"
+        self._dates: tuple = (None, None)
         self._exhausted = False
         self._fetching = False
 
@@ -165,6 +166,16 @@ class SentModel(QAbstractTableModel):
         self._filter = key
         self.reload()
 
+    def set_dates(self, start, end) -> None:
+        """Only emails sent from ``start`` to ``end``, both days included; None for any."""
+        if (start, end) == self._dates:
+            return
+        self._dates = (start, end)
+        self.reload()
+
+    def dates(self) -> tuple:
+        return self._dates
+
     def search_text(self) -> str:
         return self._search
 
@@ -174,7 +185,7 @@ class SentModel(QAbstractTableModel):
         self._rows = self._query(0, PAGE_SIZE)
         self._exhausted = len(self._rows) < PAGE_SIZE
         self.endResetModel()
-        self.counts_changed.emit(self.counts())
+        self.counts_changed.emit(self.counts(*self._dates))
 
     def _refresh_columns(self) -> None:
         """Carry the spreadsheet's own columns across, so a row can be matched
@@ -201,6 +212,9 @@ class SentModel(QAbstractTableModel):
         params: list = list(ATTEMPTED)
         clause = f"WHERE s.status IN ({','.join('?' * len(ATTEMPTED))})"
         clause += " " + _FILTER_CLAUSE[self._filter]
+        dates, values = prefs.date_clause("s.sent_at", *self._dates)
+        clause += dates
+        params += values
         if self._search:
             like = f"%{self._search}%"
             clause += (" AND (s.email LIKE ? OR s.company LIKE ? OR s.person LIKE ? "
@@ -265,8 +279,9 @@ class SentModel(QAbstractTableModel):
 
     # --- totals -------------------------------------------------------------
     @staticmethod
-    def counts() -> dict:
-        """One pass over the table for the four tiles above the list."""
+    def counts(start=None, end=None) -> dict:
+        """One pass over the table for the four tiles above the list, for any dates given."""
+        dates, values = prefs.date_clause("s.sent_at", start, end)
         row = db.query_one(
             "SELECT "
             "  COUNT(*) AS attempted, "
@@ -275,8 +290,8 @@ class SentModel(QAbstractTableModel):
             f"  SUM(CASE WHEN s.status = 'bounced' OR {_BOUNCED} IS NOT NULL "
             "           THEN 1 ELSE 0 END) AS bounced, "
             "  SUM(CASE WHEN s.status = 'failed' THEN 1 ELSE 0 END) AS failed "
-            f"{_FROM} WHERE s.status IN ({','.join('?' * len(ATTEMPTED))})",
-            list(ATTEMPTED),
+            f"{_FROM} WHERE s.status IN ({','.join('?' * len(ATTEMPTED))}){dates}",
+            [*ATTEMPTED, *values],
         )
         if row is None:
             return {"attempted": 0, "sent": 0, "replied": 0, "bounced": 0, "failed": 0}

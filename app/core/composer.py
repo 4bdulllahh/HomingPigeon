@@ -383,3 +383,50 @@ def preview_message(
     full_html, _images = assemble(body_html, content, sender, context, random.Random(seed),
                                   embed=embed)
     return subject, full_html, html_to_text(full_html)
+
+
+def phone_page(email_html: str, subject: str, sender_name: str) -> str:
+    """A web page with a phone drawn around the email, for "View on a phone".
+
+    The email goes in an iframe of a typical phone's width, so its own styles
+    cannot leak into the frame and the frame's cannot change the email.
+    """
+    from html import escape
+
+    initial = escape((sender_name.strip() or "?")[0].upper())
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>{escape(t("Your email on a phone"))}</title>
+<style>
+  body {{ margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+         align-items: center; justify-content: center; gap: 18px; background: #e9ecf1;
+         font-family: "Segoe UI", system-ui, sans-serif; color: #333; }}
+  .phone {{ width: 390px; height: 800px; background: #111; border-radius: 54px; padding: 14px;
+            box-shadow: 0 30px 60px rgba(0,0,0,.25); box-sizing: border-box; }}
+  .screen {{ width: 100%; height: 100%; background: #fff; border-radius: 42px; overflow: hidden;
+             display: flex; flex-direction: column; }}
+  .notch {{ width: 120px; height: 30px; background: #111; border-radius: 0 0 18px 18px;
+            margin: 0 auto; flex: none; }}
+  .head {{ padding: 14px 18px 10px; border-bottom: 1px solid #eee; flex: none; }}
+  .subject {{ font-size: 19px; font-weight: 600; margin: 0 0 12px; }}
+  .from {{ display: flex; align-items: center; gap: 10px; font-size: 14px; }}
+  .avatar {{ width: 36px; height: 36px; border-radius: 50%; background: #3b86dd; color: #fff;
+             display: flex; align-items: center; justify-content: center; font-weight: 600; }}
+  .to {{ color: #888; font-size: 12px; }}
+  iframe {{ border: 0; width: calc(100% - 28px); margin: 6px 14px 0; flex: 1; }}
+  .note {{ font-size: 14px; color: #666; max-width: 420px; text-align: center; }}
+</style></head>
+<body>
+  <div class="phone"><div class="screen">
+    <div class="notch"></div>
+    <div class="head">
+      <p class="subject">{escape(subject)}</p>
+      <div class="from"><div class="avatar">{initial}</div>
+        <div><div>{escape(sender_name)}</div><div class="to">{escape(t("to me"))}</div></div>
+      </div>
+    </div>
+    <iframe srcdoc="{escape(email_html, quote=True)}"></iframe>
+  </div></div>
+  <p class="note">{escape(t("This is roughly how your email looks in a mail app on a "
+                             "typical phone. Scroll inside the phone to read it all."))}</p>
+</body></html>
+"""

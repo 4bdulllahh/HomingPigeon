@@ -17,6 +17,7 @@ from app.ui.pages.base import Page
 from app.ui.widgets.common import (FormRow, MenuButton, ProgressRow, ScrollPage, Section,
                                    TabBar, clear_layout, danger_button, hint, muted,
                                    primary_button, row, secondary_button, set_tone, wrap_row)
+from app.ui.widgets.date_range import DateRange
 from app.ui.widgets.dialogs import ConfirmDialog
 from app.ui.widgets.inputs import (Debouncer, checkbox, combo, line_edit, read_only_box,
                                    set_combo_values, update_completer)
@@ -36,7 +37,7 @@ class ContactsPage(Page):
         self._column_pickers: dict[str, object] = {}
 
         self.add_header(
-            "Contacts",
+            "My contacts",
             "Import your spreadsheet. The app finds the email, company and contact columns "
             "automatically, then removes duplicates, invalid addresses and dead domains before "
             "anything is sent.")
@@ -338,9 +339,14 @@ class ContactsPage(Page):
         self.clear_button = danger_button("Clear whole list...", self._clear_list, 160)
         export_button = secondary_button("Export...", self._export_contacts, 110)
 
+        self.dates = DateRange(on_change=self._change_dates,
+                               labels=("Imported: any date", "Imported: {start} to {end}"))
+        self.dates.button.setToolTip(t("Show only the contacts imported between two dates"))
+
         self.search_box.setMinimumWidth(round(280 * theme.text_scale()))
         layout.addWidget(wrap_row(self.search_box, self.status_button, self.sort_button,
-                                  self.delete_button, self.clear_button, export_button))
+                                  self.dates, self.delete_button, self.clear_button,
+                                  export_button))
 
         self.contacts_summary = muted("", wrap=False)
         layout.addWidget(self.contacts_summary)
@@ -385,6 +391,12 @@ class ContactsPage(Page):
         self.contacts_table.view.scrollToTop()
         self.contacts_table.fit_columns()
         db.set_setting_soft("contacts_sort", key)
+
+    def _change_dates(self, start, end) -> None:
+        self.contacts_model.set_dates(start, end)
+        self.contacts_table.clear_selection()
+        self.contacts_table.view.scrollToTop()
+        self.contacts_table.fit_columns()
 
     def _change_status(self, key: str) -> None:
         self.contacts_model.set_status_filter(key)

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from PyQt6.QtCore import QAbstractTableModel, QEvent, Qt, pyqtSignal
+from PyQt6.QtCore import QAbstractTableModel, QEvent, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QAbstractItemView, QHeaderView, QLabel, QStackedWidget, QTableView,
                              QVBoxLayout, QWidget)
@@ -145,6 +145,9 @@ class DataTable(QWidget):
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt naming
         super().resizeEvent(event)
         self.fit_columns()
+        # A page built while the window is being rebuilt gets its viewport width a
+        # moment after this; measured now, the last column stops short of the edge.
+        QTimer.singleShot(0, self.fit_columns)
 
     def _after_change(self, *_args) -> None:
         empty = self.model.rowCount() == 0

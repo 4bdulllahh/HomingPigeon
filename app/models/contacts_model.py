@@ -15,7 +15,7 @@ import json
 
 from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt, pyqtSignal
 
-from app.core import db
+from app.core import db, prefs
 from app.i18n import t
 from app.ui import theme
 
@@ -145,6 +145,7 @@ class ContactsModel(QAbstractTableModel):
         self._columns = list(BASE_COLUMNS)
         self._search = ""
         self._status = "all"
+        self._dates: tuple = (None, None)
         self._campaign: int | None = None
         self._sort = DEFAULT_SORT
         self._matching = 0
@@ -242,6 +243,13 @@ class ContactsModel(QAbstractTableModel):
     def status_filter(self) -> str:
         return self._status
 
+    def set_dates(self, start, end) -> None:
+        """Only contacts imported from ``start`` to ``end``, both days included; None for any."""
+        if (start, end) == self._dates:
+            return
+        self._dates = (start, end)
+        self.reload()
+
     def set_sort(self, key: str) -> None:
         """Change the order. Re-runs the query; SQLite does the sorting."""
         if key not in _ORDER_BY or key == self._sort:
@@ -296,6 +304,10 @@ class ContactsModel(QAbstractTableModel):
         if self._status in STATUSES:
             conditions.append(f"{db.contact_send_status(self._campaign)} = ?")
             params.append(self._status)
+        dates, values = prefs.date_clause("imported_at", *self._dates)
+        if dates:
+            conditions.append(dates.removeprefix(" AND "))
+            params += values
         return ("WHERE " + " AND ".join(conditions) if conditions else ""), params
 
     def _count_matching(self) -> int:
@@ -304,8 +316,6 @@ class ContactsModel(QAbstractTableModel):
         return row["n"] if row else 0
 
     def _query(self, offset: int, limit: int) -> list[dict]:
-        from app.core import prefs
-
         clause, params = self._where()
         # "id" is appended as a tiebreak so LIMIT/OFFSET paging is stable: with
         # an order that has ties, SQLite is free to return them in a different

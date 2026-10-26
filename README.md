@@ -14,6 +14,11 @@ correctly, cleans your contact list before you send, makes every message slightl
 sends at a human pace, and quietly removes addresses that bounce. It runs on your own computer,
 and your contacts never leave it.
 
+**New in 0.8:** **themes.** Pick one of eight ready-made themes or make your own: your colours,
+a gradient and a font, and share it as a file. Put the menu in your own order and hide pages
+you never use. **Filter by date** on Sent emails, My inbox and My contacts. **See your email on
+a phone**, send yourself a test from My message, and take back an import with **Undo**.
+
 **New in 0.7.5:** **import and export on every My message tab.** Bring subjects, messages, a
 signature or a footer in from a spreadsheet, check and touch up each one in a window with the
 formatting bar and personal touches, and add the ones you want. Export them to give to
@@ -31,7 +36,7 @@ and the starting designs, saves itself as you work, and keeps a copy of each des
 Documents folder. Scrollbars are slimmer and scrolling is smooth (you can switch it off in
 Settings).
 
-**Download:** [latest release](../../releases/latest) · **Version:** 0.7.5 (free beta) ·
+**Download:** [latest release](../../releases/latest) · **Version:** 0.8.0 (free beta) ·
 **Works on:** Windows, Mac and Linux · **Languages:** English, العربية, Deutsch, Español,
 Français
 
@@ -122,8 +127,10 @@ Français
   what to delete. It also exports back to Excel so your master list stays current.
 - **Work while it works.** Importing a large spreadsheet checks every domain in the background,
   so you can set up your account or write your message at the same time.
-- **Easy to read.** Dark, light or match-your-computer themes, five text sizes, high contrast
-  and bold text, smooth scrolling, and your choice of date and time format.
+- **Make it yours.** Dark, light, match-your-computer and eight more themes, or make your own
+  with your colours, a gradient and a font. Put the menu in your own order.
+- **Easy to read.** Five text sizes, high contrast and bold text, smooth scrolling, and your
+  choice of date and time format.
 - **Backups.** Save everything to one file and restore it later, on this computer or a new one.
 
 ## Screenshots
@@ -151,7 +158,7 @@ Français
 
 You don't need to know anything about coding.
 
-1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.7.5.zip`**.
+1. Go to the **[Releases](../../releases/latest)** page and download **`HomingPigeon-v0.8.0.zip`**.
 2. Right-click the downloaded file → **Extract All...** → **Extract**.
 3. In the folder that opens, double-click **`HomingPigeon Setup.exe`**.
 4. Click **Install**. Setup shows you every step while it works: it downloads what the app needs
