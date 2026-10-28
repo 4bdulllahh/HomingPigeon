@@ -22,6 +22,10 @@ include any open item. When one is built, move it to "Done" with the version.
 
 ### For selling the app
 
+- **Turn on the Google and Microsoft sign-in buttons.** Free; the owner's
+  checklist is [../TODO-sign-in-buttons.md](../TODO-sign-in-buttons.md). Remind
+  the user it is still waiting.
+
 - **Accounts and subscriptions.** The app is downloaded from the maker's
   website, where people sign up, log in and buy a subscription. The app then asks
   them to log in with that same website account and only works while the
