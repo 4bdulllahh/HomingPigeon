@@ -359,10 +359,12 @@ class ContactsPage(Page):
             multi_select=True)
         self.contacts_table.selection_changed.connect(self._selection_changed)
         self.contacts_table.set_context_menu(self._contact_menu)
+        self.contacts_table.double_clicked.connect(self._show_history)
         layout.addWidget(self.contacts_table, 1)
 
         layout.addWidget(hint(
-            "Tip: scroll sideways to see every column from your spreadsheet. Drag a column edge to "
+            "Tip: double-click a contact to see every email they were sent and what happened. "
+            "Scroll sideways to see every column from your spreadsheet. Drag a column edge to "
             "widen it, select rows and press Delete to remove them, or right-click for more. "
             "Click any empty space to let go of a selection."))
 
@@ -447,10 +449,20 @@ class ContactsPage(Page):
         menu.addAction(again)
 
         menu.addSeparator()
+        everything = QAction(t("Everything sent to this person"), menu)
+        everything.triggered.connect(lambda: self._show_history(index))
+        menu.addAction(everything)
         copy = QAction(t("Copy email address"), menu)
         copy.triggered.connect(lambda: self._copy_email(email))
         menu.addAction(copy)
         return menu
+
+    def _show_history(self, index: int) -> None:
+        from app.ui.pages.sent import show_history
+
+        email = self.contacts_model.email_at(index)
+        if email:
+            show_history(self, email)
 
     def _send_again(self) -> None:
         rows = self.contacts_table.selected_rows()

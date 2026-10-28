@@ -49,6 +49,8 @@ PROVIDER_LIMITS = {
     "Outlook.com (free)": 300,
     "Zoho Mail": 1000,
     "Titan Email": 1000,
+    "Brevo (free plan)": 300,
+    "Sending service, paid plan": 5000,
     "Other / shared hosting": 500,
 }
 

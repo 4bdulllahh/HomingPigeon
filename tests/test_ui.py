@@ -331,7 +331,8 @@ def test_sent_log_filters_and_counts(qt_app, store):
 
     model = SentModel()
     model.reload()
-    assert model.counts() == {"attempted": 3, "sent": 2, "replied": 1, "bounced": 1, "failed": 0}
+    assert model.counts() == {"attempted": 3, "sent": 2, "replied": 1, "bounced": 1, "failed": 0,
+                              "opened": 0}
 
     model.set_filter("replied")
     assert [model.email_at(r) for r in range(model.rowCount())] == ["two@example.com"]
@@ -1449,5 +1450,50 @@ def test_making_a_theme_from_a_ready_made_one_leaves_it_alone(qt_app, store):
         assert theme.is_dark()
     finally:
         theme.set_appearance("Dark")
+        window.close()
+        window.deleteLater()
+
+
+# --- v0.8.1: sign in with Google or Microsoft ---------------------------------------
+def test_account_page_signs_in_and_hides_the_password_boxes(qt_app, store, monkeypatch):
+    from app import config
+    from app.core import credentials
+    from app.ui.main_window import MainWindow
+
+    secrets: dict = {}
+    monkeypatch.setattr(credentials, "save_secret", secrets.__setitem__)
+    monkeypatch.setattr(credentials, "load_secret", lambda name, default="":
+                        secrets.get(name, default))
+    monkeypatch.setattr(credentials, "delete_secret", lambda name: secrets.pop(name, None))
+    monkeypatch.setattr(config, "GOOGLE_CLIENT_ID", "id.apps.googleusercontent.com")
+    monkeypatch.setattr(config, "MICROSOFT_CLIENT_ID", "")
+
+    qt_app.setStyleSheet(theme.stylesheet())
+    window = MainWindow()
+    window.show()
+    try:
+        window.show_page("account")
+        qt_app.processEvents()
+        page = window.page("account")
+        assert [button.text() for button in page.smtp_sign_in.buttons] == ["Sign in with Google"]
+        assert page.password_row.isVisible() and page.imap_user_row.isVisible()
+
+        page._signed_in("smtp", {"provider": "google", "email": "me@gmail.com",
+                                 "refresh_token": "r"})
+        qt_app.processEvents()
+        assert not page.password_row.isVisible() and not page.imap_password_row.isVisible()
+        assert page.imap_host_box.text() == "imap.gmail.com"
+        assert db.get_setting("imap_username") == "me@gmail.com"
+        assert "me@gmail.com" in page.smtp_sign_in.status.text()
+
+        page.sign_out("smtp")
+        qt_app.processEvents()
+        assert page.password_row.isVisible()
+        assert not page.imap_password_row.isVisible(), "the inbox stays signed in"
+
+        for key in ("sent", "dashboard"):
+            window.show_page(key)
+            qt_app.processEvents()
+    finally:
         window.close()
         window.deleteLater()

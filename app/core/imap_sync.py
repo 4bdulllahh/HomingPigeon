@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from email.message import Message
 
-from app.core import composer, db, tls
+from app.core import composer, db, oauth, tls
 from app.i18n import t
 
 UNSUBSCRIBE_PHRASES = [
@@ -100,6 +100,7 @@ class ImapSettings:
     use_ssl: bool = True
     folder: str = "INBOX"
     timeout: int = 30
+    oauth: str = ""              # "imap" when signed in with Google or Microsoft instead
 
 
 @dataclass
@@ -135,7 +136,11 @@ def connect(settings: ImapSettings) -> imaplib.IMAP4:
     else:
         client = imaplib.IMAP4(settings.host, settings.port, timeout=settings.timeout)
         client.starttls(tls.secure_context())
-    client.login(settings.username, settings.password)
+    if settings.oauth:
+        email, token = oauth.access_token(settings.oauth)
+        client.authenticate("XOAUTH2", lambda _challenge: oauth.xoauth2(email, token).encode())
+    else:
+        client.login(settings.username, settings.password)
     return client
 
 
@@ -155,11 +160,14 @@ def test_connection(settings: ImapSettings) -> tuple[bool, str]:
                 client.logout()
             except Exception:
                 pass
+    except oauth.OAuthError as error:
+        return False, str(error)
     except imaplib.IMAP4.error as error:
         text = str(error)
         if "AUTHENTICATIONFAILED" in text.upper():
-            return False, ("Sign-in rejected. If this is Gmail or Outlook with 2-step verification, "
-                           "you need an app password here too.")
+            return False, ("Sign-in rejected. Check the inbox email address is the mailbox you "
+                           "read (for example your Gmail address, not your Brevo login). Gmail "
+                           "and Outlook need an app password, or use the sign-in button.")
         return False, t("IMAP error: {text}", text=text)
     except (socket.gaierror, socket.timeout, OSError) as error:
         return False, t("Could not reach {host}:{port}: {error}",
@@ -602,24 +610,10 @@ def _classify(message: Message, result: SyncResult) -> tuple[str, bool]:
             return "bounce", False
         if hard:
             result.hard_bounces.append((address, detail))
-            db.suppress(address, t("Hard bounce: {detail}", detail=detail)[:200], source="bounce")
-            db.execute("UPDATE contacts SET bounced_at = ?, valid = 0 WHERE email = ?",
-                       (db.now(), address))
-            db.execute(
-                "UPDATE campaign_recipients SET status = 'bounced', last_error = ? "
-                "WHERE contact_id = (SELECT id FROM contacts WHERE email = ?) AND status = 'sent'",
-                (detail[:400], address),
-            )
-            db.execute(
-                "UPDATE sent_log SET status = 'bounced', bounced_at = ?, last_error = ? "
-                "WHERE email = ? AND status = 'sent'",
-                (db.now(), detail[:400], address.lower()),
-            )
-            db.execute("UPDATE contacted SET status = 'bounced' WHERE email = ? AND status = 'sent'",
-                       (address,))
+            record_hard_bounce(address, detail)
         else:
             result.soft_bounces.append((address, detail))
-            _retry_later(address, detail)
+            retry_later(address, detail)
         return "bounce", True
 
     address = sender_address(message)
@@ -650,7 +644,27 @@ def _classify(message: Message, result: SyncResult) -> tuple[str, bool]:
     return "reply", True
 
 
-def _retry_later(address: str, detail: str) -> None:
+def record_hard_bounce(address: str, detail: str, reason: str = "") -> None:
+    """The address can never be delivered to: never email it again, and mark what was sent."""
+    db.suppress(address, (reason or t("Hard bounce: {detail}", detail=detail))[:200],
+                source="bounce")
+    db.execute("UPDATE contacts SET bounced_at = ?, valid = 0 WHERE email = ?",
+               (db.now(), address))
+    db.execute(
+        "UPDATE campaign_recipients SET status = 'bounced', last_error = ? "
+        "WHERE contact_id = (SELECT id FROM contacts WHERE email = ?) AND status = 'sent'",
+        (detail[:400], address),
+    )
+    db.execute(
+        "UPDATE sent_log SET status = 'bounced', bounced_at = ?, last_error = ? "
+        "WHERE email = ? AND status = 'sent'",
+        (db.now(), detail[:400], address.lower()),
+    )
+    db.execute("UPDATE contacted SET status = 'bounced' WHERE email = ? AND status = 'sent'",
+               (address,))
+
+
+def retry_later(address: str, detail: str) -> None:
     """A temporary bounce: try that person again on a later run, within the attempt limit."""
     from app import config
 

@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QMainWin
                              QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 
 from app import config
-from app.core import db, prefs, warmup
+from app.core import db, delivery, prefs, warmup
 from app.i18n import t
 from app.ui import theme
 from app.ui.widgets.common import restyle, separator, toast
@@ -690,6 +690,15 @@ class MainWindow(QMainWindow):
         settings = imap_settings()
         if settings is not None:
             Task(jobs.sync_inbox, settings).start(on_result=self._inbox_checked)
+        if delivery.configured():
+            Task(delivery.check).start(on_result=self._reports_checked)
+
+    def _reports_checked(self, result) -> None:
+        """The sending service's delivery reports came in: say if anyone was taken off the list."""
+        if result.removed:
+            self.notify(t("{count} address(es) taken off your list after reports from your "
+                          "sending service", count=result.removed), "success")
+            self.refresh_status()
 
     def _inbox_checked(self, result) -> None:
         if result.errors or not result.scanned:

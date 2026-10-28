@@ -2,6 +2,58 @@
 
 Newest first. Add to the top when you change something.
 
+## v0.8.1 beta
+
+- **Separate inbox login.** My email account, Incoming mail has an **Inbox email
+  address** (setting `imap_username`). Before, the inbox always signed in with
+  the sending username, so someone sending through Brevo and reading replies in
+  Gmail could never connect: Gmail was given the Brevo login. `inbox.imap_settings()`
+  uses `imap_username`, then `smtp_username`, then `sender_email`.
+- **Sign in with Google / Microsoft** (`app/core/oauth.py`). Browser sign-in with
+  PKCE and a one-off web server on 127.0.0.1 that catches the answer; the
+  refresh token is stored encrypted as the secret `oauth_smtp` or `oauth_imap`.
+  `sender.open_smtp` and `imap_sync.connect` sign in with XOAUTH2 when
+  `SmtpSettings.oauth` / `ImapSettings.oauth` is set. Signing in for sending also
+  sets up the inbox with the same account when no other inbox is set. Buttons
+  only show when `config.GOOGLE_CLIENT_ID` / `MICROSOFT_CLIENT_ID` are filled in;
+  see [sign-in-setup.md](sign-in-setup.md). Standard library only, no new package.
+- **Delivery reports** (`app/core/delivery.py`). Paste a Brevo, SendGrid,
+  Mailgun or Postmark API key on My email account and the app asks the service
+  what happened to each email: delivered, opened, clicked, bounced, blocked,
+  marked as spam, unsubscribed. Runs with every background inbox check, from the
+  account page's "Test and fetch reports" and from "Check opens and bounces" on
+  Sent emails. Hard bounces, blocks, spam complaints and unsubscribes go on the
+  do-not-email list (bounces through the shared `imap_sync.record_hard_bounce`).
+  Soft bounces are ignored on purpose: the service retries by itself and a
+  resend from here could email someone twice.
+- **Sent emails**: Outcome now also shows Delivered, Opened, Clicked and Marked
+  as spam (`delivery.outcome`, shared with the export and the contact history).
+  Opened and Clicked filters, an Opened tile with the open rate, and right-click
+  "Everything sent to this person".
+- **Home** has a **Campaign results** table: sent, delivered, opened, clicked,
+  replied, bounced and spam for the last five campaigns.
+- **My contacts**: double-click a contact (or right-click, "Everything sent to
+  this person") for every email they got and what happened to it.
+- **Export to Excel** on Sent emails adds Delivered At, Opened At, Clicked At and
+  Marked As Spam At.
+- **Spam-complaint brake.** Sending stops when more than 1% of a run's emails
+  are reported as spam (`config.MAX_COMPLAINT_RATE`, after the usual 20-email
+  sample), next to the existing bounce-rate brake.
+- **More presets** on My email account: Outlook.com / Hotmail, Yahoo Mail,
+  iCloud Mail, Brevo, SendGrid, Mailgun and Postmark, each with plain steps for
+  the username and password. A sending-service preset leaves the inbox settings
+  alone and picks the delivery-report service. Two new plan limits: Brevo free
+  plan (300 a day) and a paid sending-service plan.
+- **Fix: paragraphs from a spreadsheet column.** A whole message kept in one
+  contact column and used as a tag (`{{Pitch}}`) arrived as one long paragraph,
+  because the tag's line breaks were put into the HTML as plain new lines.
+  `merge.apply_tags` now turns them into `<br>`, so a blank line in the cell is a
+  blank line in the email.
+- The Send page and Start here use `sender.saved_settings()` instead of their
+  own copies of it, so they understand a signed-in account.
+- Database schema 6: `sent_log` gains `delivered_at`, `opened_at`, `clicked_at`
+  and `complained_at`.
+
 ## v0.8.0 beta
 
 - **Themes.** Settings, Theme now offers Dark, Light, Match my computer and eight

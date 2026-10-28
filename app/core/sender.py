@@ -27,7 +27,8 @@ from enum import Enum
 from pathlib import Path
 
 from app import config
-from app.core import composer, credentials, db, merge, prefs, tls, warmup
+from app.core import (composer, credentials, db, delivery, merge, oauth, prefs, tls,
+                      warmup)
 from app.i18n import t
 
 
@@ -67,6 +68,7 @@ class SmtpSettings:
     password: str
     security: str = "auto"       # auto | starttls | ssl | none
     timeout: int = 30
+    oauth: str = ""              # "smtp" when signed in with Google or Microsoft instead
 
     def resolved_security(self) -> str:
         if self.security != "auto":
@@ -96,6 +98,8 @@ class SendPlan:
 # --- SMTP helpers -----------------------------------------------------------
 def friendly_smtp_error(error: Exception, settings: SmtpSettings) -> str:
     """Turn an SMTP exception into something an office user can act on."""
+    if isinstance(error, oauth.OAuthError):
+        return str(error)
     if isinstance(error, smtplib.SMTPAuthenticationError):
         code = error.smtp_code
         text = (error.smtp_error or b"").decode("utf-8", "replace") if isinstance(error.smtp_error, bytes) \
@@ -150,7 +154,12 @@ def open_smtp(settings: SmtpSettings) -> smtplib.SMTP:
         if security == "starttls":
             server.starttls(context=tls.secure_context())
             server.ehlo()
-    if settings.username:
+    if settings.oauth:
+        email, token = oauth.access_token(settings.oauth)
+        # An error comes back as a challenge, which is answered with an empty line
+        server.auth("XOAUTH2", lambda challenge=None: "" if challenge else
+                    oauth.xoauth2(email, token))
+    elif settings.username:
         server.login(settings.username, settings.password)
     return server
 
@@ -177,7 +186,8 @@ def saved_settings() -> SmtpSettings | None:
     email = db.get_setting("sender_email", "")
     host = db.get_setting("smtp_host", "")
     password = credentials.load_secret(credentials.SMTP_PASSWORD)
-    if not (email and host and password):
+    signed_in = oauth.account("smtp") is not None
+    if not (email and host and (password or signed_in)):
         return None
     try:
         port = int(db.get_setting("smtp_port", 587))
@@ -185,7 +195,8 @@ def saved_settings() -> SmtpSettings | None:
         port = 587
     return SmtpSettings(host=host, port=port,
                         username=db.get_setting("smtp_username", "") or email,
-                        password=password, security=db.get_setting("smtp_security", "auto"))
+                        password=password, security=db.get_setting("smtp_security", "auto"),
+                        oauth="smtp" if signed_in else "")
 
 
 def send_test(settings: SmtpSettings, identity: composer.SenderIdentity, context: dict,
@@ -620,6 +631,20 @@ class SendWorker(threading.Thread):
                 db.log_event("error", "send", t("Circuit breaker: bounce rate {rate:.0%}",
                                                 rate=rate),
                              self.plan.campaign_id)
+                break
+
+            # Spam complaints arrive from the sending service's delivery reports
+            complaints = delivery.complaint_rate(self.plan.campaign_id, self._began,
+                                                 self.sent + self.failed)
+            if complaints > config.MAX_COMPLAINT_RATE:
+                self._log(
+                    t("Stopped: {rate:.1%} of people marked your email as spam (limit "
+                      "{limit:.0%}). Mailbox providers block senders with this many complaints. "
+                      "Check the message and who it goes to before continuing.",
+                      rate=complaints, limit=config.MAX_COMPLAINT_RATE), "error")
+                self._set_state(State.ERROR)
+                db.log_event("error", "send", t("Circuit breaker: spam complaints {rate:.1%}",
+                                                rate=complaints), self.plan.campaign_id)
                 break
 
             if processed < total and not self._stop_event.is_set():

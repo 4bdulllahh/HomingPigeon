@@ -14,7 +14,7 @@ import json
 
 from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt, pyqtSignal
 
-from app.core import db, merge, prefs
+from app.core import db, delivery, merge, prefs
 from app.i18n import t
 from app.ui import theme
 
@@ -43,6 +43,8 @@ TRANSLATED_KEYS = {"_outcome"}
 FILTERS = [
     ("all", "All"),
     ("sent", "Sent, no reply"),
+    ("opened", "Opened"),
+    ("clicked", "Clicked"),
     ("replied", "Replied"),
     ("bounced", "Bounced"),
     ("failed", "Failed"),
@@ -57,21 +59,17 @@ _FROM = "FROM sent_log s LEFT JOIN contacts c ON c.email = s.email"
 _FILTER_CLAUSE = {
     "all": "",
     "sent": f"AND s.status = 'sent' AND {_REPLIED} IS NULL",
+    "opened": "AND s.opened_at IS NOT NULL",
+    "clicked": "AND s.clicked_at IS NOT NULL",
     "replied": f"AND {_REPLIED} IS NOT NULL",
-    "bounced": f"AND (s.status = 'bounced' OR {_BOUNCED} IS NOT NULL)",
+    "bounced": f"AND (s.status = 'bounced' OR {_BOUNCED} IS NOT NULL "
+               "OR s.complained_at IS NOT NULL)",
     "failed": "AND s.status = 'failed'",
 }
 
 
-def outcome_of(row) -> tuple[str, str]:
-    """(label, colour token) for one row. A reply outranks everything else."""
-    if row["replied_at"]:
-        return "Replied", "success"
-    if row["status"] == "bounced" or row["bounced_at"]:
-        return "Bounced", "error"
-    if row["status"] == "failed":
-        return "Failed", "error"
-    return "Sent", "fg"
+# Replied, opened, bounced...: the same wording as the export and the contact history
+outcome_of = delivery.outcome
 
 
 class SentModel(QAbstractTableModel):
@@ -229,6 +227,7 @@ class SentModel(QAbstractTableModel):
         rows = db.query(
             "SELECT s.id, s.email, s.company, s.person, s.extra_json, s.status, s.attempts, "
             "s.subject, s.sent_at, s.last_error, s.body_z IS NOT NULL AS has_body, "
+            "s.delivered_at, s.opened_at, s.clicked_at, s.complained_at, "
             f"{_REPLIED} AS replied_at, {_BOUNCED} AS bounced_at "
             f"{_FROM} {clause} ORDER BY s.sent_at IS NULL, s.sent_at DESC, s.id DESC "
             "LIMIT ? OFFSET ?",
@@ -289,11 +288,13 @@ class SentModel(QAbstractTableModel):
             f"  SUM(CASE WHEN {_REPLIED} IS NOT NULL THEN 1 ELSE 0 END) AS replied, "
             f"  SUM(CASE WHEN s.status = 'bounced' OR {_BOUNCED} IS NOT NULL "
             "           THEN 1 ELSE 0 END) AS bounced, "
-            "  SUM(CASE WHEN s.status = 'failed' THEN 1 ELSE 0 END) AS failed "
+            "  SUM(CASE WHEN s.status = 'failed' THEN 1 ELSE 0 END) AS failed, "
+            "  SUM(CASE WHEN s.opened_at IS NOT NULL THEN 1 ELSE 0 END) AS opened "
             f"{_FROM} WHERE s.status IN ({','.join('?' * len(ATTEMPTED))}){dates}",
             [*ATTEMPTED, *values],
         )
         if row is None:
-            return {"attempted": 0, "sent": 0, "replied": 0, "bounced": 0, "failed": 0}
+            return {"attempted": 0, "sent": 0, "replied": 0, "bounced": 0, "failed": 0,
+                    "opened": 0}
         return {key: int(row[key] or 0)
-                for key in ("attempted", "sent", "replied", "bounced", "failed")}
+                for key in ("attempted", "sent", "replied", "bounced", "failed", "opened")}

@@ -9,7 +9,7 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QHBoxLayout, QPlainTextEdit, QSplitter, QVBoxLayout, QWidget
 
-from app.core import credentials, db, imap_sync, prefs
+from app.core import credentials, db, imap_sync, oauth, prefs
 from app.i18n import t
 from app.models.table_model import SimpleTableModel
 from app.ui import theme
@@ -52,11 +52,15 @@ def imap_settings() -> imap_sync.ImapSettings | None:
         port = int(db.get_setting("imap_port", 993))
     except (TypeError, ValueError):
         port = 993
+    # The inbox can be a different mailbox from the one that sends, e.g. Brevo
+    # sends and a Gmail inbox collects the replies
     return imap_sync.ImapSettings(
         host=host, port=port,
-        username=db.get_setting("smtp_username", "") or db.get_setting("sender_email", ""),
+        username=(db.get_setting("imap_username", "") or db.get_setting("smtp_username", "")
+                  or db.get_setting("sender_email", "")),
         password=password, use_ssl=port == 993,
         folder=db.get_setting("imap_folder", "INBOX"),
+        oauth="imap" if oauth.account("imap") else "",
     )
 
 

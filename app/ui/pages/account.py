@@ -1,14 +1,20 @@
-"""Email account setup: SMTP for sending, IMAP for bounce and reply detection."""
+"""Email account setup: SMTP for sending, IMAP for bounce and reply detection.
+
+Sending and the inbox can be two different accounts: someone who sends through
+Brevo usually reads replies in Gmail. Either can sign in with Google or
+Microsoft instead of a password (``app.core.oauth``), and a sending service's
+API key turns on delivery reports (``app.core.delivery``).
+"""
 from __future__ import annotations
 
-from PyQt6.QtWidgets import QGridLayout, QWidget
+from PyQt6.QtWidgets import QGridLayout, QVBoxLayout, QWidget
 
-from app.core import credentials, db, imap_sync, sender
+from app.core import credentials, db, delivery, imap_sync, oauth, sender
 from app.core.warmup import PROVIDER_LIMITS
 from app.i18n import t
 from app.ui.pages.base import Page
 from app.ui.widgets.common import (FormRow, Section, muted, primary_button, row, secondary_button,
-                                   set_tone)
+                                   set_tone, wrap_row)
 from app.ui.widgets.inputs import combo, line_edit, password_edit
 from app.workers import jobs
 from app.workers.base import Task
@@ -27,6 +33,50 @@ PRESETS: dict[str, dict] = {
         "imap_host": "outlook.office365.com", "imap_port": 993,
         "note": "An administrator must enable 'Authenticated SMTP' for this mailbox in the "
                 "Microsoft 365 admin centre, otherwise sign-in is rejected.",
+    },
+    "Outlook.com / Hotmail": {
+        "smtp_host": "smtp-mail.outlook.com", "smtp_port": 587, "security": "starttls",
+        "imap_host": "outlook.office365.com", "imap_port": 993,
+        "note": "Microsoft no longer accepts passwords from email apps for Outlook.com and "
+                "Hotmail. Use the Sign in with Microsoft button.",
+    },
+    "Yahoo Mail": {
+        "smtp_host": "smtp.mail.yahoo.com", "smtp_port": 465, "security": "ssl",
+        "imap_host": "imap.mail.yahoo.com", "imap_port": 993,
+        "note": "Yahoo needs an app password: Yahoo Account Security → Generate app password. "
+                "Your normal password will not work.",
+    },
+    "iCloud Mail": {
+        "smtp_host": "smtp.mail.me.com", "smtp_port": 587, "security": "starttls",
+        "imap_host": "imap.mail.me.com", "imap_port": 993,
+        "note": "iCloud needs an app-specific password: appleid.apple.com → Sign-In and "
+                "Security → App-Specific Passwords.",
+    },
+    "Brevo": {
+        "smtp_host": "smtp-relay.brevo.com", "smtp_port": 587, "security": "starttls",
+        "stats": "brevo",
+        "note": "Username: the SMTP login in Brevo → SMTP & API (it ends in @smtp-brevo.com). "
+                "Password: an SMTP key from the same page. Brevo only sends, so put the inbox "
+                "your replies arrive in (for example Gmail) under Incoming mail.",
+    },
+    "SendGrid": {
+        "smtp_host": "smtp.sendgrid.net", "smtp_port": 587, "security": "starttls",
+        "stats": "sendgrid",
+        "note": "Username: the word apikey. Password: a SendGrid API key. SendGrid only sends, "
+                "so put the inbox your replies arrive in under Incoming mail.",
+    },
+    "Mailgun": {
+        "smtp_host": "smtp.mailgun.org", "smtp_port": 587, "security": "starttls",
+        "stats": "mailgun",
+        "note": "Username and password: your Mailgun SMTP login (postmaster@your-domain), from "
+                "Mailgun → Sending → Domain settings. EU accounts use smtp.eu.mailgun.org. "
+                "Mailgun only sends, so put the inbox your replies arrive in under Incoming mail.",
+    },
+    "Postmark": {
+        "smtp_host": "smtp.postmarkapp.com", "smtp_port": 587, "security": "starttls",
+        "stats": "postmark",
+        "note": "Username and password: both are your Postmark Server API token. Postmark only "
+                "sends, so put the inbox your replies arrive in under Incoming mail.",
     },
     "Zoho Mail": {
         "smtp_host": "smtp.zoho.com", "smtp_port": 465, "security": "ssl",
@@ -60,6 +110,80 @@ SECURITY_LABELS = {
     "none": "None (testing only)",
 }
 SECURITY_VALUES = {label: key for key, label in SECURITY_LABELS.items()}
+
+NOT_CONNECTED = "Not connected"
+SERVICE_NOTES = {
+    "": "Pick the service your emails go out through.",
+    "brevo": "In Brevo: your name (top right) → SMTP & API → API keys → Generate a new API "
+             "key. This is a different key from the SMTP key.",
+    "sendgrid": "In SendGrid: Settings → API Keys → Create API Key. Read access is enough.",
+    "mailgun": "In Mailgun: your name (top right) → API Security → Add new key. Your Mailgun "
+               "SMTP login must be the username above.",
+    "postmark": "In Postmark: open your server → API Tokens → Server API token. Switch on open "
+                "tracking in Postmark to see opens.",
+}
+
+
+class SignInRow(QWidget):
+    """Sign in with Google or Microsoft for one slot, or who is signed in.
+
+    Hidden entirely when this copy of the app has no sign-in set up and nobody
+    is signed in, so the page looks exactly as it did before.
+    """
+
+    def __init__(self, page: "AccountPage", slot: str):
+        super().__init__()
+        self.setProperty("role", "plain")
+        self.slot = slot
+        self.cancelled = False
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        self.status = muted("")
+        layout.addWidget(self.status)
+        self.buttons = [
+            secondary_button(t("Sign in with {label}", label=provider.label),
+                             lambda _checked=False, key=provider.key: page.sign_in(slot, key), 230)
+            for provider in oauth.available()]
+        self.cancel = secondary_button("Cancel", self._cancel, 110)
+        self.use_password = secondary_button("Use a password instead",
+                                             lambda: page.sign_out(slot), 220)
+        # No refresh() here: showing a widget before it has a parent opens it as its own
+        # window. The page's load() refreshes it once it is in place.
+        layout.addWidget(wrap_row(*self.buttons, self.cancel, self.use_password))
+
+    def _cancel(self) -> None:
+        self.cancelled = True
+
+    def waiting(self) -> None:
+        self.cancelled = False
+        for button in self.buttons:
+            button.setEnabled(False)
+        self.cancel.setVisible(True)
+        self.status.setText(t("Finish signing in in your browser. The app waits for up to "
+                              "5 minutes."))
+        set_tone(self.status, "muted")
+
+    def refresh(self, error: str = "") -> None:
+        account = oauth.account(self.slot)
+        self.setVisible(bool(account or self.buttons))
+        self.cancel.setVisible(False)
+        self.use_password.setVisible(account is not None)
+        for button in self.buttons:
+            button.setEnabled(True)
+            button.setVisible(account is None)
+        if error:
+            self.status.setText("✕ " + t(error))
+            set_tone(self.status, "error")
+        elif account:
+            label = oauth.PROVIDERS[account["provider"]].label
+            self.status.setText("✓ " + t("Signed in with {label} as {email}. No password needed.",
+                                         label=label, email=account["email"]))
+            set_tone(self.status, "success")
+        else:
+            self.status.setText(t("Gmail, Outlook or Microsoft 365? Sign in instead of typing "
+                                  "a password."))
+            set_tone(self.status, "muted")
 
 
 class AccountPage(Page):
@@ -98,6 +222,8 @@ class AccountPage(Page):
         smtp.add(preset_row)
         self.preset_note = muted("")
         smtp.add(self.preset_note)
+        self.smtp_sign_in = SignInRow(self, "smtp")
+        smtp.add(self.smtp_sign_in)
 
         grid_holder = QWidget()
         grid_holder.setProperty("role", "plain")
@@ -124,8 +250,9 @@ class AccountPage(Page):
         grid.addWidget(security_row, 0, 2)
         smtp.add(grid_holder)
 
-        self.username_box = self._field(smtp, "Username", "Usually your full email address.",
-                                        "you@yourcompany.com")
+        self.username_box, self.username_row = self._field(
+            smtp, "Username", "Usually your full email address.", "you@yourcompany.com",
+            with_row=True)
 
         password_row = FormRow(
             "Password",
@@ -135,6 +262,7 @@ class AccountPage(Page):
         self.show_password = secondary_button("Show", self._toggle_password, 80)
         password_row.add(row(self.password_box, self.show_password, stretch=0))
         smtp.add(password_row)
+        self.password_row = password_row
 
         self.test_button = primary_button("Test connection", self._test_smtp, 160)
         smtp.add(row(self.test_button, secondary_button("Save", self.save, 110), None))
@@ -148,6 +276,8 @@ class AccountPage(Page):
             "Lets the app read your inbox to detect bounces, unsubscribe replies and genuine "
             "replies. Bounced addresses are removed automatically, which is the single most "
             "effective way to protect your sending reputation.")
+        self.imap_sign_in = SignInRow(self, "imap")
+        imap.add(self.imap_sign_in)
 
         imap_holder = QWidget()
         imap_holder.setProperty("role", "plain")
@@ -174,17 +304,50 @@ class AccountPage(Page):
         imap_grid.addWidget(folder_row, 0, 2)
         imap.add(imap_holder)
 
+        self.imap_user_box, self.imap_user_row = self._field(
+            imap, "Inbox email address",
+            "The mailbox your replies arrive in, if it is not the account that sends. For "
+            "example your Gmail address when you send through Brevo. Leave blank to use the "
+            "sending username.", "", with_row=True)
+
         imap_password_row = FormRow(
-            "IMAP password", "Usually the same as above. Leave blank to reuse the SMTP password.")
+            "IMAP password",
+            "The password for the inbox above. For Gmail, an app password. Leave blank if it "
+            "is the same as the sending password.")
         self.imap_password_box = password_edit("")
         imap_password_row.add(self.imap_password_box)
         imap.add(imap_password_row)
+        self.imap_password_row = imap_password_row
 
         self.imap_test_button = primary_button("Test IMAP", self._test_imap, 160)
         imap.add(row(self.imap_test_button, None))
         self.imap_result = muted("")
         imap.add(self.imap_result)
         area.add(imap)
+
+        # --- delivery reports -----------------------------------------------
+        reports = Section(
+            "Delivery reports: optional",
+            "If your emails go out through Brevo, SendGrid, Mailgun or Postmark, the app can ask "
+            "it which emails were delivered, opened, clicked or bounced, and show it under Sent "
+            "emails. Bounces, spam complaints and unsubscribes are then taken off your list "
+            "automatically.")
+        service_row = FormRow("Sending service")
+        self.service_picker = combo([NOT_CONNECTED, *delivery.SERVICES.values()],
+                                    on_change=lambda _name: self._service_changed())
+        service_row.add(self.service_picker)
+        reports.add(service_row)
+        key_row = FormRow("API key")
+        self.api_key_box = password_edit("")
+        key_row.add(self.api_key_box)
+        self.service_note = muted("")
+        key_row.add(self.service_note)
+        reports.add(key_row)
+        self.reports_button = primary_button("Test and fetch reports", self._test_reports, 210)
+        reports.add(row(self.reports_button, None))
+        self.reports_result = muted("")
+        reports.add(self.reports_result)
+        area.add(reports)
 
         # --- provider limit -------------------------------------------------
         limits = Section("Provider sending limit",
@@ -199,12 +362,13 @@ class AccountPage(Page):
         area.add(limits)
         area.add_stretch()
 
-    def _field(self, section: Section, label: str, note: str, placeholder: str):
+    def _field(self, section: Section, label: str, note: str, placeholder: str,
+               with_row: bool = False):
         form = FormRow(label, note)
         box = line_edit(placeholder)
         form.add(box)
         section.add(form)
-        return box
+        return (box, form) if with_row else box
 
     # --- helpers ------------------------------------------------------------
     def _toggle_password(self) -> None:
@@ -222,8 +386,12 @@ class AccountPage(Page):
             return
         self.smtp_host_box.setText(preset["smtp_host"])
         self.smtp_port_box.setText(str(preset["smtp_port"]))
-        self.imap_host_box.setText(preset["imap_host"])
-        self.imap_port_box.setText(str(preset["imap_port"]))
+        # A sending service has no inbox, so whatever inbox is set up stays
+        if preset.get("imap_host"):
+            self.imap_host_box.setText(preset["imap_host"])
+            self.imap_port_box.setText(str(preset["imap_port"]))
+        if preset.get("stats") and not self._service_key():
+            self.service_picker.setCurrentText(delivery.SERVICES[preset["stats"]])
         security = preset.get("security", "starttls")
         self.security_picker.setCurrentText(SECURITY_LABELS.get(security, "Automatic"))
         self.preset_note.setText(t(preset.get("note", "")))
@@ -250,6 +418,7 @@ class AccountPage(Page):
             username=self.username_box.text().strip() or self.email_box.text().strip(),
             password=self.password_box.text(),
             security=self._security_value(),
+            oauth="smtp" if oauth.account("smtp") else "",
         )
 
     def _imap_settings(self) -> imap_sync.ImapSettings:
@@ -260,11 +429,98 @@ class AccountPage(Page):
         return imap_sync.ImapSettings(
             host=self.imap_host_box.text().strip(),
             port=port,
-            username=self.username_box.text().strip() or self.email_box.text().strip(),
+            username=(self.imap_user_box.text().strip() or self.username_box.text().strip()
+                      or self.email_box.text().strip()),
             password=self.imap_password_box.text() or self.password_box.text(),
             use_ssl=port == 993,
             folder=self.imap_folder_box.text().strip() or "INBOX",
+            oauth="imap" if oauth.account("imap") else "",
         )
+
+    def _service_key(self) -> str:
+        names = {label: key for key, label in delivery.SERVICES.items()}
+        return names.get(self.service_picker.currentText(), "")
+
+    def _service_changed(self) -> None:
+        self.service_note.setText(t(SERVICE_NOTES[self._service_key()]))
+        self.reports_result.setText("")
+
+    def _show_auth(self) -> None:
+        """Signed in: no username or password boxes to fill, for that half of the page."""
+        for slot, rows in (("smtp", (self.username_row, self.password_row)),
+                           ("imap", (self.imap_user_row, self.imap_password_row))):
+            signed_in = oauth.account(slot) is not None
+            for widget in rows:
+                widget.setVisible(not signed_in)
+        self.smtp_sign_in.refresh()
+        self.imap_sign_in.refresh()
+
+    # --- signing in with Google / Microsoft --------------------------------
+    def sign_in(self, slot: str, provider_key: str) -> None:
+        box = self.smtp_sign_in if slot == "smtp" else self.imap_sign_in
+        box.waiting()
+        Task(oauth.sign_in, provider_key, lambda: box.cancelled).start(
+            on_result=self.guard(lambda account: self._signed_in(slot, account)),
+            on_error=self.guard(lambda message: box.refresh(error=message)))
+
+    def _signed_in(self, slot: str, account: dict) -> None:
+        provider = oauth.PROVIDERS[account["provider"]]
+        oauth.save(slot, account)
+        slots = [slot]
+        if slot == "smtp":
+            self.smtp_host_box.setText(provider.smtp_host)
+            self.smtp_port_box.setText("587")
+            self.security_picker.setCurrentText(SECURITY_LABELS["starttls"])
+            self.username_box.setText(account["email"])
+            if not self.email_box.text().strip():
+                self.email_box.setText(account["email"])
+            # The same account reads the inbox too, unless another inbox is already set up
+            if not self.imap_host_box.text().strip() and oauth.account("imap") is None:
+                oauth.save("imap", account)
+                slots.append("imap")
+        if "imap" in slots:
+            self.imap_host_box.setText(provider.imap_host)
+            self.imap_port_box.setText("993")
+            self.imap_user_box.setText(account["email"])
+        self.save(silent=True)
+        self._show_auth()
+        self.notify(t("Signed in as {email}", email=account["email"]), "success")
+
+    def sign_out(self, slot: str) -> None:
+        oauth.forget(slot)
+        self._show_auth()
+        self.notify("Signed out. Type a password below instead.", "info")
+
+    # --- delivery reports -------------------------------------------------
+    def _test_reports(self) -> None:
+        service, key = self._service_key(), self.api_key_box.text().strip()
+        if not service or not key:
+            self.reports_result.setText(t("Pick your sending service and paste its API key "
+                                          "first."))
+            set_tone(self.reports_result, "error")
+            return
+        self.reports_button.setEnabled(False)
+        self.reports_button.setText(t("Checking..."))
+        self.reports_result.setText(t("Connecting..."))
+        set_tone(self.reports_result, "muted")
+        Task(delivery.check, service, key).start(
+            on_result=self.guard(self._show_reports_result),
+            on_error=self.guard(
+                lambda message: self._show_reports_result(delivery.DeliveryResult(
+                    errors=[message]))))
+
+    def _show_reports_result(self, result: delivery.DeliveryResult) -> None:
+        self.reports_button.setEnabled(True)
+        self.reports_button.setText(t("Test and fetch reports"))
+        ok = not result.errors
+        text = ("✓ " + t("Connected. {summary}", summary=t(result.summary())) if ok
+                else "✕ " + t(result.summary()))
+        for note in result.notes:
+            text += "\n" + t(note)
+        self.reports_result.setText(text)
+        set_tone(self.reports_result, "success" if ok else "error")
+        if ok:
+            self.save(silent=True)
 
     # --- actions ------------------------------------------------------------
     def _test_smtp(self) -> None:
@@ -328,7 +584,13 @@ class AccountPage(Page):
         db.set_setting("imap_host", self.imap_host_box.text().strip())
         db.set_setting("imap_port", self.imap_port_box.text().strip())
         db.set_setting("imap_folder", self.imap_folder_box.text().strip() or "INBOX")
+        db.set_setting("imap_username", self.imap_user_box.text().strip())
         db.set_setting("smtp_preset", self.preset_picker.currentText())
+        db.set_setting("stats_service", self._service_key())
+        if not self._service_key():
+            credentials.delete_secret(delivery.API_KEY)
+        elif self.api_key_box.text().strip():
+            credentials.save_secret(delivery.API_KEY, self.api_key_box.text().strip())
 
         if self.password_box.text():
             credentials.save_secret(credentials.SMTP_PASSWORD, self.password_box.text())
@@ -349,6 +611,7 @@ class AccountPage(Page):
         self.imap_host_box.setText(str(db.get_setting("imap_host", "") or ""))
         self.imap_port_box.setText(str(db.get_setting("imap_port", "993") or "993"))
         self.imap_folder_box.setText(str(db.get_setting("imap_folder", "INBOX") or "INBOX"))
+        self.imap_user_box.setText(str(db.get_setting("imap_username", "") or ""))
 
         preset = db.get_setting("smtp_preset", "Custom / other")
         if preset in PRESETS:
@@ -366,6 +629,14 @@ class AccountPage(Page):
         imap_password = credentials.load_secret(credentials.IMAP_PASSWORD)
         if imap_password:
             self.imap_password_box.setText(imap_password)
+
+        service = db.get_setting("stats_service", "")
+        blocked = self.service_picker.blockSignals(True)
+        self.service_picker.setCurrentText(delivery.SERVICES.get(service, NOT_CONNECTED))
+        self.service_picker.blockSignals(blocked)
+        self.service_note.setText(t(SERVICE_NOTES[self._service_key()]))
+        self.api_key_box.setText(credentials.load_secret(delivery.API_KEY))
+        self._show_auth()
 
         limit_name = db.get_setting("provider_limit_name", "Other / shared hosting")
         if limit_name in PROVIDER_LIMITS:

@@ -40,6 +40,9 @@ Where each feature lives and how it works. Paths are from the repository root.
 - `importer.merge_tag_names()` = built-ins + every extra column. Used by the
   "Personal touch" buttons and by the scorer to flag unknown tags.
 - Spintax `{Hi|Hello}` is expanded first; tags are shielded from it.
+- In the email (`html=True`) a tag's value is HTML-escaped and its line breaks
+  become `<br>`, so a whole paragraphed message kept in one spreadsheet column
+  keeps its paragraphs (v0.8.1).
 
 ## My message (`app/ui/pages/templates.py`)
 
@@ -201,7 +204,8 @@ See [languages.md](languages.md). Settings → Language; `MainWindow.change_lang
 - Safety: random delay between emails, office hours and weekdays, holidays, the
   warm-up daily cap, stop after 5 failures in a row or a bounce rate over 5%.
   The rate includes bounces the inbox check found for emails sent in this run
-  (late bounces), read from `campaign_recipients`.
+  (late bounces), read from `campaign_recipients`. A second brake stops the run
+  when spam complaints from the delivery reports pass 1% (`delivery.complaint_rate`).
 - **Campaigns (v0.7.2).** The Send page always uses `db.current_campaign()`;
   "Start a new campaign" (`db.start_new_campaign`) closes it and queues everyone
   again. Temporary failures retry up to `config.MAX_SEND_ATTEMPTS` (3) times.
@@ -210,10 +214,14 @@ See [languages.md](languages.md). Settings → Language; `MainWindow.change_lang
 ## Sent emails (`app/ui/pages/sent.py`, `app/models/sent_model.py`)
 
 - Reads `sent_log` (see [data.md](data.md)). Filters: all, sent with no reply,
-  replied, bounced, failed. Search covers address, company, person, subject.
+  opened, clicked, replied, bounced (includes marked as spam), failed. Outcome
+  is `delivery.outcome()`: Replied, Marked as spam, Bounced, Failed, Clicked,
+  Opened, Delivered, Sent, in that order of importance. Search covers address, company, person, subject.
 - **Dates** (`DateRange`, `SentModel.set_dates`): only emails sent between two
   days, kept while switching filters. The tiles and Export to Excel follow it.
-- Tiles: emails sent, replied, bounced, failed.
+- Tiles: emails sent, opened (needs delivery reports), replied, bounced, failed.
+- "Check opens and bounces" runs `delivery.check()` now. Right-click, "Everything
+  sent to this person" opens `show_history()`, also used by My contacts.
 - **Double-click** (or right-click, "See the email that was sent") opens
   `SentEmailDialog`: To, From, Company, Sent, Outcome, attachment, error, and
   the message rendered in a white `QTextBrowser`. "Open in browser" and "Copy
@@ -241,11 +249,38 @@ See [languages.md](languages.md). Settings → Language; `MainWindow.change_lang
 - The Inbox tab has a search box (sender name, address, subject) and a date
   range next to the kind buttons; both go to `db.inbox_messages`.
 
+## Delivery reports (`app/core/delivery.py`, v0.8.1)
+
+- The app has no server, so it cannot see opens itself. Brevo, SendGrid, Mailgun
+  and Postmark can, and each has an API. `brevo_events`, `sendgrid_events`,
+  `mailgun_events` and `postmark_events` turn their answers into
+  `(email, kind, when, detail)`; `apply()` writes them onto `sent_log`.
+- Only emails HomingPigeon sent are touched. Opens and deliveries must come after
+  the email was sent (with 10 minutes of clock slack). Re-reading the same events
+  changes nothing: stamps are set once and suppressed addresses are skipped.
+- `check()` reads from one day before the last check (30 days the first time,
+  89 at most), under a lock. It runs from `MainWindow.check_inbox_in_background`
+  even when no inbox is set up.
+- Service quirks: SendGrid's opens and clicks need its paid Email Activity
+  add-on (the app says so and still reads bounces and spam reports). Mailgun is
+  asked about the domain in the SMTP username, US region first, then EU. Postmark
+  reports bounces, opens and clicks, not deliveries.
+
+## Signing in (`app/core/oauth.py`, v0.8.1)
+
+- Two slots: `smtp` and `imap`, so sending and the inbox can be different
+  accounts. `account(slot)`, `save`, `forget`, `access_token(slot)` (cached until
+  a minute before it runs out; Microsoft's rotated refresh tokens are kept).
+- `sign_in()` blocks while the person signs in, so it runs in a `Task`; the
+  Cancel button stops the wait. Setup for the app IDs: [sign-in-setup.md](sign-in-setup.md).
+
 ## Other pages
 
 - Home (`dashboard.py`): counts and status. Start here (`guide.py`): checklist
   that ticks itself from real state. My email account (`account.py`): SMTP/IMAP
-  with provider presets. Domain check (`deliverability.py`): SPF/DKIM/DMARC.
+  with provider presets, a separate inbox email address, sign-in buttons
+  (`SignInRow`) and the delivery reports key. Home also shows Campaign results
+  (`delivery.campaign_results`). Domain check (`deliverability.py`): SPF/DKIM/DMARC.
   Sending options (`campaign.py`): brochure, pacing, warm-up. Settings
   (`settings.py`): language, themes (`app/core/themes.py`, the theme maker in
   `widgets/theme_editor.py`), text size, menu order and hidden pages, smooth

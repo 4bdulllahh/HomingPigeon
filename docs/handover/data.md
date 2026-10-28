@@ -39,7 +39,9 @@ user ticks "delete my data" in Settings.
 - One row per (campaign, contact): a retry that later succeeds updates the same
   row (`ON CONFLICT ... DO UPDATE`), adding to `attempts`.
 - `imap_sync.py` sets `bounced_at`/`status='bounced'` and `replied_at` on it by
-  email address. The Sent page also reads `contacts.replied_at/bounced_at` via a
+  email address. `delivery.py` (v0.8.1) sets `delivered_at`, `opened_at`,
+  `clicked_at` and `complained_at` from the sending service's reports, first
+  time only, on the latest email to that address sent before the event. The Sent page also reads `contacts.replied_at/bounced_at` via a
   LEFT JOIN on email, using whichever is set.
 - `db.sent_message(id)` returns a dict with `body_html` unpacked, for the viewer.
 - `db.delete_sent(ids)` / `db.clear_sent()` touch `sent_log` only. Never make
@@ -65,6 +67,8 @@ user ticks "delete my data" in Settings.
 | `template_set_id` | The saved My message set |
 | `sender_name`, `sender_email`, `reply_to` | The From identity |
 | `smtp_*`, `imap_*` | Mail server settings (password is not here, see `credentials.py`) |
+| `imap_username` | The inbox's own login when it is not the sending account, e.g. Gmail beside Brevo (v0.8.1). Blank: the SMTP username |
+| `stats_service`, `stats_checked_at` | Delivery reports: `brevo`, `sendgrid`, `mailgun`, `postmark` or blank, and when they were last fetched. The API key is the secret `stats_api_key` (v0.8.1) |
 | `attach_mode`, `attachment_path`, `link_url`, `link_text` | Brochure: link, attachment or none |
 | `delay_min_s`, `delay_max_s`, `window_start`, `window_end`, `weekdays_only`, `skip_holidays`, `holidays` | Pacing and office hours |
 | `warmup_enabled`, `manual_daily_cap`, `provider_limit*` | Daily cap |
@@ -98,3 +102,9 @@ History: version 1 was every release up to v0.6.1. Version 2 (v0.6.2) added
 `contacted` and fills it from `sent_log` and `campaign_recipients`
 (`backfill_contacted`), so nobody already emailed is emailed again after the update.
 Version 5 (v0.7.3) added `template_sets.footer_html`; nothing to copy.
+Version 6 (v0.8.1) added `sent_log.delivered_at`, `opened_at`, `clicked_at` and
+`complained_at`; nothing to copy.
+
+Secrets (in `secrets.dat`, never the database): `smtp_password`,
+`imap_password`, `stats_api_key`, and `oauth_smtp` / `oauth_imap` (JSON with the
+provider, the signed-in address and the refresh token).

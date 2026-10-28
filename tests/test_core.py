@@ -95,6 +95,14 @@ def test_extra_columns_become_tags():
     assert context["City"] == "Lisbon"
 
 
+def test_a_tag_with_paragraphs_keeps_them_in_the_email():
+    """A whole message in one spreadsheet cell used to arrive as one long paragraph."""
+    cell = "Hi team,\r\n\r\nQuick thought & idea.\nSecond line."
+    out = merge.render("<p>{{Pitch}}</p>", {"Pitch": cell}, html=True)
+    assert out == "<p>Hi team,<br><br>Quick thought &amp; idea.<br>Second line.</p>"
+    assert merge.render("{{Pitch}}", {"Pitch": cell}) == cell
+
+
 def test_variant_cycler_avoids_immediate_repeats():
     cycler = merge.VariantCycler(["a", "b", "c"], seed=1)
     picks = [cycler.next() for _ in range(30)]
@@ -1573,3 +1581,229 @@ def test_every_language_has_an_example_footer():
     from app.core import examples
 
     assert all(v["footer"].strip() for v in examples.EXAMPLES.values())
+
+
+# --- v0.8.1: delivery reports from the sending service ------------------------------
+def _sent_to(email: str, sent_at: str = "2026-10-20T10:00:00") -> int:
+    contact_id = _sent_contact(email)
+    campaign_id = _campaign()
+    db.execute("INSERT INTO campaign_recipients(campaign_id, contact_id, status, sent_at) "
+               "VALUES (?, ?, 'sent', ?)", (campaign_id, contact_id, sent_at))
+    contact = db.query_one("SELECT * FROM contacts WHERE id = ?", (contact_id,))
+    db.log_sent(campaign_id=campaign_id, contact=contact, status="sent", subject="Hi",
+                sent_at=sent_at)
+    return campaign_id
+
+
+def _log_row(email: str):
+    return db.query_one("SELECT * FROM sent_log WHERE email = ?", (email,))
+
+
+def _zoned(local: str) -> str:
+    """A local time the way services send it: with its time zone."""
+    from datetime import datetime
+
+    return datetime.fromisoformat(local).astimezone().isoformat()
+
+
+def test_service_times_become_local_times():
+    from datetime import datetime, timezone
+
+    from app.core import delivery
+
+    moment = datetime(2026, 10, 20, 8, 0, tzinfo=timezone.utc)
+    local = moment.astimezone().replace(tzinfo=None).isoformat(timespec="seconds")
+    assert delivery.local_time("2026-10-20T08:00:00Z") == local
+    assert delivery.local_time("2026-10-20T10:00:00.000+02:00") == local
+    assert delivery.local_time("2026-10-20T04:00:00.1234567-04:00") == local
+    assert delivery.local_time(moment.timestamp()) == local
+    assert delivery.local_time("not a date") is None
+
+
+def test_opens_and_clicks_are_written_once_and_only_for_our_emails():
+    from app.core import delivery
+
+    _sent_to("reader@example.com")
+    events = [
+        ("Reader@Example.com", "delivered", _zoned("2026-10-20T10:01:00"), ""),
+        ("reader@example.com", "clicked", _zoned("2026-10-20T11:00:00"), ""),
+        ("stranger@example.com", "opened", _zoned("2026-10-20T11:00:00"), ""),
+        # Before the email went out: about some other email, so ignored
+        ("reader@example.com", "opened", _zoned("2026-10-19T09:00:00"), ""),
+    ]
+    result = delivery.apply(events, "brevo")
+    row = _log_row("reader@example.com")
+    assert row["delivered_at"] == "2026-10-20T10:01:00"
+    assert row["clicked_at"] == row["opened_at"] == "2026-10-20T11:00:00"
+    assert result.counts == {"delivered": 1, "clicked": 1}
+    assert delivery.outcome(row) == ("Clicked", "success")
+
+    again = delivery.apply(events, "brevo")
+    assert again.counts == {}
+
+
+def test_a_reported_bounce_or_complaint_takes_the_person_off_the_list():
+    from app.core import delivery
+
+    _sent_to("gone@example.com")
+    _sent_to("angry@example.com")
+    result = delivery.apply([
+        ("gone@example.com", "hard_bounce", _zoned("2026-10-20T10:02:00"), "550 no such user"),
+        ("angry@example.com", "spam", _zoned("2026-10-20T12:00:00"), ""),
+    ], "brevo")
+    assert result.removed == 2
+    assert db.is_suppressed("gone@example.com") and db.is_suppressed("angry@example.com")
+    assert _log_row("gone@example.com")["status"] == "bounced"
+    assert db.query_one("SELECT status FROM campaign_recipients r JOIN contacts c "
+                        "ON c.id = r.contact_id WHERE c.email = 'gone@example.com'"
+                        )["status"] == "bounced"
+    angry = _log_row("angry@example.com")
+    assert angry["complained_at"] and delivery.outcome(angry) == ("Marked as spam", "error")
+    assert delivery.apply([("angry@example.com", "spam", _zoned("2026-10-20T12:00:00"), "")],
+                          "brevo").removed == 0
+
+
+def test_each_service_report_is_read_into_the_same_events(monkeypatch):
+    from datetime import datetime
+
+    from app.core import delivery
+
+    answers = {
+        "api.brevo.com": {"events": [
+            {"email": "a@example.com", "event": "opened", "date": "2026-10-20T10:00:00Z"},
+            {"email": "a@example.com", "event": "loadedByProxy", "date": "2026-10-20T10:00:00Z"},
+            {"email": "b@example.com", "event": "hardBounces", "date": "2026-10-20T10:00:00Z",
+             "reason": "unknown user"}]},
+        "api.mailgun.net": {"items": [
+            {"event": "failed", "severity": "permanent", "recipient": "c@example.com",
+             "timestamp": 1760954400.0, "delivery-status": {"message": "No such mailbox"}},
+            {"event": "failed", "severity": "temporary", "recipient": "c@example.com",
+             "timestamp": 1760954400.0}], "paging": {}},
+    }
+
+    def fake_get(url, headers):
+        return next(answer for host, answer in answers.items() if host in url)
+
+    monkeypatch.setattr(delivery, "_get", fake_get)
+    since = datetime(2026, 10, 19).astimezone()
+    events, _notes = delivery.brevo_events("key", since)
+    assert [(e[0], e[1]) for e in events] == [("a@example.com", "opened"),
+                                              ("b@example.com", "hard_bounce")]
+    events, _notes = delivery.mailgun_events("key", since, "mg.example.com")
+    assert events == [("c@example.com", "hard_bounce", 1760954400.0, "No such mailbox")]
+
+
+def test_the_send_brake_counts_spam_complaints():
+    from app.core import delivery
+
+    campaign_id = _sent_to("complainer@example.com", "2026-10-20T10:00:00")
+    db.execute("UPDATE sent_log SET complained_at = '2026-10-20T11:00:00' "
+               "WHERE email = 'complainer@example.com'")
+    assert delivery.complaint_rate(campaign_id, "2026-10-20T09:00:00", 5) == 0.0
+    assert delivery.complaint_rate(campaign_id, "2026-10-20T09:00:00", 50) == 1 / 50
+
+
+def test_upgrading_to_v081_adds_the_delivery_columns(tmp_path):
+    import sqlite3 as sqlite
+
+    path = tmp_path / "v080.db"
+    old = sqlite.connect(path)
+    old.executescript(db._SCHEMA)
+    for column in ("delivered_at", "opened_at", "clicked_at", "complained_at"):
+        old.execute(f"ALTER TABLE sent_log DROP COLUMN {column}")
+    old.execute("INSERT INTO schema_info(version) VALUES (5)")
+    old.execute("INSERT INTO sent_log(campaign_id, contact_id, email, status, sent_at) "
+                "VALUES (1, 1, 'kept@example.com', 'sent', '2026-10-02T10:00:00')")
+    old.commit()
+    old.close()
+
+    db.close()
+    try:
+        db.init(path)
+        row = db.query_one("SELECT * FROM sent_log")
+        assert row["email"] == "kept@example.com" and row["opened_at"] is None
+        assert db.query_one("SELECT version FROM schema_info")["version"] == db.SCHEMA_VERSION
+    finally:
+        db.close()
+        db.init(os.path.join(tempfile.mkdtemp(), "test.db"))
+
+
+# --- v0.8.1: sign in with Google or Microsoft ------------------------------------------
+@pytest.fixture
+def secrets_in_memory(monkeypatch):
+    from app.core import credentials, oauth
+
+    store: dict[str, str] = {}
+    monkeypatch.setattr(credentials, "save_secret", store.__setitem__)
+    monkeypatch.setattr(credentials, "load_secret",
+                        lambda name, default="": store.get(name, default))
+    monkeypatch.setattr(credentials, "delete_secret", lambda name: store.pop(name, None))
+    oauth._tokens.clear()
+    return store
+
+
+def test_signing_in_catches_the_browser_answer_and_keeps_a_refresh_token(monkeypatch,
+                                                                          secrets_in_memory):
+    import base64
+    import json
+    import threading
+    import urllib.parse
+    import urllib.request
+
+    from app import config
+    from app.core import oauth
+
+    monkeypatch.setattr(config, "GOOGLE_CLIENT_ID", "id.apps.googleusercontent.com")
+    claims = base64.urlsafe_b64encode(json.dumps({"email": "Me@Gmail.com"}).encode()).decode()
+    posted = []
+
+    def fake_post(url, fields):
+        posted.append(fields)
+        if fields["grant_type"] == "authorization_code":
+            return {"refresh_token": "refresh-1", "id_token": f"x.{claims.rstrip('=')}.y"}
+        return {"access_token": "access-1", "expires_in": 3600}
+
+    def browser(url):
+        """Stands in for the person signing in: the browser comes back with a code."""
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+        back = f"{query['redirect_uri'][0]}?code=abc&state={query['state'][0]}"
+        threading.Thread(target=lambda: urllib.request.urlopen(back, timeout=5).read(),
+                         daemon=True).start()
+
+    monkeypatch.setattr(oauth, "_post", fake_post)
+    account = oauth.sign_in("google", open_url=browser)
+    assert account == {"provider": "google", "refresh_token": "refresh-1",
+                       "email": "me@gmail.com"}
+    assert posted[0]["code"] == "abc" and posted[0]["code_verifier"]
+
+    oauth.save("imap", account)
+    assert oauth.access_token("imap") == ("me@gmail.com", "access-1")
+    assert oauth.access_token("imap") == ("me@gmail.com", "access-1")
+    assert len(posted) == 2, "the access token is reused until it runs out"
+    assert oauth.xoauth2("me@gmail.com", "tok") == "user=me@gmail.com\x01auth=Bearer tok\x01\x01"
+
+
+def test_sign_in_buttons_stay_hidden_until_the_app_is_registered(monkeypatch):
+    from app import config
+    from app.core import oauth
+
+    monkeypatch.setattr(config, "GOOGLE_CLIENT_ID", "")
+    monkeypatch.setattr(config, "MICROSOFT_CLIENT_ID", "")
+    assert oauth.available() == []
+    monkeypatch.setattr(config, "MICROSOFT_CLIENT_ID", "abc")
+    assert [p.key for p in oauth.available()] == ["microsoft"]
+
+
+def test_the_inbox_signs_in_with_its_own_address_not_the_sending_login(secrets_in_memory):
+    """A Brevo sender reading replies in Gmail: Gmail must get the Gmail address."""
+    from app.ui.pages.inbox import imap_settings
+
+    db.set_setting("imap_host", "imap.gmail.com")
+    db.set_setting("smtp_username", "8a1b2c@smtp-brevo.com")
+    db.set_setting("imap_username", "replies@gmail.com")
+    try:
+        assert imap_settings().username == "replies@gmail.com"
+        db.set_setting("imap_username", "")
+        assert imap_settings().username == "8a1b2c@smtp-brevo.com"
+    finally:
+        db.set_setting("imap_host", "")

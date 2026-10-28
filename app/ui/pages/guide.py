@@ -8,7 +8,7 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QProgressBar, QVBoxLayout, QWidget
 
-from app.core import credentials, db, importer, scorer, shortcut
+from app.core import db, importer, scorer, sender, shortcut
 from app.i18n import t
 from app.ui import theme
 from app.ui.pages.base import Page
@@ -111,9 +111,7 @@ class GuidePage(Page):
     # --- state ---------------------------------------------------------------
     def _steps(self) -> list[dict]:
         dns_status = db.get_setting("dns_last_status", {}) or {}
-        account_ready = bool(db.get_setting("sender_email", "")
-                             and db.get_setting("smtp_host", "")
-                             and credentials.has_secret(credentials.SMTP_PASSWORD))
+        account_ready = sender.saved_settings() is not None
         report = scorer.latest_report()
         sender_email = db.get_setting("sender_email", "")
         domain = sender_email.split("@", 1)[1] if "@" in sender_email else "your domain"

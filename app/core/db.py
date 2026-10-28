@@ -15,7 +15,7 @@ from typing import Any, Iterable, Sequence
 
 from app import config
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 _local = threading.local()
 _db_path: Path | None = None
@@ -232,7 +232,11 @@ CREATE TABLE IF NOT EXISTS sent_log (
     sent_at     TEXT,
     last_error  TEXT,
     replied_at  TEXT,
-    bounced_at  TEXT
+    bounced_at  TEXT,
+    delivered_at  TEXT,
+    opened_at     TEXT,
+    clicked_at    TEXT,
+    complained_at TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sent_log_recipient ON sent_log(campaign_id, contact_id);
 CREATE INDEX IF NOT EXISTS idx_sent_log_when ON sent_log(sent_at DESC);
@@ -286,6 +290,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
         columns = {r[1] for r in conn.execute("PRAGMA table_info(template_sets)")}
         if "footer_html" not in columns:
             conn.execute("ALTER TABLE template_sets ADD COLUMN footer_html TEXT DEFAULT ''")
+    if row["version"] < 6:
+        # v0.8.1: what the sending service (Brevo, SendGrid...) reports about each email
+        columns = {r[1] for r in conn.execute("PRAGMA table_info(sent_log)")}
+        for name in ("delivered_at", "opened_at", "clicked_at", "complained_at"):
+            if name not in columns:
+                conn.execute(f"ALTER TABLE sent_log ADD COLUMN {name} TEXT")
     if row["version"] < SCHEMA_VERSION:
         conn.execute("UPDATE schema_info SET version = ?", (SCHEMA_VERSION,))
 

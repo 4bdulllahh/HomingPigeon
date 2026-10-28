@@ -5,9 +5,15 @@ from pathlib import Path
 
 APP_NAME = "HomingPigeon"
 APP_TITLE = "HomingPigeon"
-APP_VERSION = "v0.8.0 beta"
+APP_VERSION = "v0.8.1 beta"
 APP_TAGLINE = "Safe, simple email for your business"
 REPO_URL = "https://github.com/4bdulllahh/HomingPigeon"
+
+# "Sign in with Google / Microsoft". HomingPigeon's own app IDs, made once by its
+# maker (docs/handover/sign-in-setup.md). Blank hides that sign-in button.
+GOOGLE_CLIENT_ID = ""
+GOOGLE_CLIENT_SECRET = ""
+MICROSOFT_CLIENT_ID = ""
 
 
 def _app_data_dir() -> Path:
@@ -72,6 +78,8 @@ SMTP_RECONNECT_EVERY = 25
 MAX_CONSECUTIVE_FAILURES = 5
 MAX_HARD_BOUNCE_RATE = 0.05
 MIN_SAMPLE_FOR_BOUNCE_RATE = 20
+# Spam complaints reported by the sending service; mailbox providers act from about 0.3%
+MAX_COMPLAINT_RATE = 0.01
 # A temporary failure is tried again on later runs, up to this many attempts in all
 MAX_SEND_ATTEMPTS = 3
 

@@ -190,7 +190,11 @@ def apply_tags(text: str, context: Mapping[str, str], html: bool = False) -> str
         value = _lookup(context, match.group(1))
         if value is None:
             return match.group(0)
-        return escape(value) if html else value
+        if not html:
+            return value
+        # A spreadsheet cell with paragraphs keeps them: HTML would run the lines together
+        lines = re.sub(r"\r\n?", "\n", escape(value)).strip().split("\n")
+        return "<br>".join(line.strip() for line in lines)
 
     return TAG_PATTERN.sub(replace, text)
 

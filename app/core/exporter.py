@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from app import config
-from app.core import db, prefs
+from app.core import db, delivery, prefs
 from app.i18n import t
 
 STATUS_LABELS = {
@@ -99,7 +99,8 @@ def sent_dataframe(start=None, end=None) -> pd.DataFrame:
         "SELECT s.email, s.company, s.person, s.extra_json, s.status, s.attempts, "
         "s.subject AS subject_used, s.sent_at, s.last_error, "
         "COALESCE(s.replied_at, c.replied_at) AS replied_at, "
-        "COALESCE(s.bounced_at, c.bounced_at) AS bounced_at "
+        "COALESCE(s.bounced_at, c.bounced_at) AS bounced_at, "
+        "s.delivered_at, s.opened_at, s.clicked_at, s.complained_at "
         "FROM sent_log s LEFT JOIN contacts c ON c.email = s.email "
         f"WHERE s.status IN ('sent', 'failed', 'bounced'){dates} "
         "ORDER BY s.sent_at IS NULL, s.sent_at DESC, s.id DESC", values
@@ -107,21 +108,18 @@ def sent_dataframe(start=None, end=None) -> pd.DataFrame:
 
     records = []
     for row in rows:
-        if row["replied_at"]:
-            outcome = "Replied"
-        elif row["status"] == "bounced" or row["bounced_at"]:
-            outcome = "Bounced"
-        elif row["status"] == "failed":
-            outcome = "Failed"
-        else:
-            outcome = "Sent"
+        outcome, _tone = delivery.outcome(row)
         record = {
             "Email": row["email"],
             "Company": row["company"] or "",
             "Contact Person": row["person"] or "",
             "Outcome": outcome,
             "Sent At": row["sent_at"] or "",
+            "Delivered At": row["delivered_at"] or "",
+            "Opened At": row["opened_at"] or "",
+            "Clicked At": row["clicked_at"] or "",
             "Replied At": row["replied_at"] or "",
+            "Marked As Spam At": row["complained_at"] or "",
             "Subject Used": row["subject_used"] or "",
             "Attempts": row["attempts"] or 0,
             "Details": row["last_error"] or "",

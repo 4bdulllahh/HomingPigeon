@@ -24,6 +24,18 @@ and your contacts never leave it.
 
 > **Free while in beta.** Please [report anything confusing or broken](../../issues/new).
 
+## New in 0.8.1
+
+- **See who opened, clicked or bounced.** Send through Brevo, SendGrid, Mailgun or Postmark?
+  Paste its API key once and Sent emails shows which emails were delivered, opened and
+  clicked. Bounces, spam complaints and unsubscribes are taken off your list automatically.
+- **Campaign results** on Home, and every email a contact got with a double-click on My
+  contacts.
+- **Send through one service, read replies in another.** A separate inbox email address,
+  for example Brevo for sending and Gmail for replies.
+- **Sign in with Google or Microsoft** instead of an app password, where available.
+- **Paragraphs stay paragraphs** when a whole message comes from a spreadsheet column.
+
 ## New in 0.8
 
 - **Themes.** Pick one of eight ready-made themes or make your own: your colours, a gradient
@@ -98,6 +110,8 @@ The full history is in [`docs/handover/changelog.md`](docs/handover/changelog.md
 - **A record of everything sent.** **Sent emails** keeps every message with the time, the
   subject used and what came back. Double-click one to see it exactly as it went out, or
   export the lot to Excel.
+- **Opens, clicks and deliveries** from Brevo, SendGrid, Mailgun or Postmark, once you add the
+  service's API key on My email account. Spam complaints stop the send automatically.
 
 ### Comfort
 
@@ -203,6 +217,13 @@ address gets filtered much harder.
 **My password doesn't work.**
 If your email has two-step sign-in (most do), you need an **app password** instead of your
 normal one. The app shows where to get it for Gmail, Microsoft 365, Zoho and others.
+If you send through Brevo or a similar service and read replies in Gmail, put your Gmail
+address in **Inbox email address** under Incoming mail, with a Gmail app password.
+
+**Can I see who opened my email?**
+Yes, if you send through Brevo, SendGrid, Mailgun or Postmark: they track opens, and the app
+reads their reports. HomingPigeon adds no tracking of its own, because tracking pixels push
+cold email towards spam.
 
 **How many emails can I send?**
 You start at about 20 a day and it grows gradually. Sending more, faster, is how domains get
@@ -213,7 +234,8 @@ Yes, up to 2 MB, but a link is the default, because attachments from unknown sen
 of the strongest spam signals.
 
 **Is my contact list uploaded anywhere?**
-No. The app only talks to your own email provider and to public DNS to check your domain.
+No. The app only talks to your own email provider, to public DNS to check your domain and,
+if you connect it, to your sending service to read its delivery reports.
 
 **What about DKIM?**
 The app can generate a DKIM key, but that only helps if you run your own mail server. On Google

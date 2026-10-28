@@ -34,7 +34,7 @@ TEXT_FILES = sorted(
     + [ROOT / "app" / "core" / name for name in (
         "sender.py", "imap_sync.py", "importer.py", "dns_tools.py", "warmup.py",
         "credentials.py", "exporter.py", "prefs.py", "shortcut.py", "scorer.py", "db.py",
-        "design.py", "themes.py")]
+        "design.py", "themes.py", "delivery.py", "oauth.py")]
     + list((ROOT / "app" / "services").glob("*.py"))
     + list((ROOT / "app" / "workers").glob("*.py"))
 )
@@ -55,7 +55,8 @@ SKIP_NAMES = {
 # a header name, programmer errors and DNS record types
 IGNORE = {
     "a mx", "Doc", "Scripts", "Lib", "Message-ID", "Desktop", "sign off", "In-Reply-To",
-    "References", "Action",
+    "References", "Action", "Brevo", "Mailgun", "Postmark", "Basic", "Opens", "Clicks",
+    "Google", "Microsoft", "Catcher", "Content-Type", "text/html; charset=utf-8",
     "db.init() must be called before db.connect()", "CryptProtectData failed",
     "CryptUnprotectData failed", "Start HomingPigeon - Mac.command",
     "Start HomingPigeon - Linux.sh", "Arial", "DejaVuSans-Bold.ttf", "DejaVuSans.ttf",

@@ -17,7 +17,7 @@ from PyQt6.QtGui import QAction, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QDialog, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QMenu,
                              QTextBrowser, QVBoxLayout, QWidget)
 
-from app.core import composer, db, prefs
+from app.core import composer, db, delivery, prefs
 from app.i18n import t
 from app.models.sent_model import FILTERS, SentModel, outcome_of
 from app.ui import theme
@@ -25,7 +25,7 @@ from app.ui.pages.base import Page
 from app.ui.widgets.common import (ChoiceButtons, StatTile, copy_to_clipboard, danger_button,
                                    hint, muted, primary_button, secondary_button, wrap_row)
 from app.ui.widgets.date_range import DateRange
-from app.ui.widgets.dialogs import ConfirmDialog, resizable
+from app.ui.widgets.dialogs import ConfirmDialog, InfoDialog, resizable
 from app.ui.widgets.inputs import Debouncer, line_edit
 from app.ui.widgets.tables import DataTable
 from app.workers.base import Task
@@ -48,10 +48,12 @@ class SentPage(Page):
         tiles.setContentsMargins(0, 0, 0, 0)
         tiles.setSpacing(8)
         self.tile_sent = StatTile("Emails sent", "0")
+        self.tile_opened = StatTile("Opened", "0", tone="accent")
         self.tile_replied = StatTile("Replied", "0", tone="success")
         self.tile_bounced = StatTile("Bounced", "0", tone="error")
         self.tile_failed = StatTile("Failed to send", "0", tone="warning")
-        for tile in (self.tile_sent, self.tile_replied, self.tile_bounced, self.tile_failed):
+        for tile in (self.tile_sent, self.tile_opened, self.tile_replied, self.tile_bounced,
+                     self.tile_failed):
             tiles.addWidget(tile, 1)
         self.root.addWidget(tiles_holder)
 
@@ -66,9 +68,12 @@ class SentPage(Page):
         self.delete_button = danger_button("Delete selected", self._delete_selected, 150)
         self.delete_button.setEnabled(False)
         self.clear_button = danger_button("Clear history...", self._clear_history, 150)
+        self.reports_button = secondary_button("Check opens and bounces", self._check_reports,
+                                               210)
+        self.reports_button.setToolTip(t("Ask your sending service what happened to your emails"))
         self.root.addWidget(wrap_row(
             self.search_box, self.delete_button, self.clear_button,
-            secondary_button("Export to Excel...", self._export, 170)))
+            secondary_button("Export to Excel...", self._export, 170), self.reports_button))
 
         self.filters = ChoiceButtons(FILTERS, "all", on_change=self._apply_filter)
         # Separate from the buttons, so the dates stay while switching between them
@@ -130,6 +135,12 @@ class SentPage(Page):
     def _update_tiles(self, counts: dict) -> None:
         total = max(1, counts["attempted"])
         self.tile_sent.update_value(f"{counts['attempted']:,}")
+        if delivery.configured():
+            self.tile_opened.update_value(
+                f"{counts['opened']:,}", t("{number:.1f}% open rate",
+                                           number=counts['opened'] / total * 100))
+        else:
+            self.tile_opened.update_value("-", "connect your sending service")
         self.tile_replied.update_value(
             f"{counts['replied']:,}", t("{number:.1f}% reply rate",
                                         number=counts['replied'] / total * 100))
@@ -165,6 +176,10 @@ class SentPage(Page):
             copy_subject = QAction(t("Copy the subject that was used"), menu)
             copy_subject.triggered.connect(lambda: self._copy(subject))
             menu.addAction(copy_subject)
+
+        everything = QAction(t("Everything sent to this person"), menu)
+        everything.triggered.connect(lambda: show_history(self, email))
+        menu.addAction(everything)
 
         menu.addSeparator()
         find = QAction(t("Find this person in my contacts"), menu)
@@ -251,6 +266,28 @@ class SentPage(Page):
         if page is not None and hasattr(page, "search_for"):
             page.search_for(email)
 
+    # --- delivery reports ---------------------------------------------------
+    def _check_reports(self) -> None:
+        if not delivery.configured():
+            self.notify("Add your sending service's API key on 'My email account' first", "warn")
+            self.go("account")
+            return
+        self.reports_button.setEnabled(False)
+        self.reports_button.setText(t("Checking..."))
+        Task(delivery.check).start(on_result=self.guard(self._reports_checked),
+                                   on_error=self.guard(self._reports_failed))
+
+    def _reports_failed(self, message: str) -> None:
+        self._reports_checked(delivery.DeliveryResult(errors=[message]))
+
+    def _reports_checked(self, result: delivery.DeliveryResult) -> None:
+        self.reports_button.setEnabled(True)
+        self.reports_button.setText(t("Check opens and bounces"))
+        self.notify(t(result.summary()), "error" if result.errors else "success", 7000)
+        for note in result.notes:
+            self.notify(t(note), "info", 9000)
+        self.model.reload()
+
     # --- export -------------------------------------------------------------
     def _export(self) -> None:
         path, _filter = QFileDialog.getSaveFileName(
@@ -275,6 +312,30 @@ class SentPage(Page):
         self.model.reload()
         self._selection_changed()
         self.table.fit_columns()
+
+
+def show_history(page: Page, email: str) -> None:
+    """Every email sent to one person and what happened to each: opened, replied, bounced."""
+    rows = delivery.history(email)
+    sections = []
+    for row in rows:
+        points = [t("Sent {when}", when=prefs.format_datetime(row["sent_at"]))
+                  if row["sent_at"] else t("Not sent")]
+        for key, text in (("delivered_at", "Delivered {when}"), ("opened_at", "Opened {when}"),
+                          ("clicked_at", "Clicked a link {when}"),
+                          ("replied_at", "Replied {when}"), ("bounced_at", "Bounced {when}"),
+                          ("complained_at", "Marked as spam {when}")):
+            if row[key]:
+                points.append(t(text, when=prefs.format_datetime(row[key])))
+        if row["status"] in ("failed", "bounced") and row["last_error"]:
+            points.append(row["last_error"])
+        sections.append((row["subject"] or t("(no subject)"), points))
+    InfoDialog.show_for(
+        page, email,
+        t("{count} email(s) sent to this person.", count=len(rows)) if rows
+        else t("Nothing has been sent to this person yet."), sections,
+        "" if delivery.configured() else
+        "Connect your sending service on 'My email account' to see opens and deliveries.")
 
 
 HISTORY_NOTE = ("\n\nThis only tidies the list. Nobody is emailed again because of it, and "

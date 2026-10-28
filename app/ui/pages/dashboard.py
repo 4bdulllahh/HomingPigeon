@@ -4,7 +4,7 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QHBoxLayout, QProgressBar, QSizePolicy, QVBoxLayout, QWidget
 
-from app.core import db, imap_sync, importer, prefs, scorer, warmup
+from app.core import db, delivery, imap_sync, importer, prefs, scorer, warmup
 from app.i18n import t
 from app.models.table_model import SimpleTableModel
 from app.ui import theme
@@ -60,6 +60,18 @@ class DashboardPage(Page):
         campaign.add_layout(self.campaign_body)
         area.add(campaign)
 
+        results = Section(
+            "Campaign results",
+            "Opens and deliveries come from your sending service, once it is connected on "
+            "'My email account'.")
+        self.results_model = SimpleTableModel(
+            ["Campaign", "Sent", "Delivered", "Opened", "Clicked", "Replied", "Bounced",
+             "Marked as spam"])
+        self.results_table = DataTable(self.results_model, "No campaign has sent anything yet.")
+        self.results_table.setMinimumHeight(round(160 * theme.text_scale()))
+        results.add(self.results_table)
+        area.add(results)
+
         activity = Section("Recent activity")
         self.activity_model = SimpleTableModel(["When", "Type", "Detail"])
         self.activity_table = DataTable(self.activity_model, "Nothing has happened yet.")
@@ -85,6 +97,7 @@ class DashboardPage(Page):
         self._refresh_tiles()
         self._refresh_health()
         self._refresh_campaign()
+        self._refresh_results()
         self._refresh_activity()
 
     def _refresh_tiles(self) -> None:
@@ -230,6 +243,22 @@ class DashboardPage(Page):
                   days=days)))
             self.campaign_body.addWidget(
                 row(primary_button("Continue sending", lambda: self.go("send"), 170), None))
+
+    def _refresh_results(self) -> None:
+        rows, colours = [], []
+        for result in delivery.campaign_results():
+            sent = max(1, result["sent"])
+
+            def share(key: str) -> str:
+                return t("{count:,} ({share:.0%})", count=result[key], share=result[key] / sent)
+
+            rows.append([result["name"], f"{result['sent']:,}", share("delivered"),
+                         share("opened"), share("clicked"), share("replied"), share("bounced"),
+                         share("spam")])
+            colours.append([None, None, None, "accent", "accent", "success",
+                            "error" if result["bounced"] else "muted",
+                            "error" if result["spam"] else "muted"])
+        self.results_model.set_rows(rows, colours)
 
     def _refresh_activity(self) -> None:
         events = db.recent_events(40)

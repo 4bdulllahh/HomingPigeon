@@ -7,7 +7,7 @@ from datetime import datetime
 from PyQt6.QtGui import QTextCursor
 from PyQt6.QtWidgets import QHBoxLayout, QProgressBar, QVBoxLayout, QWidget
 
-from app.core import composer, credentials, db, design, importer, prefs, scorer, sender, warmup
+from app.core import composer, db, design, importer, prefs, scorer, sender, warmup
 from app.i18n import t
 from app.ui import theme
 from app.ui.pages.base import Page
@@ -110,10 +110,7 @@ class SendPage(Page):
     def _gather_checks(self) -> list[tuple[str, bool, str]]:
         checks: list[tuple[str, bool, str]] = []
 
-        email = db.get_setting("sender_email", "")
-        host = db.get_setting("smtp_host", "")
-        has_password = credentials.has_secret(credentials.SMTP_PASSWORD)
-        checks.append(("Email account configured", bool(email and host and has_password),
+        checks.append(("Email account configured", sender.saved_settings() is not None,
                        "Set your SMTP details on the 'My email account' page"))
 
         count = importer.contact_count()
@@ -193,10 +190,9 @@ class SendPage(Page):
     # --- campaign assembly --------------------------------------------------
     def _build_plan(self) -> sender.SendPlan | None:
         email = db.get_setting("sender_email", "")
-        host = db.get_setting("smtp_host", "")
-        password = credentials.load_secret(credentials.SMTP_PASSWORD)
+        smtp = sender.saved_settings()
 
-        if not (email and host and password):
+        if smtp is None:
             self.notify("Finish setting up your email account first", "warn")
             self.go("account")
             return None
@@ -225,11 +221,6 @@ class SendPage(Page):
             footer_html=(signature_row["footer_html"] or "") if signature_row else "",
         )
 
-        try:
-            port = int(db.get_setting("smtp_port", 587))
-        except (TypeError, ValueError):
-            port = 587
-
         identity = composer.SenderIdentity(
             name=db.get_setting("sender_name", ""),
             email=email,
@@ -240,12 +231,7 @@ class SendPage(Page):
             campaign_id=self._ensure_campaign(),
             sender=identity,
             content=content,
-            smtp=sender.SmtpSettings(
-                host=host, port=port,
-                username=db.get_setting("smtp_username", "") or email,
-                password=password,
-                security=db.get_setting("smtp_security", "auto"),
-            ),
+            smtp=smtp,
             delay_min_s=int(db.get_setting("delay_min_s", 75)),
             delay_max_s=int(db.get_setting("delay_max_s", 150)),
             window_start=db.get_setting("window_start", "09:00"),
