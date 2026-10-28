@@ -34,6 +34,12 @@ release history.
   count=n)`. Never an f-string or English fragments glued together, which
   cannot be translated. Never call `t()` at import time.
 
+## Planned features
+
+Before starting a new batch of changes or a release, read
+[docs/handover/roadmap.md](docs/handover/roadmap.md) and ask the user whether to
+include any open item. Move items to its Done list when they ship.
+
 ## Everyday commands
 
 ```

@@ -12,6 +12,7 @@ without rediscovering everything.
 | [languages.md](languages.md) | The five languages, right to left, and how to add or change text |
 | [working-on-it.md](working-on-it.md) | Conventions, tests, building and releasing, known traps |
 | [sign-in-setup.md](sign-in-setup.md) | One-time setup for the Google and Microsoft sign-in buttons |
+| [roadmap.md](roadmap.md) | Features planned but not built yet; check before each release |
 | [changelog.md](changelog.md) | What changed in each release, newest first |
 
 ## The product in one paragraph
